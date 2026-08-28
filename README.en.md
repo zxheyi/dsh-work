@@ -70,7 +70,16 @@ The upstream project provides the Agent runtime and plugin architecture. DSH Wor
 
 ## Development and contributing
 
-The repository is currently at the architecture-design stage and does not yet have a runnable development workflow. The first milestone will define the technology stack, upstream integration strategy, plugin boundaries, and minimum runnable desktop host.
+The repository is currently at the architecture-design stage and does not yet have a runnable product-development workflow. Phase 0 establishes the repository contract. Read [`AGENTS.md`](AGENTS.md) and [`docs/workflow.md`](docs/workflow.md) before starting work. The current product scope, first milestone, and decision process live in [`docs/product-scope.md`](docs/product-scope.md), [`docs/acceptance/m0.md`](docs/acceptance/m0.md), and [`docs/decisions/README.md`](docs/decisions/README.md).
+
+The current contract gate is independent of the future product toolchain:
+
+```bash
+node --test scripts/verify-contract.test.mjs
+node scripts/verify-contract.mjs
+```
+
+The first product milestone will define the technology stack, upstream integration strategy, plugin boundaries, and minimum runnable desktop host.
 
 Before proposing a large implementation, use GitHub Issues to discuss product scope, architecture decisions, or plugin boundaries.
 

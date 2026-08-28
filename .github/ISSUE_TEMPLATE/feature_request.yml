@@ -1,0 +1,80 @@
+name: Feature request / 功能建议
+description: Propose a verifiable user outcome for DSH Work / 提议一个可验收的 DSH Work 用户结果
+labels: ["enhancement"]
+body:
+  - type: checkboxes
+    id: duplicate
+    attributes:
+      label: Existing work / 提交前查重
+      options:
+        - label: I searched open and closed Issues and Discussions / 我已搜索已有 Issue 与 Discussion
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case / 问题或使用场景
+      description: Describe who is blocked, what they are trying to achieve, and the current difficulty / 说明谁在什么场景下遇到了什么困难
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired user outcome / 期望的用户结果
+      description: Describe the observable result rather than prescribing implementation / 描述用户最终能做到什么，不必预设技术实现
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Current alternatives / 当前替代方案
+      description: Existing workaround, plugin, upstream behavior, or other product / 当前的临时办法、插件、上游能力或其他产品
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected boundary / 涉及边界
+      options:
+        - Desktop lifecycle or operating-system integration / 桌面生命周期或系统集成
+        - Profile, Bundle, or plugin composition
+        - Project, file, research, or artifact surface / 项目、文件、研究或产物界面
+        - Harness upstream integration / Harness 上游集成
+        - Permissions, credentials, or diagnostics / 权限、凭据或诊断
+        - Documentation or community / 文档或社区
+        - Unknown / 不确定
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and non-goals / 范围与非目标
+      description: State what this request should and should not include / 说明本次应该做什么、明确不做什么
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria / 验收标准
+      placeholder: |
+        - [ ] Normal path / 正常路径
+        - [ ] Failure path / 异常路径
+        - [ ] Recovery path / 恢复路径
+        - [ ] Security or privacy / 安全或隐私
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: References and evidence / 参考与证据
+      description: Upstream source, screenshots, recordings, logs, prototypes, or competitor examples / 上游源码、截图、录屏、日志、原型或竞品示例
+
+  - type: textarea
+    id: risk
+    attributes:
+      label: Risks and rollback / 风险与回滚
+      description: Compatibility, security, data, platform, or migration concerns / 兼容、安全、数据、平台或迁移风险

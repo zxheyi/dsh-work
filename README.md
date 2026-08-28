@@ -70,7 +70,16 @@ DSH Work 是基于 DeepSeek Harness 构建的独立社区项目，与深度求�
 
 ## 开发与参与
 
-仓库目前处于架构设计阶段，尚无可运行的开发流程。首个里程碑将确定技术栈、上游集成方式、插件边界和最小可运行桌面宿主。
+仓库目前处于架构设计阶段，尚无可运行的产品开发流程。Phase 0 已建立仓库契约；开始工作前请阅读 [`AGENTS.md`](AGENTS.md) 与 [`docs/workflow.md`](docs/workflow.md)。当前产品范围、首个里程碑和架构决策流程分别见 [`docs/product-scope.md`](docs/product-scope.md)、[`docs/acceptance/m0.md`](docs/acceptance/m0.md) 和 [`docs/decisions/README.md`](docs/decisions/README.md)。
+
+当前契约门禁不依赖产品技术栈：
+
+```bash
+node --test scripts/verify-contract.test.mjs
+node scripts/verify-contract.mjs
+```
+
+首个产品里程碑将确定技术栈、上游集成方式、插件边界和最小可运行桌面宿主。
 
 在提交大规模实现前，请先通过 GitHub Issues 讨论产品范围、架构决策或插件边界。
 
