@@ -10,7 +10,7 @@ Primary sources only: the official `deepseek-ai/deepseek-harness` Git repository
 
 DeepSeek Harness already exposes the composition and lifecycle seams needed for a thin desktop supervisor: one `dsh` launcher, named Profiles, installable Bundle patches, ordinary Cordis plugins/services, Loader settlement, a Web readiness announcement, and bounded root disposal. DSH Work should therefore run an unmodified Harness child and add any desktop-specific lifecycle handshake as a DSH Work Bundle/plugin rather than embedding or forking Harness.
 
-There is one immediate blocker to selecting the runtime: **the repository revision inspected is newer than every currently installable official runtime distribution**. The inspected Git revision is [`cd5ef8148158c3a752a658978873241fdf8e2bbc`](https://github.com/deepseek-ai/deepseek-harness/tree/cd5ef8148158c3a752a658978873241fdf8e2bbc) (`dsh-v0.1.2-alpha.1`), while npm currently resolves `@deepseek-ai/dsh` to `0.1.1-rc.2`, whose matching official tag points to [`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`](https://github.com/deepseek-ai/deepseek-harness/tree/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e). The source and runtime must be selected as a tested pair; HEAD-only lifecycle APIs must not be assumed to exist in the published runtime.
+The research identified one selection risk: **the repository revision inspected is newer than every currently installable official runtime distribution**. The inspected Git revision is [`cd5ef8148158c3a752a658978873241fdf8e2bbc`](https://github.com/deepseek-ai/deepseek-harness/tree/cd5ef8148158c3a752a658978873241fdf8e2bbc) (`dsh-v0.1.2-alpha.1`), while npm resolves `@deepseek-ai/dsh` to `0.1.1-rc.2`, whose matching official tag points to [`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`](https://github.com/deepseek-ai/deepseek-harness/tree/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e). [ADR 0002](../decisions/0002-official-dsh-cli-runtime.md) resolves the selection by accepting that released pair as the M0 baseline; HEAD-only lifecycle APIs must not be assumed to exist in it.
 
 ## Evidence snapshot
 
@@ -95,9 +95,8 @@ The source is explicitly a developer preview with compatibility-breaking changes
 5. **Own structured diagnostics in the desktop layer.** Preserve raw private logs locally, but translate spawn failure, readiness timeout, nonzero exit, `EADDRINUSE`, invalid Profile, and forced-stop outcomes into DSH Work error categories. Treat upstream stderr wording as diagnostic evidence, not a stable API.
 6. **Do not use the current PyPI wheel as the M0 cross-platform runtime.** Although current source declares a Windows x64 wheel target, the public `0.1.1rc1` registry release currently exposes no Windows wheel. Reconsider only after the selected exact release is available and verified on both target platforms.
 
-## Unknowns that block the integration decision
+## Unknowns that remain after baseline selection
 
-- Which exact runtime will M0 ship: the published npm family, a DSH Work-built official-source artifact, or a later official native runtime wheel?
 - Does the selected released revision expose the lifecycle services required by the DSH Work Bundle, or must readiness/stop be implemented using older public seams?
 - Can the selected runtime load a DSH Work Bundle from an installed, pinned tarball on clean macOS and Windows machines without pnpm at ordinary launch time?
 - Does closing the Web child's stdin remain unused by every selected Web Bundle row and reliably reach `appExit` on Windows?
@@ -146,12 +145,12 @@ Run these against each candidate **source/runtime pair** on native macOS and Win
    - If using a native runtime artifact, verify platform/architecture and sidecars before spawn.
    - Run the same Loader/Profile smoke after packaging, not only from source.
 
-## Decision input
+## Decision outcome
 
-The evidence supports proceeding to a disposable M0 lifecycle prototype, but not yet accepting the upstream integration ADR. The first prototype should compare:
+The evidence and completed development-host smokes support the ADR 0002 decision:
 
-- **Released npm pair:** `@deepseek-ai/dsh@0.1.1-rc.2` with source tag `dsh-v0.1.1-rc.2`; widest immediately visible distribution path, but it lacks current HEAD's `appReady` contract and needs bundled Node plus native Windows stop proof.
-- **Pinned-source artifact:** build the official `dsh-v0.1.2-alpha.1` tree at `cd5ef814…` without changes; exposes the newest lifecycle seams and can keep source byte-clean, but DSH Work would own artifact reproducibility, signing, and update packaging.
-- **Official native wheel:** operationally attractive because it bundles Node, but the current PyPI release is older and has no visible Windows wheel, so it is not presently a two-platform M0 candidate.
+- **Accepted released npm pair:** `@deepseek-ai/dsh@0.1.1-rc.2` with source tag `dsh-v0.1.1-rc.2`; it is immediately distributable and passed macOS/Windows development launch checks, but it lacks proven current-HEAD lifecycle contracts and still needs the native Bundle, Windows graceful-stop, manifest, and packaging checks.
+- **Deferred pinned-source artifact:** build the official `dsh-v0.1.2-alpha.1` tree at `cd5ef814…` without changes only if an executable check proves the accepted pair lacks a required public seam; DSH Work would then own artifact reproducibility, signing, and update packaging.
+- **Deferred official native wheel:** reconsider when an exact official release provides the required macOS and Windows artifacts and passes the same compatibility matrix.
 
-Accept a direction only after the provenance, readiness, Windows graceful-stop, clean-Profile Bundle load, and packaged macOS/Windows smokes all pass for the same pair.
+Accepting the baseline authorizes only work against that exact pair. Provenance enforcement, secret-safe readiness, Windows graceful stop, clean-Profile Bundle load, and packaged macOS/Windows smokes remain implementation gates. Failure of a required public seam returns the work to Research and a superseding ADR; it does not authorize a Harness patch or parallel implementation.

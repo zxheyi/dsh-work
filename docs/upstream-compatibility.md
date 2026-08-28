@@ -1,6 +1,6 @@
 # DeepSeek Harness compatibility contract
 
-Status: proposed strategy under verification; not yet selected
+Status: accepted integration baseline; implementation verification open
 
 ## Rule
 
@@ -13,17 +13,19 @@ DSH Work must not modify or copy upstream source to implement product behavior, 
 | Item | Value | Evidence |
 | --- | --- | --- |
 | Source repository | `https://github.com/deepseek-ai/deepseek-harness` | Project README |
-| Source revision | Proposed: `b150a551b8d465e31e418e1b2eaf5e79bbb7d28e` (`dsh-v0.1.1-rc.2`) | [ADR 0002](decisions/0002-official-dsh-cli-runtime.md) |
-| Source integration method | Proposed: read-only provenance baseline; launch the official `dsh --profile` CLI as a child | [ADR 0002](decisions/0002-official-dsh-cli-runtime.md) |
-| Runtime package family | Proposed: official npm `@deepseek-ai/dsh@0.1.1-rc.2` | macOS and Windows development prototype evidence; packaged matrix pending |
-| Package manager boundary | Proposed: pinned build/materialization step only; no package manager required at ordinary launch | Packaging proof pending |
+| Source revision | `b150a551b8d465e31e418e1b2eaf5e79bbb7d28e` (`dsh-v0.1.1-rc.2`) | [ADR 0002](decisions/0002-official-dsh-cli-runtime.md) |
+| Source integration method | Read-only provenance baseline; launch the official `dsh --profile` CLI as a child | [ADR 0002](decisions/0002-official-dsh-cli-runtime.md) |
+| Runtime package family | Official npm `@deepseek-ai/dsh@0.1.1-rc.2` | macOS and Windows development prototype evidence; packaged matrix pending |
+| Runtime integrity | `sha512-UP1UIh6q3Gme/yXRn/QL2P8IsVlv8Shpg22TRJIZPsCRWLm4CBiA1MUvXmJAfsOEETBMLAl+xWPtFw6ICsN3wg==` | npm registry and checked-in prototype lockfile |
+| Standalone Node baseline | Node.js `24.11.1` | macOS and Windows development smokes; platform artifact hashes pending |
+| Package manager boundary | pnpm `10.34.4` only in controlled build/materialization; no package manager at ordinary launch | Development materialization passed; packaged proof pending |
 | Last compatibility verification | 2026-08-28, macOS arm64 CLI plus Electron/Tauri development smokes, and Windows Electron/Tauri native CI | [`research/m0-lifecycle-prototype.md`](research/m0-lifecycle-prototype.md) |
 
-The proposed values are not an accepted selection. Current source revision `cd5ef8148158c3a752a658978873241fdf8e2bbc` is newer than the published runtime and is research evidence only; its lifecycle APIs must not be attributed to `0.1.1-rc.2`.
+These values are the accepted M0 baseline, not an implementation-complete runtime manifest. Current source revision `cd5ef8148158c3a752a658978873241fdf8e2bbc` is newer than the published runtime and is research evidence only; its lifecycle APIs must not be attributed to `0.1.1-rc.2`.
 
 ## Required compatibility checks
 
-When an integration strategy is accepted, the repository gate must be able to verify:
+The repository gate must verify:
 
 - the expected upstream remote and exact source revision;
 - a clean upstream working tree or immutable source artifact;

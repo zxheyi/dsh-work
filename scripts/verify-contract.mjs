@@ -138,6 +138,23 @@ export function verifyContract(root) {
     requireText(errors, upstream, token, 'docs/upstream-compatibility.md')
   }
 
+  const hostDecision = read(root, 'docs/decisions/0001-electron-desktop-host.md')
+  for (const token of ['Status: accepted', 'Accept Electron `44.0.0` as the M0 desktop host']) {
+    requireText(errors, hostDecision, token, 'docs/decisions/0001-electron-desktop-host.md')
+  }
+
+  const runtimeDecision = read(root, 'docs/decisions/0002-official-dsh-cli-runtime.md')
+  for (const token of [
+    'Status: accepted',
+    '`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`',
+    '`@deepseek-ai/dsh@0.1.1-rc.2`',
+    '`sha512-UP1UIh6q3Gme/yXRn/QL2P8IsVlv8Shpg22TRJIZPsCRWLm4CBiA1MUvXmJAfsOEETBMLAl+xWPtFw6ICsN3wg==`',
+    'Node.js `24.11.1`',
+    'pnpm `10.34.4`',
+  ]) {
+    requireText(errors, runtimeDecision, token, 'docs/decisions/0002-official-dsh-cli-runtime.md')
+  }
+
   const workflow = read(root, 'docs/workflow.md')
   for (const heading of ['## Upstream-first architecture', '## State machine', '## Stage contracts', '## Verification ladder', '## Definition of Done']) {
     requireText(errors, workflow, heading, 'docs/workflow.md')
