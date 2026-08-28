@@ -15,7 +15,8 @@ M0 needs one thin macOS and Windows desktop host that can supervise the official
 - [`../research/m0-lifecycle-prototype.md`](../research/m0-lifecycle-prototype.md) records a macOS arm64 smoke in which Electron `44.0.0` launched official `@deepseek-ai/dsh@0.1.1-rc.2`, observed the readiness line, fetched HTTP `200`, sent `SIGTERM`, and observed exit code `0`.
 - Electron artifact integrity was verified against the official release SHA-256 list.
 - An equivalent macOS Tauri `2.11.5`/shell-plugin `2.3.5` prototype used standalone Node as a configured sidecar, reached HTTP `200`, sent POSIX `SIGTERM`, and observed exit code `0`. Its hidden WebView had no shell capability.
-- Native Windows and packaged-product checks remain pending for both candidates.
+- [Windows CI run `33159188420`](https://github.com/zxheyi/dsh-work/actions/runs/33159188420) built and launched both development hosts against the same official runtime, reached HTTP `200`, and completed bounded direct-child forced cleanup. It intentionally does not claim graceful Windows stop or descendant cleanup.
+- Packaged-product, Windows graceful-stop, and owned process-tree checks remain pending for both candidates.
 
 ## Decision
 
@@ -30,6 +31,7 @@ The host launches the selected standalone Node executable and official `dsh` bin
 - [x] An official Electron artifact passes integrity verification.
 - [x] A macOS development smoke launches one official Harness child, observes executable readiness plus HTTP `200`, requests stop, and receives exit code `0`.
 - [x] An equivalent macOS Tauri sidecar smoke passes against the same official runtime and lifecycle sequence.
+- [x] Native Windows development smokes build and launch both candidates, observe readiness plus HTTP `200`, and report bounded direct-child forced cleanup without misclassifying it as graceful.
 - [ ] A packaged macOS app runs without global Node or package-manager dependencies.
 - [ ] A packaged Windows app runs without global Node or package-manager dependencies.
 - [ ] Native macOS and Windows tests prove graceful stop, bounded forced recovery, owned descendant cleanup, and restart after host/runtime failure.
@@ -43,7 +45,7 @@ The proposed implementation cannot begin beyond disposable prototypes until this
 
 ### Tauri sidecar host
 
-Tauri offers a small Rust core, system WebViews, and declarative capability scoping. Its macOS lifecycle prototype passed. It also requires a Rust toolchain, separate Node/Harness sidecars for each target, native WebView compatibility testing, and the same platform-specific process-tree ownership code. It remains the active comparison candidate until the native matrix and measurement gates above are resolved.
+Tauri offers a small Rust core, system WebViews, and declarative capability scoping. Its macOS lifecycle and Windows native launch/readiness prototypes passed. It also requires a Rust toolchain, separate Node/Harness sidecars for each target, native WebView compatibility testing, and the same platform-specific process-tree ownership code. It remains the active comparison candidate until the packaging, lifecycle, and measurement gates above are resolved.
 
 ### Electron in-process Harness embedding
 

@@ -15,7 +15,7 @@ Use a decision record when a change affects the desktop stack, upstream integrat
 
 | Decision | Status | Summary |
 | --- | --- | --- |
-| [0001: Electron child-process desktop host](0001-electron-desktop-host.md) | proposed | Recommends Electron after both macOS host smokes; Windows, packaging, and measurement gates remain open. |
+| [0001: Electron child-process desktop host](0001-electron-desktop-host.md) | proposed | Recommends Electron after macOS lifecycle and Windows launch/readiness smokes; graceful Windows stop, packaging, and measurement gates remain open. |
 | [0002: Official `dsh` CLI and matched runtime pair](0002-official-dsh-cli-runtime.md) | proposed | Fixes the public CLI boundary and proposes the released npm pair pending native lifecycle and packaging proof. |
 
 No architecture decision has been accepted yet. Dependent production implementation remains blocked until the applicable proposal is accepted.

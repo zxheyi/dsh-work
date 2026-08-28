@@ -1,6 +1,6 @@
 # M0 lifecycle prototype evidence
 
-Status: macOS prototype evidence; Windows and packaged-app checks pending
+Status: macOS and Windows development prototype evidence; packaged-app and graceful Windows stop checks pending
 
 Related work: [Issue #5](https://github.com/zxheyi/dsh-work/issues/5)
 
@@ -10,7 +10,7 @@ Date: 2026-08-28
 
 If DSH Work selects a separate Harness process, can the M0 desktop host represent launch, executable readiness, requested stop, clean exit, startup failure, and an unexpected post-readiness exit without relying on a fixed delay or collapsing failures into `stopped`?
 
-The first fixture tests the separate-process lifecycle model. A second smoke replaces the fixture with the official published npm runtime. Electron and Tauri smokes then run that same official runtime through their respective desktop process APIs. These results prove both macOS development topologies are viable, but do not prove Windows graceful stop or packaged-product behavior.
+The first fixture tests the separate-process lifecycle model. A second smoke replaces the fixture with the official published npm runtime. Electron and Tauri smokes then run that same official runtime through their respective desktop process APIs. These results prove both macOS development topologies and basic Windows native launch/readiness are viable, but do not prove Windows graceful stop or packaged-product behavior.
 
 ## Disposable artifacts
 
@@ -148,6 +148,17 @@ Both the temporary prototype and the research-branch source completed with resul
 
 Until a Harness-native child-visible public stop carrier is proven, the Windows probes deliberately classify cleanup as `forced-no-public-carrier`. A green job proves native host launch, readiness, HTTP `200`, and direct-child forced cleanup only. It cannot satisfy the M0 graceful-stop, descendant-cleanup, packaging, or recovery criteria.
 
+## Windows native CI result
+
+[GitHub Actions run `33159188420`](https://github.com/zxheyi/dsh-work/actions/runs/33159188420) completed successfully on `windows-latest` for research commit `e7643884934230b96b28fa897c3ed6905dfcb0f2`.
+
+| Host | Build and launch | Readiness | Cleanup classification | Workflow result |
+| --- | --- | --- | --- | --- |
+| Electron separate process | official runtime materialized with pinned Node/pnpm; host launched one direct child | `dsh web:` line followed by HTTP `200` | `forced-no-public-carrier`; host result code `0` | passed |
+| Tauri sidecar | Rust/Tauri compiled natively; target-suffixed standalone Node sidecar launched official `dsh` | `dsh web:` line followed by HTTP `200` | `forced-no-public-carrier`; host result code `0` | passed |
+
+The run proves that both development hosts can compose the same unmodified official Harness runtime on Windows. It deliberately does not treat forceful direct-child cleanup as graceful stop or process-tree ownership evidence.
+
 ## What this does not prove
 
 - a stable, versioned Harness health/readiness protocol beyond the released URL line;
@@ -161,7 +172,7 @@ Until a Harness-native child-visible public stop carrier is proven, the Windows 
 
 ## Required next prototype
 
-Run the native Windows workflow, then extend the official runtime smoke with a DSH Work-native lifecycle Bundle. The next acceptance-grade executable check must verify:
+Extend the official runtime smoke with a DSH Work-native lifecycle Bundle and owned process-tree recovery. The next acceptance-grade executable check must verify:
 
 1. a real Profile or Bundle is selected;
 2. readiness comes from a public Host/runtime boundary;
