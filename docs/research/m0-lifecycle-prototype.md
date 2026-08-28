@@ -140,7 +140,7 @@ Observed lifecycle:
 | Stop request | Rust core sent POSIX `SIGTERM` to the owned sidecar PID |
 | Exit | sidecar emitted `Terminated` with code `0` and no terminating signal |
 
-Both the temporary prototype and the research-branch source completed with result code `0`. This establishes lifecycle feasibility parity on macOS. It does not establish a product preference: Tauri still carries the Rust/system-WebView/target-sidecar trade-offs recorded in [`desktop-stack-comparison.md`](desktop-stack-comparison.md).
+Both the temporary prototype and the research-branch source completed with result code `0`. This establishes lifecycle feasibility parity on macOS. The prototype alone did not establish a product preference; [ADR 0001](../decisions/0001-electron-desktop-host.md) subsequently accepted Electron for M0 and paused Tauri product work while retaining this result as reevaluation evidence.
 
 ## Windows prototype contract
 
@@ -157,7 +157,7 @@ Until a Harness-native child-visible public stop carrier is proven, the Windows 
 | Electron separate process | official runtime materialized with pinned Node/pnpm; host launched one direct child | `dsh web:` line followed by HTTP `200` | `forced-no-public-carrier`; host result code `0` | passed |
 | Tauri sidecar | Rust/Tauri compiled natively; target-suffixed standalone Node sidecar launched official `dsh` | `dsh web:` line followed by HTTP `200` | `forced-no-public-carrier`; host result code `0` | passed |
 
-The run proves that both development hosts can compose the same unmodified official Harness runtime on Windows. It deliberately does not treat forceful direct-child cleanup as graceful stop or process-tree ownership evidence.
+The run proves that both development hosts can compose the same unmodified official Harness runtime on Windows. It deliberately does not treat forceful direct-child cleanup as graceful stop or process-tree ownership evidence. ADR 0001 uses this matched feasibility result to remove basic platform launch as a host differentiator; the remaining lifecycle work now proceeds only on Electron.
 
 ## What this does not prove
 

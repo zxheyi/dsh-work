@@ -197,9 +197,9 @@ Run the same black-box checks against development and packaged builds on native 
 
 The cycle count is a proposed prototype stress check, not a reliability claim or final M0 limit.
 
-## Decision criteria for the later ADR
+## Decision criteria and remaining implementation evidence
 
-Both candidates remain viable until a prototype supplies evidence. The ADR should select only after these criteria are answered:
+The comparison used the following criteria. ADR 0001 now selects Electron for M0 based on the matched feasibility evidence and the product owner's delivery and maintenance judgment. Criteria not yet answered remain Electron implementation or M0 release gates; accepting the host does not convert them into verified facts.
 
 1. **Harness fidelity:** Can the same exact official `dsh --profile` source/runtime pair, Node version, native dependencies, Loader, Profile/Bundle, and plugin UI run under each host without modifying or copying Harness-owned implementation?
 2. **Lifecycle correctness:** Do native macOS and Windows tests prove spawn-exactly-once, trustworthy readiness, platform-correct graceful stop, owned process-tree cleanup, abnormal-exit diagnostics, orphan handling, and restart recovery?
@@ -211,7 +211,7 @@ Both candidates remain viable until a prototype supplies evidence. The ADR shoul
 8. **Maintenance cost:** Which candidate produces the smaller accepted set of languages, runtime copies, native modules, platform-specific process code, security update obligations, and release jobs for this team? This must be counted from the prototypes, not inferred from framework marketing.
 9. **Measured product properties:** Compare package contents, startup-to-ready time, idle/active memory, update delta, and repeated-cycle stability using the same pinned Harness build, command, Profile/Bundle, and UI on the same machines. Record raw commands and results; do not import unrelated public benchmarks.
 
-The historical Electron in-process `boot(...)` reference is excluded by the current official launcher contract and is not an M0 prototype. The active decision is Electron child-process host versus Tauri sidecar host for the same official `dsh --profile` runtime. Neither stack is selected until the native prototypes satisfy the shared criteria.
+The historical Electron in-process `boot(...)` reference is excluded by the current official launcher contract and is not an M0 prototype. [ADR 0001](../decisions/0001-electron-desktop-host.md) accepts the Electron child-process host and pauses Tauri product work. Tauri remains research evidence and may be reconsidered only through the explicit triggers and superseding-decision process in that ADR.
 
 ## Prototype update: 2026-08-28
 
@@ -222,6 +222,6 @@ The macOS arm64 throwaway prototypes now give both candidates the same standalon
 | Electron `44.0.0` | hidden sandboxed Chromium renderer; Electron main spawned the standalone Node/official `dsh` child | readiness line, HTTP `200`, POSIX SIGTERM, exit code `0` |
 | Tauri `2.11.5` + shell plugin `2.3.5` | hidden WKWebView with no shell capability; Rust core launched standalone Node as a configured sidecar | readiness line, HTTP `200`, POSIX SIGTERM, exit code `0` |
 
-The result removes basic macOS lifecycle feasibility as a differentiator. It does not select a host. The remaining decision turns on Windows public graceful stop, owned process-tree cleanup, packaged runtime independence, real plugin UI behavior across browser engines, security verification, repeated measurements, and team maintenance cost. Commands and exact provenance are recorded in [`m0-lifecycle-prototype.md`](m0-lifecycle-prototype.md); the throwaway sources live on the research branch under [`../../prototypes/m0-desktop-hosts/`](../../prototypes/m0-desktop-hosts/).
+The result removed basic macOS lifecycle feasibility as a differentiator. It did not by itself select a host; ADR 0001 subsequently selected Electron based on the full evidence and product priorities. Windows public graceful stop, owned process-tree cleanup, packaged runtime independence, real plugin UI behavior, security verification, and repeated Electron measurements remain M0 gates. Commands and exact provenance are recorded in [`m0-lifecycle-prototype.md`](m0-lifecycle-prototype.md); the throwaway sources live on the research branch under [`../../prototypes/m0-desktop-hosts/`](../../prototypes/m0-desktop-hosts/).
 
 [Windows CI run `33159188420`](https://github.com/zxheyi/dsh-work/actions/runs/33159188420) subsequently built and launched both checked-in throwaway hosts on `windows-latest`. Each launched the same official runtime, observed the `dsh web:` readiness line and HTTP `200`, and reported `forced-no-public-carrier` before bounded direct-child cleanup. This removes basic Windows build/launch/readiness feasibility as a differentiator, but it does not satisfy graceful stop, descendant cleanup, packaging, recovery, or WebView compatibility acceptance.

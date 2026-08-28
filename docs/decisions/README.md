@@ -15,7 +15,7 @@ Use a decision record when a change affects the desktop stack, upstream integrat
 
 | Decision | Status | Summary |
 | --- | --- | --- |
-| [0001: Electron child-process desktop host](0001-electron-desktop-host.md) | proposed | Recommends Electron after macOS lifecycle and Windows launch/readiness smokes; graceful Windows stop, packaging, and measurement gates remain open. |
+| [0001: Electron child-process desktop host](0001-electron-desktop-host.md) | accepted | Selects Electron for M0 and pauses Tauri product work; graceful Windows stop, packaging, security, and lifecycle gates remain open. |
 | [0002: Official `dsh` CLI and matched runtime pair](0002-official-dsh-cli-runtime.md) | proposed | Fixes the public CLI boundary and proposes the released npm pair pending native lifecycle and packaging proof. |
 
-No architecture decision has been accepted yet. Dependent production implementation remains blocked until the applicable proposal is accepted.
+ADR 0001 is accepted, so Electron host implementation may begin. Upstream runtime-dependent implementation remains blocked until ADR 0002 is accepted, and every unchecked M0 criterion remains a delivery gate rather than an implemented claim.
