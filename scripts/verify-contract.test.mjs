@@ -19,6 +19,7 @@ test('missing contract files fail verification', () => {
     const errors = verifyContract(emptyRoot)
     assert.ok(errors.some((error) => error === 'missing required file: AGENTS.md'))
     assert.ok(errors.some((error) => error === 'missing required file: docs/workflow.md'))
+    assert.ok(errors.some((error) => error === 'missing required file: docs/workflow-v1.zh-CN.md'))
   } finally {
     fs.rmSync(emptyRoot, { recursive: true, force: true })
   }

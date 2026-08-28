@@ -9,6 +9,7 @@ export const requiredFiles = [
   'CLAUDE.md',
   'docs/product-scope.md',
   'docs/workflow.md',
+  'docs/workflow-v1.zh-CN.md',
   'docs/acceptance/m0.md',
   'docs/decisions/README.md',
   'docs/decisions/TEMPLATE.md',
@@ -28,6 +29,7 @@ const linkedMarkdownFiles = [
   'CLAUDE.md',
   'docs/product-scope.md',
   'docs/workflow.md',
+  'docs/workflow-v1.zh-CN.md',
   'docs/acceptance/m0.md',
   'docs/decisions/README.md',
   'docs/upstream-compatibility.md',
@@ -101,6 +103,12 @@ export function verifyContract(root) {
   for (const heading of ['## State machine', '## Stage contracts', '## Verification ladder', '## Definition of Done']) {
     requireText(errors, workflow, heading, 'docs/workflow.md')
   }
+
+  const workflowV1Zh = read(root, 'docs/workflow-v1.zh-CN.md')
+  for (const heading of ['## 状态机', '## 阶段契约', '## 验证阶梯', '## 完成定义', '## v1 落地验收']) {
+    requireText(errors, workflowV1Zh, heading, 'docs/workflow-v1.zh-CN.md')
+  }
+  requireText(errors, workflowV1Zh, '文档状态：冻结留存', 'docs/workflow-v1.zh-CN.md')
 
   const acceptance = read(root, 'docs/acceptance/m0.md')
   for (const heading of [

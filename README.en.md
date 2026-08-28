@@ -70,7 +70,7 @@ The upstream project provides the Agent runtime and plugin architecture. DSH Wor
 
 ## Development and contributing
 
-The repository is currently at the architecture-design stage and does not yet have a runnable product-development workflow. Phase 0 establishes the repository contract. Read [`AGENTS.md`](AGENTS.md) and [`docs/workflow.md`](docs/workflow.md) before starting work. The current product scope, first milestone, and decision process live in [`docs/product-scope.md`](docs/product-scope.md), [`docs/acceptance/m0.md`](docs/acceptance/m0.md), and [`docs/decisions/README.md`](docs/decisions/README.md).
+The repository is currently at the architecture-design stage and does not yet have a runnable product-development workflow. Phase 0 establishes the repository contract. Read [`AGENTS.md`](AGENTS.md) and [`docs/workflow.md`](docs/workflow.md) before starting work. The frozen Chinese v1 record of the AI Native delivery workflow lives in [`docs/workflow-v1.zh-CN.md`](docs/workflow-v1.zh-CN.md). The current product scope, first milestone, and decision process live in [`docs/product-scope.md`](docs/product-scope.md), [`docs/acceptance/m0.md`](docs/acceptance/m0.md), and [`docs/decisions/README.md`](docs/decisions/README.md).
 
 The current contract gate is independent of the future product toolchain:
 

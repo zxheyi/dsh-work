@@ -70,7 +70,7 @@ DSH Work 是基于 DeepSeek Harness 构建的独立社区项目，与深度求�
 
 ## 开发与参与
 
-仓库目前处于架构设计阶段，尚无可运行的产品开发流程。Phase 0 已建立仓库契约；开始工作前请阅读 [`AGENTS.md`](AGENTS.md) 与 [`docs/workflow.md`](docs/workflow.md)。当前产品范围、首个里程碑和架构决策流程分别见 [`docs/product-scope.md`](docs/product-scope.md)、[`docs/acceptance/m0.md`](docs/acceptance/m0.md) 和 [`docs/decisions/README.md`](docs/decisions/README.md)。
+仓库目前处于架构设计阶段，尚无可运行的产品开发流程。Phase 0 已建立仓库契约；开始工作前请阅读 [`AGENTS.md`](AGENTS.md) 与 [`docs/workflow.md`](docs/workflow.md)。AI Native 交付工作流的中文 v1 冻结记录见 [`docs/workflow-v1.zh-CN.md`](docs/workflow-v1.zh-CN.md)。当前产品范围、首个里程碑和架构决策流程分别见 [`docs/product-scope.md`](docs/product-scope.md)、[`docs/acceptance/m0.md`](docs/acceptance/m0.md) 和 [`docs/decisions/README.md`](docs/decisions/README.md)。
 
 当前契约门禁不依赖产品技术栈：
 

@@ -2,6 +2,8 @@
 
 Status: active contract
 
+Frozen Chinese v1 record: [`workflow-v1.zh-CN.md`](workflow-v1.zh-CN.md)
+
 ## Purpose
 
 Every change begins with a user outcome, passes through executable acceptance, and ends with independently reviewable evidence. Code production is an intermediate step, not the definition of completion.
