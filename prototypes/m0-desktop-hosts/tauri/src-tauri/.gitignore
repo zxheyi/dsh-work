@@ -1,0 +1,4 @@
+/binaries/node-*
+/gen/
+/icons/icon.png
+/target/

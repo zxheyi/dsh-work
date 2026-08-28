@@ -1,0 +1,61 @@
+name: M0 Windows prototype
+
+on:
+  push:
+    branches: [research/m0-architecture]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: m0-windows-prototype-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-desktop-hosts:
+    name: windows-desktop-hosts
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.11.1
+      - name: Install pinned pnpm
+        run: npm install --global pnpm@10.34.4
+      - name: Materialize official Harness runtime
+        run: pnpm install --dir prototypes/m0-desktop-hosts --frozen-lockfile
+      - name: Run Electron child-process smoke
+        run: |
+          $env:DSH_WORK_NODE = node -p "process.execPath"
+          pnpm --dir prototypes/m0-desktop-hosts electron:smoke
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal
+          rustup default 1.98.0
+          rustc --version --verbose
+          cargo --version --verbose
+      - name: Materialize Tauri Node sidecar
+        run: node prototypes/m0-desktop-hosts/scripts/materialize-tauri-sidecar.mjs x86_64-pc-windows-msvc
+      - name: Run Tauri sidecar smoke
+        env:
+          DSH_WORK_STOP_MODE: forced
+        run: |
+          $packageRoot = Resolve-Path "prototypes/m0-desktop-hosts/node_modules/@deepseek-ai/dsh"
+          $env:DSH_WORK_DSH_BIN = Join-Path $packageRoot "lib/bin.js"
+          cargo run --locked --manifest-path prototypes/m0-desktop-hosts/tauri/src-tauri/Cargo.toml
+      - name: Record interpretation
+        run: |
+          @"
+          ## M0 Windows prototype interpretation
+
+          Passing this job proves Windows native launch, readiness, HTTP 200, and owned direct-child forced cleanup for both hosts.
+
+          It does not prove graceful Windows shutdown. Both prototypes intentionally report `forced-no-public-carrier` until a Harness-native child-visible public stop carrier is verified.
+          "@ | Add-Content $env:GITHUB_STEP_SUMMARY

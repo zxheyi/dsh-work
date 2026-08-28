@@ -13,12 +13,18 @@ export const requiredFiles = [
   'docs/acceptance/m0.md',
   'docs/decisions/README.md',
   'docs/decisions/TEMPLATE.md',
+  'docs/decisions/0001-electron-desktop-host.md',
+  'docs/decisions/0002-official-dsh-cli-runtime.md',
+  'docs/research/deepseek-harness-integration.md',
+  'docs/research/desktop-stack-comparison.md',
+  'docs/research/m0-lifecycle-prototype.md',
   'docs/upstream-compatibility.md',
   '.github/ISSUE_TEMPLATE/config.yml',
   '.github/ISSUE_TEMPLATE/feature_request.yml',
   '.github/ISSUE_TEMPLATE/bug_report.yml',
   '.github/pull_request_template.md',
   '.github/workflows/contract.yml',
+  '.github/workflows/m0-windows-prototype.yml',
   '.github/BRANCH_PROTECTION.md',
   '.github/branch-protection.json',
   'scripts/verify-pr-contract.mjs',
@@ -35,6 +41,11 @@ const linkedMarkdownFiles = [
   'docs/workflow-v1.zh-CN.md',
   'docs/acceptance/m0.md',
   'docs/decisions/README.md',
+  'docs/decisions/0001-electron-desktop-host.md',
+  'docs/decisions/0002-official-dsh-cli-runtime.md',
+  'docs/research/deepseek-harness-integration.md',
+  'docs/research/desktop-stack-comparison.md',
+  'docs/research/m0-lifecycle-prototype.md',
   'docs/upstream-compatibility.md',
   '.github/BRANCH_PROTECTION.md',
 ]
@@ -218,6 +229,21 @@ export function verifyContract(root) {
     'node scripts/verify-pr-contract.mjs "$GITHUB_EVENT_PATH"',
   ]) {
     requireText(errors, workflowYaml, token, '.github/workflows/contract.yml')
+  }
+
+  const m0WindowsPrototype = read(root, '.github/workflows/m0-windows-prototype.yml')
+  for (const token of [
+    'name: M0 Windows prototype',
+    'branches: [research/m0-architecture]',
+    'runs-on: windows-latest',
+    'node-version: 24.11.1',
+    'pnpm@10.34.4',
+    'electron:smoke',
+    'rustup toolchain install 1.98.0 --profile minimal',
+    'cargo run --locked --manifest-path prototypes/m0-desktop-hosts/tauri/src-tauri/Cargo.toml',
+    'forced-no-public-carrier',
+  ]) {
+    requireText(errors, m0WindowsPrototype, token, '.github/workflows/m0-windows-prototype.yml')
   }
 
   let protection

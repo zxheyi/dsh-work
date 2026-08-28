@@ -1,0 +1,21 @@
+{
+  "name": "dsh-work-m0-desktop-host-prototypes",
+  "private": true,
+  "version": "0.0.0",
+  "description": "PROTOTYPE ONLY — compare Electron and Tauri supervision of the official dsh CLI",
+  "packageManager": "pnpm@10.34.4",
+  "scripts": {
+    "electron:smoke": "electron electron"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.1.1-rc.2"
+  },
+  "devDependencies": {
+    "electron": "44.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron"
+    ]
+  }
+}
