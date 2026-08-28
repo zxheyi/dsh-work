@@ -8,6 +8,12 @@ Frozen Chinese v1 record: [`workflow-v1.zh-CN.md`](workflow-v1.zh-CN.md)
 
 Every change begins with a user outcome, passes through executable acceptance, and ends with independently reviewable evidence. Code production is an intermediate step, not the definition of completion.
 
+## Upstream-first architecture
+
+DSH Work composes DeepSeek Harness; it does not modify, copy, or reimplement Harness-owned source and services. Harness owns the Agent runtime, sessions, models, tools, authorization, and plugin lifecycle. DSH Work owns the thin desktop host, operating-system integration, lifecycle, diagnostics, recovery, and product presentation.
+
+Product capabilities use Harness-native Profiles, Bundles, plugins, and public services. Pinned upstream source stays read-only and byte-clean. If native composition cannot deliver a verified outcome, the task returns to Research for an upstream extension proposal; it does not proceed by creating a parallel DSH Work implementation.
+
 ## Roles
 
 | Role | Owns |
@@ -54,6 +60,7 @@ An Issue is **Ready** only when:
 - [ ] the user outcome is one sentence and objectively testable;
 - [ ] scope and non-goals are explicit;
 - [ ] Harness, DSH Work, and plugin ownership are identified;
+- [ ] the solution uses an accepted Harness-native extension boundary and leaves pinned upstream source unchanged;
 - [ ] normal, failure, recovery, and security paths have acceptance criteria;
 - [ ] every acceptance criterion has a verification method;
 - [ ] the work is split into a half-day to one-day vertical slice;
@@ -86,6 +93,8 @@ Architecture choices use `docs/decisions/TEMPLATE.md`. The decision is reviewed 
 For a defect, preserve the reproduction as a failing regression before fixing it. For a new capability, add the smallest failing acceptance or smoke check. When a test harness does not exist, creating that harness is the first slice.
 
 Implementation stays inside the accepted slice. A newly discovered boundary conflict, destructive migration, security decision, or unverifiable criterion returns the task to Contract or Research.
+
+Editing pinned Harness source, copying its private implementation, or introducing a parallel Agent/session/model/tool/authorization/plugin-lifecycle service is a boundary conflict, not an implementation shortcut.
 
 ## Verification ladder
 
@@ -147,6 +156,7 @@ Every escaped defect follows this sequence:
 - [ ] defects and behavior changes have regression protection;
 - [ ] targeted and affected broader checks pass;
 - [ ] upstream compatibility is verified when affected;
+- [ ] pinned upstream source is unchanged and no Harness-owned service is duplicated;
 - [ ] affected platform and packaging checks pass when applicable;
 - [ ] UI evidence exists for changed key states;
 - [ ] the PR lists actual commands and manual checks;

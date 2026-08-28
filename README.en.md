@@ -29,10 +29,12 @@ DSH Work is not another Agent kernel, and it will not create a plugin platform a
 
 - **Everything is a plugin:** deliver product capabilities through native DeepSeek Harness plugins whenever possible.
 - **Keep the host thin:** limit the native desktop host to windows, system integration, and lifecycle responsibilities.
-- **Compose instead of fork:** prefer upstream composition over modifying or reimplementing Harness core.
+- **Compose instead of fork:** keep pinned upstream source read-only and free of product changes; prefer upstream composition over modifying, copying, or reimplementing Harness core.
 - **Keep capabilities replaceable:** work surfaces, tools, models, workflows, and data connections should be independently installable, replaceable, and removable.
 - **Make boundaries explicit:** permissions, credentials, local resource access, and plugin ownership should remain visible to users.
 - **Do not invent a second protocol:** avoid DSH Work extension APIs that are incompatible with native Harness plugins.
+
+If a verified user outcome cannot be delivered through native Harness Profiles, Bundles, plugins, or public services, propose and pursue an upstream extension first. Do not turn that gap into a second Harness inside DSH Work.
 
 ## Target architecture
 

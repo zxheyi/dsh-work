@@ -10,6 +10,8 @@
 
 <!-- What changed? Does this affect Harness, DSH Work, Profile, Bundle, or plugin ownership? / 改了什么？是否影响职责边界？ -->
 
+- [ ] Harness-native composition is used; pinned upstream source is unchanged and no Harness-owned service is duplicated. / 使用 Harness 原生组合；固定上游源码未改动，且没有重复实现 Harness 核心服务。
+
 ## Type / 类型
 
 - [ ] Feature / 功能

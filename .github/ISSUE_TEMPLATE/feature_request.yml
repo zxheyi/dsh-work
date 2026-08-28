@@ -51,7 +51,7 @@ body:
     id: scope
     attributes:
       label: Scope and non-goals / 范围与非目标
-      description: State what this request should and should not include / 说明本次应该做什么、明确不做什么
+      description: State what this request should and should not include. If Harness owns the capability, identify the native extension or upstream proposal; do not plan a parallel implementation. / 说明本次应该做什么、明确不做什么；若能力属于 Harness，标明原生扩展点或上游提案，不规划平行实现
     validations:
       required: true
 
