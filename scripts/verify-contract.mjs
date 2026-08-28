@@ -171,6 +171,7 @@ export function verifyContract(root) {
     'name: Contract',
     'pull_request:',
     'branches: [main]',
+    'types: [opened, synchronize, reopened, edited, ready_for_review]',
     'name: contract',
     'name: pull-request-contract',
     'node --test scripts/*.test.mjs',
