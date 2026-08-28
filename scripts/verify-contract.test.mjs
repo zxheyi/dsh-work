@@ -20,6 +20,8 @@ test('missing contract files fail verification', () => {
     assert.ok(errors.some((error) => error === 'missing required file: AGENTS.md'))
     assert.ok(errors.some((error) => error === 'missing required file: docs/workflow.md'))
     assert.ok(errors.some((error) => error === 'missing required file: docs/workflow-v1.zh-CN.md'))
+    assert.ok(errors.some((error) => error === 'missing required file: .github/branch-protection.json'))
+    assert.ok(errors.some((error) => error === 'missing required file: scripts/verify-pr-contract.mjs'))
   } finally {
     fs.rmSync(emptyRoot, { recursive: true, force: true })
   }
