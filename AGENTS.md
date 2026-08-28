@@ -1,6 +1,6 @@
 # DSH Work repository contract
 
-DSH Work is a desktop product layer composed on DeepSeek Harness. Preserve the upstream Agent runtime and native plugin boundaries while keeping the desktop host focused on operating-system integration and process lifecycle.
+DSH Work is a desktop product layer composed on DeepSeek Harness. Compose Harness; do not reimplement it. Preserve the upstream Agent runtime and native plugin boundaries while keeping the desktop host focused on operating-system integration and process lifecycle.
 
 ## Context
 
@@ -23,10 +23,11 @@ DSH Work is a desktop product layer composed on DeepSeek Harness. Preserve the u
 
 ## Boundaries
 
-- DeepSeek Harness owns Agent runtime, sessions, models, tools, and plugin lifecycle.
+- DeepSeek Harness owns Agent runtime, sessions, models, tools, authorization, and plugin lifecycle.
 - DSH Work owns desktop windows, operating-system integration, process lifecycle, diagnostics, and product presentation.
 - Product capabilities compose through Harness-native Profiles, Bundles, and plugins.
-- Treat pinned upstream source as read-only from product feature branches.
+- Keep pinned upstream source read-only and byte-clean; product features land outside the upstream source tree.
+- Do not copy or rebuild Harness-owned services inside DSH Work.
 - Keep upstream pin updates, runtime package updates, and product behavior changes in separate commits.
 - Record every temporary upstream patch in `docs/upstream-compatibility.md` with evidence, protection tests, and a removal condition.
 - Keep one extension ecosystem: Harness-native Profiles, Bundles, and plugins. If native composition cannot satisfy a verified outcome, stop and propose an upstream extension; changing this invariant requires an explicit product-scope change and accepted decision before implementation.

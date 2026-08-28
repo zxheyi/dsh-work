@@ -18,6 +18,15 @@ The product is a desktop distribution and composition layer. It is not a second 
 | Work surfaces | Project, file, research, and artifact experiences implemented through Harness client plugins |
 | Ecosystem | Models, tools, Skills, MCP integrations, and workflows supplied by upstream or community plugins |
 
+## Upstream-first invariant
+
+DSH Work composes Harness; it does not modify, copy, or reimplement Harness-owned source and services.
+
+- Pinned DeepSeek Harness source is a read-only, byte-clean compatibility baseline. Product features live outside that source tree.
+- Product behavior uses Harness-native Profiles, Bundles, plugins, and public services.
+- A verified capability gap returns to research and an upstream extension proposal before product implementation continues.
+- A temporary runtime-package patch is an explicit compatibility exception, not a source fork. It requires the patch ledger, protection tests, upstream tracking, and a removal condition in [`upstream-compatibility.md`](upstream-compatibility.md).
+
 ## Current milestone
 
 The current milestone is defined by [`acceptance/m0.md`](acceptance/m0.md). It proves the architecture and the smallest desktop lifecycle before broader work surfaces are built.

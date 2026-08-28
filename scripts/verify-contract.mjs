@@ -96,14 +96,39 @@ export function verifyContract(root) {
   for (const heading of ['## Context', '## Change loop', '## Boundaries', '## Discipline', '## Verification']) {
     requireText(errors, agents, heading, 'AGENTS.md')
   }
+  for (const token of [
+    'Compose Harness; do not reimplement it.',
+    'Keep pinned upstream source read-only and byte-clean',
+    'Do not copy or rebuild Harness-owned services inside DSH Work.',
+  ]) {
+    requireText(errors, agents, token, 'AGENTS.md')
+  }
 
   const claude = read(root, 'CLAUDE.md').trim()
   if (claude !== 'See [AGENTS.md](AGENTS.md).') {
     errors.push('CLAUDE.md: must remain a one-line pointer to AGENTS.md')
   }
 
+  const productScope = read(root, 'docs/product-scope.md')
+  for (const token of [
+    '## Upstream-first invariant',
+    'DSH Work composes Harness; it does not modify, copy, or reimplement Harness-owned source and services.',
+    'A verified capability gap returns to research and an upstream extension proposal',
+  ]) {
+    requireText(errors, productScope, token, 'docs/product-scope.md')
+  }
+
+  const upstream = read(root, 'docs/upstream-compatibility.md')
+  for (const token of [
+    'read-only, byte-clean compatibility baseline',
+    '## DSH Desktop reference',
+    'the absence of product modifications in the pinned upstream source tree',
+  ]) {
+    requireText(errors, upstream, token, 'docs/upstream-compatibility.md')
+  }
+
   const workflow = read(root, 'docs/workflow.md')
-  for (const heading of ['## State machine', '## Stage contracts', '## Verification ladder', '## Definition of Done']) {
+  for (const heading of ['## Upstream-first architecture', '## State machine', '## Stage contracts', '## Verification ladder', '## Definition of Done']) {
     requireText(errors, workflow, heading, 'docs/workflow.md')
   }
 
@@ -123,6 +148,13 @@ export function verifyContract(root) {
     '## Verification acceptance',
   ]) {
     requireText(errors, acceptance, heading, 'docs/acceptance/m0.md')
+  }
+  for (const token of [
+    'The pinned Harness source remains read-only and byte-clean under an executable repository check.',
+    'No Harness-owned Agent, session, model, tool, authorization, or plugin-lifecycle service is copied or reimplemented in DSH Work.',
+    'A missing native extension is handled through a recorded upstream proposal',
+  ]) {
+    requireText(errors, acceptance, token, 'docs/acceptance/m0.md')
   }
 
   const decision = read(root, 'docs/decisions/TEMPLATE.md')
@@ -159,12 +191,19 @@ export function verifyContract(root) {
   const pullRequest = read(root, '.github/pull_request_template.md')
   for (const heading of [
     '## User outcome / 用户结果',
+    '## Scope and boundary / 范围与边界',
     '## Acceptance evidence / 验收证据',
     '## Verification actually run / 实际执行的验证',
     '## Risks and rollback / 风险与回滚',
   ]) {
     requireText(errors, pullRequest, heading, '.github/pull_request_template.md')
   }
+  requireText(
+    errors,
+    pullRequest,
+    'Harness-native composition is used; pinned upstream source is unchanged and no Harness-owned service is duplicated.',
+    '.github/pull_request_template.md',
+  )
 
   const workflowYaml = read(root, '.github/workflows/contract.yml')
   for (const token of [

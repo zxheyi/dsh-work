@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 const sections = {
   outcome: '## User outcome / 用户结果',
   issue: '## Related Issue / 关联 Issue',
+  scope: '## Scope and boundary / 范围与边界',
   acceptance: '## Acceptance evidence / 验收证据',
   verification: '## Verification actually run / 实际执行的验证',
   risks: '## Risks and rollback / 风险与回滚',
@@ -74,6 +75,11 @@ export function verifyPullRequestContract(pullRequest) {
   const issueReference = withoutComments(content.issue ?? '')
   if (!/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:[\w.-]+\/[\w.-]+)?#\d+\b/i.test(issueReference)) {
     errors.push('Related Issue section must contain a closing Issue reference such as "Closes #123"')
+  }
+
+  const scope = withoutComments(content.scope ?? '')
+  if (!/^- \[[xX]\]\s+Harness-native composition is used;/m.test(scope)) {
+    errors.push('Scope and boundary section must confirm Harness-native composition and an unchanged upstream source')
   }
 
   if (!hasMeaningfulText(content.acceptance)) {

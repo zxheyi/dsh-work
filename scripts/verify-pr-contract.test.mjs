@@ -11,6 +11,10 @@ Maintainers can deliver a repository change through enforced checks.
 
 Closes #1
 
+## Scope and boundary / 范围与边界
+
+- [x] Harness-native composition is used; pinned upstream source is unchanged and no Harness-owned service is duplicated.
+
 ## Acceptance evidence / 验收证据
 
 - Criterion one maps to a passing contract test.
@@ -46,6 +50,16 @@ test('rejects a ready pull request without an issue-closing reference', () => {
   const errors = verifyPullRequestContract({ draft: false, body })
 
   assert.ok(errors.some((error) => error.includes('closing Issue reference')))
+})
+
+test('rejects a ready pull request without the upstream boundary confirmation', () => {
+  const body = validBody.replace(
+    '- [x] Harness-native composition is used;',
+    '- [ ] Harness-native composition is used;',
+  )
+  const errors = verifyPullRequestContract({ draft: false, body })
+
+  assert.ok(errors.some((error) => error.includes('Harness-native composition')))
 })
 
 test('rejects empty required sections and missing executed verification', () => {

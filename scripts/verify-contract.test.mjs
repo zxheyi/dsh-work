@@ -5,7 +5,7 @@ import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { verifyContract, verifyMarkdownLinks } from './verify-contract.mjs'
+import { requiredFiles, verifyContract, verifyMarkdownLinks } from './verify-contract.mjs'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -32,6 +32,30 @@ test('broken relative Markdown links fail verification', () => {
   try {
     const errors = verifyMarkdownLinks(root, 'docs/example.md', '[missing](./not-found.md)')
     assert.deepEqual(errors, ['docs/example.md: broken relative link "./not-found.md"'])
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('removing the no-reimplementation boundary fails verification', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-boundary-'))
+  try {
+    for (const relativePath of requiredFiles) {
+      const target = path.join(root, relativePath)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.copyFileSync(path.join(repositoryRoot, relativePath), target)
+    }
+
+    const agentsPath = path.join(root, 'AGENTS.md')
+    const agents = fs
+      .readFileSync(agentsPath, 'utf8')
+      .replace('Compose Harness; do not reimplement it.', 'Compose Harness.')
+    fs.writeFileSync(agentsPath, agents)
+
+    const errors = verifyContract(root)
+    assert.ok(
+      errors.includes('AGENTS.md: missing required contract text "Compose Harness; do not reimplement it."'),
+    )
   } finally {
     fs.rmSync(root, { recursive: true, force: true })
   }
