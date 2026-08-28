@@ -20,14 +20,28 @@ const source = process.env.DSH_WORK_NODE || process.execPath
 const extension = target.includes('windows') ? '.exe' : ''
 const destination = path.join(root, 'tauri', 'src-tauri', 'binaries', `node-${target}${extension}`)
 const icon = path.join(root, 'tauri', 'src-tauri', 'icons', 'icon.png')
+const windowsIcon = path.join(root, 'tauri', 'src-tauri', 'icons', 'icon.ico')
+const png = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL8WQAAAABJRU5ErkJggg==',
+  'base64',
+)
 
 fs.mkdirSync(path.dirname(destination), { recursive: true })
 fs.copyFileSync(source, destination)
 if (!target.includes('windows')) fs.chmodSync(destination, 0o755)
 fs.mkdirSync(path.dirname(icon), { recursive: true })
-fs.writeFileSync(icon, Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL8WQAAAABJRU5ErkJggg==',
-  'base64',
-))
+fs.writeFileSync(icon, png)
 
-console.log(JSON.stringify({ source, destination, icon, target }))
+const icoHeader = Buffer.alloc(22)
+icoHeader.writeUInt16LE(0, 0)
+icoHeader.writeUInt16LE(1, 2)
+icoHeader.writeUInt16LE(1, 4)
+icoHeader.writeUInt8(1, 6)
+icoHeader.writeUInt8(1, 7)
+icoHeader.writeUInt16LE(1, 10)
+icoHeader.writeUInt16LE(32, 12)
+icoHeader.writeUInt32LE(png.length, 14)
+icoHeader.writeUInt32LE(icoHeader.length, 18)
+fs.writeFileSync(windowsIcon, Buffer.concat([icoHeader, png]))
+
+console.log(JSON.stringify({ source, destination, icon, windowsIcon, target }))
