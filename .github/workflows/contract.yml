@@ -28,5 +28,10 @@ jobs:
           node-version: 22
       - name: Test repository contract verifier
         run: node --test scripts/verify-contract.test.mjs
+      - name: Test pull request contract verifier
+        run: node --test scripts/verify-pr-contract.test.mjs
       - name: Verify repository contract
         run: node scripts/verify-contract.mjs
+      - name: Verify pull request contract
+        if: github.event_name == 'pull_request' && !github.event.pull_request.draft
+        run: node scripts/verify-pr-contract.mjs "$GITHUB_EVENT_PATH"
