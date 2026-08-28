@@ -9,6 +9,7 @@ export const requiredFiles = [
   'CLAUDE.md',
   'docs/product-scope.md',
   'docs/workflow.md',
+  'docs/workflow-v1.zh-CN.md',
   'docs/acceptance/m0.md',
   'docs/decisions/README.md',
   'docs/decisions/TEMPLATE.md',
@@ -19,6 +20,9 @@ export const requiredFiles = [
   '.github/pull_request_template.md',
   '.github/workflows/contract.yml',
   '.github/BRANCH_PROTECTION.md',
+  '.github/branch-protection.json',
+  'scripts/verify-pr-contract.mjs',
+  'scripts/verify-pr-contract.test.mjs',
 ]
 
 const linkedMarkdownFiles = [
@@ -28,6 +32,7 @@ const linkedMarkdownFiles = [
   'CLAUDE.md',
   'docs/product-scope.md',
   'docs/workflow.md',
+  'docs/workflow-v1.zh-CN.md',
   'docs/acceptance/m0.md',
   'docs/decisions/README.md',
   'docs/upstream-compatibility.md',
@@ -102,6 +107,12 @@ export function verifyContract(root) {
     requireText(errors, workflow, heading, 'docs/workflow.md')
   }
 
+  const workflowV1Zh = read(root, 'docs/workflow-v1.zh-CN.md')
+  for (const heading of ['## 状态机', '## 阶段契约', '## 验证阶梯', '## 完成定义', '## v1 落地验收']) {
+    requireText(errors, workflowV1Zh, heading, 'docs/workflow-v1.zh-CN.md')
+  }
+  requireText(errors, workflowV1Zh, '文档状态：冻结留存', 'docs/workflow-v1.zh-CN.md')
+
   const acceptance = read(root, 'docs/acceptance/m0.md')
   for (const heading of [
     '## User outcome',
@@ -160,11 +171,45 @@ export function verifyContract(root) {
     'name: Contract',
     'pull_request:',
     'branches: [main]',
+    'types: [opened, synchronize, reopened, edited, ready_for_review]',
     'name: contract',
-    'node --test scripts/verify-contract.test.mjs',
+    'name: pull-request-contract',
+    'node --test scripts/*.test.mjs',
     'node scripts/verify-contract.mjs',
+    'node scripts/verify-pr-contract.mjs "$GITHUB_EVENT_PATH"',
   ]) {
     requireText(errors, workflowYaml, token, '.github/workflows/contract.yml')
+  }
+
+  let protection
+  try {
+    protection = JSON.parse(read(root, '.github/branch-protection.json'))
+  } catch (error) {
+    errors.push(`.github/branch-protection.json: invalid JSON: ${error.message}`)
+  }
+  if (protection) {
+    const contexts = protection.required_status_checks?.contexts ?? []
+    for (const context of ['contract', 'pull-request-contract']) {
+      if (!contexts.includes(context)) {
+        errors.push(`.github/branch-protection.json: missing required status check ${JSON.stringify(context)}`)
+      }
+    }
+    if (protection.required_status_checks?.strict !== true) {
+      errors.push('.github/branch-protection.json: required status checks must require an up-to-date branch')
+    }
+    for (const field of ['enforce_admins', 'required_conversation_resolution']) {
+      if (protection[field] !== true) {
+        errors.push(`.github/branch-protection.json: ${field} must be true`)
+      }
+    }
+    for (const field of ['allow_force_pushes', 'allow_deletions']) {
+      if (protection[field] !== false) {
+        errors.push(`.github/branch-protection.json: ${field} must be false`)
+      }
+    }
+    if (protection.required_pull_request_reviews?.required_approving_review_count !== 0) {
+      errors.push('.github/branch-protection.json: single-maintainer baseline requires zero approving reviews')
+    }
   }
 
   for (const relativePath of linkedMarkdownFiles) {

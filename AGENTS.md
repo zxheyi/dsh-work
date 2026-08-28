@@ -6,6 +6,7 @@ DSH Work is a desktop product layer composed on DeepSeek Harness. Preserve the u
 
 - **Scope:** read `docs/product-scope.md` before changing product behavior or proposing a milestone.
 - **Delivery:** read `docs/workflow.md` before implementing, reviewing, or declaring a change complete.
+- **V1 baseline:** read `docs/workflow-v1.zh-CN.md` when auditing or changing the AI Native delivery workflow v1 contract.
 - **Milestones:** read the applicable file under `docs/acceptance/` before milestone work.
 - **Architecture:** read `docs/decisions/README.md` before changing a public interface, persistence format, technology stack, security boundary, or production dependency.
 - **Upstream:** read `docs/upstream-compatibility.md` before changing Harness integration, versions, patches, Profiles, Bundles, or plugin lifecycle behavior.

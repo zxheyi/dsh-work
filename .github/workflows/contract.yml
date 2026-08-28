@@ -3,6 +3,7 @@ name: Contract
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
   push:
     branches: [main]
   workflow_dispatch:
@@ -26,7 +27,22 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-      - name: Test repository contract verifier
-        run: node --test scripts/verify-contract.test.mjs
+      - name: Test repository verifiers
+        run: node --test scripts/*.test.mjs
       - name: Verify repository contract
         run: node scripts/verify-contract.mjs
+
+  pull-request-contract:
+    name: pull-request-contract
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Verify pull request contract
+        run: node scripts/verify-pr-contract.mjs "$GITHUB_EVENT_PATH"
