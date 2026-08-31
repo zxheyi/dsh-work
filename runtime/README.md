@@ -1,0 +1,11 @@
+# Product runtime inputs
+
+The [accepted baseline](baseline.json) selects the official standalone Node, Harness CLI, and Electron versions. The root package manifest and lockfile materialize that selection separately from historical research fixtures. Ordinary desktop launch must not install packages or fall back to a global `dsh` or Node.
+
+Dependency purpose and license: `@deepseek-ai/dsh` is the supported CLI application boundary; `@deepseek-ai/dsh-cmdline` exposes the public `exitOnStdinEnd` helper to the out-of-tree Bundle. Both upstream package manifests declare MIT. Electron (MIT) is the accepted desktop host. Redistribution still requires a complete transitive license/notice inventory, including Chromium/Node notices; these direct declarations are not a distribution audit.
+
+Build-time install: `pnpm install --frozen-lockfile`. Only Electron's installation script is allowed; no Harness source build or patch step is introduced. All DSH-family packages must resolve to alpha.2. The known upstream React/React DOM peer mismatch remains a browser-rendering gate, not a reason for an unreviewed override.
+
+Packaging status: development inputs only. Per-platform standalone Node archives, complete dependency bytes, native modules, ASAR placement, signing, and no-global-tools launch still need immutable distribution manifests and native package verification. No runnable release is claimed by adding this lockfile.
+
+Rollback: revert the bounded product dependency commit before dependent behavior is adopted, or revert its dependent commit set together. Do not change user global installations or downgrade an existing user Profile without separate migration evidence. Baseline changes require a superseding ADR.
