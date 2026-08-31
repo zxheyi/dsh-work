@@ -9,3 +9,17 @@ Build-time install: `pnpm install --frozen-lockfile`. Only Electron's installati
 Packaging status: development inputs only. Per-platform standalone Node archives, complete dependency bytes, native modules, ASAR placement, signing, and no-global-tools launch still need immutable distribution manifests and native package verification. No runnable release is claimed by adding this lockfile.
 
 Rollback: revert the bounded product dependency commit before dependent behavior is adopted, or revert its dependent commit set together. Do not change user global installations or downgrade an existing user Profile without separate migration evidence. Baseline changes require a superseding ADR.
+
+## Development lifecycle checks
+
+Use a prepared archive context (`source`, `tarball`, `node`, `nodeArchive`) from the [frozen preparation tool](../prototypes/m0-runtime-upgrade/README.md). Check the **root product installation**, not the historical probe installation:
+
+```sh
+node scripts/verify-product-runtime.mjs /absolute/path/to/context.json
+pnpm test
+DSH_WORK_NODE=/absolute/path/to/verified/node pnpm test:runtime
+node scripts/verify-product-runtime.mjs /absolute/path/to/context.json
+pnpm check
+```
+
+The real Profile tests cover three normal cycles, invalid startup with early EOF and retry in the same isolated home, and successful early EOF. These prove direct-child/Bundle observations only. [Slice acceptance](../docs/acceptance/electron-lifecycle-slice.md) tracks the security, desktop and native-platform gates separately.

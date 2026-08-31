@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-work-lifecycle
+      name: '@dsh-work/lifecycle'

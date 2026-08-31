@@ -5,6 +5,11 @@
   "type": "module",
   "description": "Electron desktop composition of the official DeepSeek Harness CLI",
   "packageManager": "pnpm@10.34.4",
+  "scripts": {
+    "test": "node --test scripts/*.test.mjs tests/runtime-host.test.mjs tests/official-launcher.test.mjs",
+    "test:runtime": "node --test tests/runtime-integration.test.mjs",
+    "check": "node scripts/verify-contract.mjs"
+  },
   "dependencies": {
     "@deepseek-ai/dsh": "0.1.2-alpha.2",
     "@deepseek-ai/dsh-cmdline": "0.1.2-alpha.2"
