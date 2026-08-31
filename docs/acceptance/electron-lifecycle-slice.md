@@ -1,12 +1,12 @@
 # Electron lifecycle: first implementation slice
 
-Status: candidate implementation; not M0 completion.
+Status: native macOS/Windows development lifecycle verified at `96f7ff9`; not M0 completion.
 
 ## Outcome and boundary
 
 From a trusted local Electron status window, start one official alpha.2 CLI, observe committed Harness readiness, stop through stdin EOF, and retry after a confirmed exit. This is a development slice of [M0](m0.md), on the [accepted runtime](../decisions/0003-dsh-alpha2-runtime-upgrade.md). It does not add a second Agent or plugin runtime.
 
-Local Issue draft: implement the formerly blocked Electron lifecycle seam. Remote Issue/PR creation and push are not authorized in this turn; attach a remote Issue before merge. Full Harness browser UI, user workspace/config import, tools, descendants, crash recovery, signing and distribution remain separate M0 gates.
+Local Issue draft: implement the formerly blocked Electron lifecycle seam. Attach a remote Issue before merge; commit, push, Issue/PR creation and merge each require their own current authorization. Full Harness browser UI, user workspace/config import, tools, descendants, crash recovery, signing and distribution remain separate M0 gates.
 
 ## Acceptance mapping
 
@@ -17,7 +17,7 @@ Local Issue draft: implement the formerly blocked Electron lifecycle seam. Remot
 | L3 | Missing runtime, unexpected exit and timeout expose a safe code and retry only after ownership is settled | Unit failure matrix; desktop missing-runtime/retry path |
 | L4 | No arbitrary output, token, URL, path, shell or filesystem API crosses the renderer bridge | Unit negative paths; sandboxed renderer E2E |
 | L5 | Start, ready, stopping, stopped and failure states are readable and controls match state | Actual Electron interactions and screenshots; visual acceptance remains candidate until compared with an agreed baseline |
-| L6 | Same product revision works on native macOS and Windows | Local macOS evidence first; Windows CI required before completion |
+| L6 | Same product revision works on native macOS and Windows | Both native jobs passed at `96f7ff9`; see the receipt below; later behavior changes require fresh native evidence |
 
 ## Interface and ownership
 
@@ -53,13 +53,24 @@ Behavior ledger, established before implementation:
 | Missing runtime; unexpected exit; missing disposal; unreaped child | Safe fixed failure codes; no overlapping child | Unchanged; only confirmed close releases ownership | Preserve | All start/stop and shutdown entries | Existing unit/security/renderer tests; missing-runtime desktop E2E |
 | Reentrant notifications, retry and stale-generation events | Frozen command result and single-owner isolation | Unchanged | Renderer subscribers and IPC commands | Existing reentrancy/retry tests |
 
-Verification status for this repair: `PARTIAL` — local checks pass, Windows native rerun is `NOT_RUN`.
+Verification status for this repair: `RUNTIME_PASS` on native macOS arm64 and Windows x64 at `96f7ff9`. Whole-tree cleanup, host-crash recovery, agreed visual acceptance and packaging remain unverified; the whole M0 status is still `PARTIAL`.
 
 - Before the fix, four virtual-time regressions failed. Both real CLI delay cases loaded their external plugin, then the host requested force at about 8026 ms, before the test plugin's 9-second initialization completed. This reproduces the budget defect without modifying Harness. The Windows wait point remains unproven.
 - After the fix, `pnpm test` passed 41 checks and `pnpm check` passed. The [supervisor tests](../../tests/runtime-host.test.mjs) retain deadline, duplicate request, fault, ownership and reentrancy coverage. The [real CLI suite](../../tests/runtime-integration.test.mjs) passed all five scenarios on macOS arm64 / Node 24.11.1: the original three plus delayed failure and delayed success. The delayed cases observed disposal, exit and close, without host force; failure remained `runtime-exit-failed`. These controlled delays are regression inputs, not performance benchmarks.
 - `node scripts/verify-local.mjs <verified-context.json> --desktop` passed unit, contract, runtime and both Electron 44.0.0 E2E modes. The [normal desktop path](../../tests/desktop-e2e.mjs) also starts and immediately stops through the renderer bridge, observes no transient `ready`, then retries and closes while Ready. Existing close/before-quit wiring still shares the controller; no separate renderer-crash injection was added in this repair.
 - Before/after source and runtime provenance matched. No Harness source, Bundle, dependency pin or public interface changed. Reports in `artifacts/verification/` bind the base HEAD plus **dirty-worktree input SHA256s**; they do not prove a committed revision or Windows. Prior clean-HEAD artifacts were retained separately. Independent review found and closed the early-stop control-channel deadline regression; no remaining production-code blocker was reported.
 
-After commit/push authorization, rerun the same native CI gates on the new revision; if failure persists inside the full startup deadline, diagnose the upstream wait before changing more policy. Do not weaken the `runtime-exit-failed` assertion, turn force into success, or patch Harness. A local delayed CLI check is not Windows proof, and no new remote run is authorized by a local fix request.
+### Native receipt
+
+[Desktop lifecycle run 33398937292](https://github.com/zxheyi/dsh-work/actions/runs/33398937292) passed on 2026-08-31 for exact commit `96f7ff9cbc50dabaaee1c3d703b3d3713c40d558`. Downloaded artifacts were independently checked against that Git tree, per-check log hashes, desktop report/screenshot hashes, clean-worktree flags and before/after runtime provenance. Windows checkout CRLF conversion accounts for all 96 input byte differences; it is not a source change.
+
+| Native job | Executed checks | SHA256 of `verification/result.json` |
+| --- | --- | --- |
+| [macOS arm64](https://github.com/zxheyi/dsh-work/actions/runs/33398937292/job/99510198135) | 41 tests, contract gate, 5 real CLI cases, 2 Electron modes; 96 inputs matched | `edc3e8e6e586824b28f2acfd4d168376ce8c9890d3e55b73ebf754b519655d7d` |
+| [Windows x64](https://github.com/zxheyi/dsh-work/actions/runs/33398937292/job/99510198424) | 41 tests, contract gate, 5 real CLI cases, 2 Electron modes; 96 inputs matched after CRLF accounting | `45ebae1ade3918870dde8c417b966234776115e6ca5b55121ff7cd25233c47ce` |
+
+Windows invalid Profile plus early EOF and same-home retry passed in 11.69 seconds for the complete test. The delayed rejection observed loaded → rejected → disposed → exit → close with no host force; delayed success observed Ready and stopped normally. Both use Node 24.11.1, Electron 44.0.0, the same official root Harness alpha.2 bytes and 215 matching DSH-family packages. No full dependency-byte audit or whole-process-tree guarantee is inferred.
+
+This closes the reported early-stop regression for the tested inputs and revision, not every possible Windows failure. Future lifecycle changes must run fresh native gates. Do not weaken the `runtime-exit-failed` assertion, turn force into success, or patch Harness.
 
 Rollback: revert the behavior slice(s), keeping historical probes and accepted baseline reviewable. No user Harness home is migrated or removed. Temporary homes created by tests are test-owned; development homes are isolated and not automatically recursively deleted by the app.
