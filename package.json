@@ -6,8 +6,10 @@
   "description": "Electron desktop composition of the official DeepSeek Harness CLI",
   "packageManager": "pnpm@10.34.4",
   "scripts": {
-    "test": "node --test scripts/*.test.mjs tests/runtime-host.test.mjs tests/official-launcher.test.mjs",
+    "test": "node --test scripts/*.test.mjs tests/runtime-host.test.mjs tests/official-launcher.test.mjs tests/desktop-security.test.mjs tests/renderer.test.mjs",
     "test:runtime": "node --test tests/runtime-integration.test.mjs",
+    "test:desktop": "node scripts/run-desktop-test.mjs",
+    "desktop": "electron apps/desktop/main.mjs",
     "check": "node scripts/verify-contract.mjs"
   },
   "dependencies": {

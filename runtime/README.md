@@ -23,3 +23,16 @@ pnpm check
 ```
 
 The real Profile tests cover three normal cycles, invalid startup with early EOF and retry in the same isolated home, and successful early EOF. These prove direct-child/Bundle observations only. [Slice acceptance](../docs/acceptance/electron-lifecycle-slice.md) tracks the security, desktop and native-platform gates separately.
+
+## Electron development window
+
+```sh
+DSH_WORK_NODE=/absolute/path/to/verified/node pnpm desktop
+DSH_WORK_NODE=/absolute/path/to/verified/node pnpm test:desktop
+```
+
+These POSIX shell examples require the verified standalone Node path; on PowerShell set `$env:DSH_WORK_NODE` before running the pnpm command. A missing or mismatched runtime produces a safe error state, never a global-tool fallback. The window uses a new isolated temporary Profile per application launch, preserved across start/stop cycles in that launch. Closing the window waits for direct-child shutdown. This is not the persistent user workspace or a packaged app.
+
+`test:desktop` explicitly opens real Electron windows and records normal and missing-runtime scenarios plus screenshots under ignored `artifacts/desktop/`. Ordinary `pnpm test` remains headless. The Electron UI uses a private custom protocol and no remote scripts, fonts or content. Sender checks and sandboxed preload follow the [Electron security guidance](https://www.electronjs.org/docs/latest/tutorial/security); startup scheduling observes the [ESM ready-event caveat](https://www.electronjs.org/docs/latest/tutorial/esm).
+
+The local status page is not the Harness browser UI. Its readiness evidence comes from public `appReady`; these desktop screenshots do not verify the upstream React UI or its peer-dependency mismatch. Visual review is a candidate until compared with a product-approved baseline; screenshots alone do not imply visual acceptance.

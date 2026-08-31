@@ -30,6 +30,10 @@ export const requiredFiles = [
   'scripts/verify-pr-contract.mjs',
   'scripts/verify-pr-contract.test.mjs',
   'runtime/baseline.json',
+  'runtime/README.md',
+  'package.json',
+  'pnpm-lock.yaml',
+  'docs/acceptance/electron-lifecycle-slice.md',
   'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md',
   'docs/research/dsh-alpha2-upgrade.md',
   '.github/workflows/m0-runtime-upgrade.yml',
@@ -52,6 +56,8 @@ export const requiredFiles = [
 ]
 
 const linkedMarkdownFiles = [
+  'runtime/README.md',
+  'docs/acceptance/electron-lifecycle-slice.md',
   'README.md',
   'README.en.md',
   'AGENTS.md',
