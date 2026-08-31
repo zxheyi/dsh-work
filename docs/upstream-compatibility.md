@@ -13,19 +13,19 @@ DSH Work must not modify or copy upstream source to implement product behavior, 
 | Item | Value | Evidence |
 | --- | --- | --- |
 | Source repository | `https://github.com/deepseek-ai/deepseek-harness` | Project README |
-| Source revision | `b150a551b8d465e31e418e1b2eaf5e79bbb7d28e` (`dsh-v0.1.1-rc.2`) | [ADR 0002](decisions/0002-official-dsh-cli-runtime.md) |
-| Source integration method | Read-only provenance baseline; launch the official `dsh --profile` CLI as a child | [ADR 0002](decisions/0002-official-dsh-cli-runtime.md) |
-| Runtime package family | Official npm `@deepseek-ai/dsh@0.1.1-rc.2` | macOS and Windows development prototype evidence; packaged matrix pending |
-| Runtime integrity | `sha512-UP1UIh6q3Gme/yXRn/QL2P8IsVlv8Shpg22TRJIZPsCRWLm4CBiA1MUvXmJAfsOEETBMLAl+xWPtFw6ICsN3wg==` | npm registry and checked-in prototype lockfile |
-| Standalone Node baseline | Node.js `24.11.1` | macOS and Windows development smokes; platform artifact hashes pending |
+| Source revision | `0a53fb55bea101816fa226bb964ae2bed71c343b` (`dsh-v0.1.2-alpha.2`) | [ADR 0003](decisions/0003-dsh-alpha2-runtime-upgrade.md) |
+| Source integration method | Read-only provenance baseline; launch the official `dsh --profile` CLI as a child | [ADR 0003](decisions/0003-dsh-alpha2-runtime-upgrade.md) |
+| Runtime package family | Official npm `@deepseek-ai/dsh@0.1.2-alpha.2` | macOS and Windows native compatibility probes; product matrix pending |
+| Runtime integrity | `sha512-4TvTC5kRKlgtSU2UTBv+cID9a2Z+6+m6mpvjXWJfVzuTkflCff6s4MsQpFJTCmwFh/k7zNWe7qFXcLYMV/5VvA==` | npm registry, archive-byte checks, and research lockfile |
+| Standalone Node baseline | Node.js `24.11.1` | macOS arm64 and Windows x64 Node archives and executable bytes verified |
 | Package manager boundary | pnpm `10.34.4` only in controlled build/materialization; no package manager at ordinary launch | Development materialization passed; packaged proof pending |
-| Last compatibility verification | 2026-08-28, macOS arm64 CLI plus Electron/Tauri development smokes, and Windows Electron/Tauri native CI | [`research/m0-lifecycle-prototype.md`](research/m0-lifecycle-prototype.md) |
+| Last compatibility verification | 2026-08-31, macOS arm64 and Windows x64 official CLI/Profile lifecycle probes | [CI 33391284357](https://github.com/zxheyi/dsh-work/actions/runs/33391284357), tested `77a7aa3` |
 
-These values are the accepted M0 baseline, not an implementation-complete runtime manifest. Current source revision `cd5ef8148158c3a752a658978873241fdf8e2bbc` is newer than the published runtime and is research evidence only; its lifecycle APIs must not be attributed to `0.1.1-rc.2`.
+These values are the accepted M0 baseline, not an implementation-complete runtime manifest. [runtime/baseline.json](../runtime/baseline.json) is the machine-readable active selection. Historical rc.2/alpha.1 observations remain associated with their original revisions. Product implementation must use only the accepted alpha.2 public services; later HEAD behavior is not implicitly available.
 
 ## Required compatibility checks
 
-Upgrade candidate (2026-08-31): [ADR 0003](decisions/0003-dsh-alpha2-runtime-upgrade.md) and the [isolated alpha.2 probe](../prototypes/m0-runtime-upgrade/README.md) record a newer released pair. It is not yet the current selection. The candidate executable gate checks actual source/artifacts before and after execution; old contract-text checks and old Windows CI cannot substitute for its native evidence.
+The [isolated alpha.2 probe](../prototypes/m0-runtime-upgrade/README.md) supplied the native adoption evidence. Its original candidate manifests are frozen research inputs, not the active product selection. The executable gate checks actual source/artifacts before and after execution; document-text checks cannot replace product integration evidence.
 
 The repository gate must verify:
 

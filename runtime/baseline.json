@@ -1,0 +1,17 @@
+{
+  "status": "accepted",
+  "decision": "docs/decisions/0003-dsh-alpha2-runtime-upgrade.md",
+  "source": {
+    "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
+    "tag": "dsh-v0.1.2-alpha.2",
+    "commit": "0a53fb55bea101816fa226bb964ae2bed71c343b"
+  },
+  "runtime": {
+    "package": "@deepseek-ai/dsh",
+    "version": "0.1.2-alpha.2",
+    "integrity": "sha512-4TvTC5kRKlgtSU2UTBv+cID9a2Z+6+m6mpvjXWJfVzuTkflCff6s4MsQpFJTCmwFh/k7zNWe7qFXcLYMV/5VvA==",
+    "node": "24.11.1",
+    "pnpm": "10.34.4"
+  },
+  "electron": "44.0.0"
+}

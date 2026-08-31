@@ -76,10 +76,10 @@ test('changing an accepted architecture decision or runtime pin fails verificati
       .replace('Status: accepted', 'Status: proposed')
     fs.writeFileSync(hostDecisionPath, hostDecision)
 
-    const runtimeDecisionPath = path.join(root, 'docs/decisions/0002-official-dsh-cli-runtime.md')
+    const runtimeDecisionPath = path.join(root, 'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md')
     const runtimeDecision = fs
       .readFileSync(runtimeDecisionPath, 'utf8')
-      .replaceAll('`@deepseek-ai/dsh@0.1.1-rc.2`', '`@deepseek-ai/dsh@unlocked`')
+      .replaceAll('`@deepseek-ai/dsh@0.1.2-alpha.2`', '`@deepseek-ai/dsh@unlocked`')
     fs.writeFileSync(runtimeDecisionPath, runtimeDecision)
 
     const errors = verifyContract(root)
@@ -90,9 +90,35 @@ test('changing an accepted architecture decision or runtime pin fails verificati
     )
     assert.ok(
       errors.includes(
-        'docs/decisions/0002-official-dsh-cli-runtime.md: missing required contract text "`@deepseek-ai/dsh@0.1.1-rc.2`"',
+        'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md: missing required contract text "`@deepseek-ai/dsh@0.1.2-alpha.2`"',
       ),
     )
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('every active baseline field is locked to the accepted decision', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-baseline-'))
+  try {
+    for (const relativePath of requiredFiles) {
+      const target = path.join(root, relativePath)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.copyFileSync(path.join(repositoryRoot, relativePath), target)
+    }
+    const target = path.join(root, 'runtime/baseline.json')
+    const original = JSON.parse(fs.readFileSync(target, 'utf8'))
+    for (const keys of [
+      ['status'], ['decision'], ['electron'],
+      ...['repository', 'tag', 'commit'].map((key) => ['source', key]),
+      ...['package', 'version', 'integrity', 'node', 'pnpm'].map((key) => ['runtime', key]),
+    ]) {
+      const changed = structuredClone(original)
+      const parent = keys.length === 1 ? changed : changed[keys[0]]
+      parent[keys.at(-1)] = 'unlocked'
+      fs.writeFileSync(target, JSON.stringify(changed))
+      assert.ok(verifyContract(root).includes('runtime/baseline.json: active selection does not match accepted decisions'), keys.join('.'))
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true })
   }

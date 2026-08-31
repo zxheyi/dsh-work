@@ -29,6 +29,7 @@ export const requiredFiles = [
   '.github/branch-protection.json',
   'scripts/verify-pr-contract.mjs',
   'scripts/verify-pr-contract.test.mjs',
+  'runtime/baseline.json',
   'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md',
   'docs/research/dsh-alpha2-upgrade.md',
   '.github/workflows/m0-runtime-upgrade.yml',
@@ -165,17 +166,31 @@ export function verifyContract(root) {
     requireText(errors, hostDecision, token, 'docs/decisions/0001-electron-desktop-host.md')
   }
 
-  const runtimeDecision = read(root, 'docs/decisions/0002-official-dsh-cli-runtime.md')
+  requireText(errors, read(root, 'docs/decisions/0002-official-dsh-cli-runtime.md'),
+    'Status: superseded by ADR 0003', 'docs/decisions/0002-official-dsh-cli-runtime.md')
+  const runtimeDecision = read(root, 'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md')
   for (const token of [
     'Status: accepted',
-    '`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`',
-    '`@deepseek-ai/dsh@0.1.1-rc.2`',
-    '`sha512-UP1UIh6q3Gme/yXRn/QL2P8IsVlv8Shpg22TRJIZPsCRWLm4CBiA1MUvXmJAfsOEETBMLAl+xWPtFw6ICsN3wg==`',
+    '`0a53fb55bea101816fa226bb964ae2bed71c343b`',
+    '`@deepseek-ai/dsh@0.1.2-alpha.2`',
+    '`sha512-4TvTC5kRKlgtSU2UTBv+cID9a2Z+6+m6mpvjXWJfVzuTkflCff6s4MsQpFJTCmwFh/k7zNWe7qFXcLYMV/5VvA==`',
     'Node.js `24.11.1`',
     'pnpm `10.34.4`',
   ]) {
-    requireText(errors, runtimeDecision, token, 'docs/decisions/0002-official-dsh-cli-runtime.md')
+    requireText(errors, runtimeDecision, token, 'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md')
   }
+  try {
+    const baseline = JSON.parse(read(root, 'runtime/baseline.json'))
+    if (baseline.status !== 'accepted' || baseline.decision !== 'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md' ||
+        baseline.source?.repository !== 'https://github.com/deepseek-ai/deepseek-harness.git' ||
+        baseline.source?.tag !== 'dsh-v0.1.2-alpha.2' || baseline.source?.commit !== '0a53fb55bea101816fa226bb964ae2bed71c343b' ||
+        baseline.runtime?.package !== '@deepseek-ai/dsh' ||
+        baseline.runtime?.integrity !== 'sha512-4TvTC5kRKlgtSU2UTBv+cID9a2Z+6+m6mpvjXWJfVzuTkflCff6s4MsQpFJTCmwFh/k7zNWe7qFXcLYMV/5VvA==' ||
+        baseline.runtime?.version !== '0.1.2-alpha.2' || baseline.runtime?.node !== '24.11.1' ||
+        baseline.runtime?.pnpm !== '10.34.4' || baseline.electron !== '44.0.0') {
+      errors.push('runtime/baseline.json: active selection does not match accepted decisions')
+    }
+  } catch { errors.push('runtime/baseline.json: invalid active baseline') }
 
   const workflow = read(root, 'docs/workflow.md')
   for (const heading of ['## Upstream-first architecture', '## State machine', '## Stage contracts', '## Verification ladder', '## Definition of Done']) {

@@ -16,9 +16,7 @@ Use a decision record when a change affects the desktop stack, upstream integrat
 | Decision | Status | Summary |
 | --- | --- | --- |
 | [0001: Electron child-process desktop host](0001-electron-desktop-host.md) | accepted | Selects Electron for M0 and pauses Tauri product work; graceful Windows stop, packaging, security, and lifecycle gates remain open. |
-| [0002: Official `dsh` CLI and matched runtime pair](0002-official-dsh-cli-runtime.md) | accepted | Locks the official npm/source pair and build-only materialization boundary; native lifecycle and packaging gates remain open. |
-| [0003: Candidate upgrade to the official dsh alpha.2 pair](0003-dsh-alpha2-runtime-upgrade.md) | proposed | Separately verifies alpha.2; native Windows evidence is required before replacing ADR 0002. |
+| [0002: Official `dsh` CLI and matched runtime pair](0002-official-dsh-cli-runtime.md) | superseded | Historical rc.2 selection; replaced by ADR 0003 without rewriting its evidence. |
+| [0003: Official dsh alpha.2 runtime pair](0003-dsh-alpha2-runtime-upgrade.md) | accepted | Selects the matched alpha.2 pair after macOS/Windows native verification; product lifecycle and packaging remain open. |
 
-ADR 0001 and ADR 0002 are accepted, so Electron lifecycle implementation may begin against the locked official runtime pair. Every unchecked M0 criterion remains a delivery gate rather than an implemented claim.
-
-The alpha.2 candidate has not replaced that baseline. Do not use its newer-only APIs in product implementation until ADR 0003 is accepted; the isolated research probe is compatibility evidence only.
+ADR 0001 and ADR 0003 are accepted, so Electron lifecycle implementation may begin against the locked alpha.2 pair. Every unchecked M0 criterion remains a delivery gate rather than an implemented claim. The isolated research probe is compatibility evidence, not the product controller.

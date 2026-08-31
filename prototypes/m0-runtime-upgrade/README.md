@@ -2,6 +2,8 @@
 
 Status: candidate research evidence — not the DSH Work product implementation.
 
+Adoption update (2026-08-31): [ADR 0003](../../docs/decisions/0003-dsh-alpha2-runtime-upgrade.md) is now accepted using [native CI 33391284357](https://github.com/zxheyi/dsh-work/actions/runs/33391284357) at `77a7aa3` (macOS arm64 and Windows x64, each 6/6). Candidate labels and original input files below are preserved to reproduce that evidence; they do not override the active product baseline. The original local-only status below is historical.
+
 This probe tests `@deepseek-ai/dsh@0.1.2-alpha.2` through the official CLI, using an external Bundle and isolated Harness homes. The old desktop-host prototypes and accepted rc.2 baseline remain untouched. [ADR 0003](../../docs/decisions/0003-dsh-alpha2-runtime-upgrade.md) must be accepted before this candidate becomes the product baseline. Keep this research fixture on the research branch; it is not a product plugin to copy unreviewed into main.
 
 ## Run from the repository root

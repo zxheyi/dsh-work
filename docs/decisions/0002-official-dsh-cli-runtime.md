@@ -1,6 +1,8 @@
 # 0002: Official `dsh` CLI and matched runtime pair
 
-Status: accepted
+Status: superseded by ADR 0003
+
+Superseded on 2026-08-31 by [ADR 0003](0003-dsh-alpha2-runtime-upgrade.md). The decision and evidence below describe the historical rc.2 baseline, not the current runtime selection.
 
 Date: 2026-08-28
 
