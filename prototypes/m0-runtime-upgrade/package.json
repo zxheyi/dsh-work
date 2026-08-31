@@ -1,0 +1,15 @@
+{
+  "name": "dsh-work-runtime-upgrade-probe",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Research-only compatibility checks; not the accepted product runtime",
+  "packageManager": "pnpm@10.34.4",
+  "scripts": {
+    "test": "node --test lifecycle.test.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-cmdline": "0.1.2-alpha.2"
+  }
+}
