@@ -48,7 +48,7 @@ try {
   run('runtime', ['--test', '--test-reporter=tap', 'tests/runtime-integration.test.mjs'])
   if (process.argv.includes('--desktop')) {
     run('desktop', ['scripts/run-desktop-test.mjs'])
-    report.desktop = ['normal', 'missing'].map(mode => JSON.parse(fs.readFileSync(path.join(root, 'artifacts/desktop', mode, 'result.json'))))
+    report.desktop = ['normal', 'missing', 'renderer-crash', 'runtime-recovery'].map(mode => JSON.parse(fs.readFileSync(path.join(root, 'artifacts/desktop', mode, 'result.json'))))
   } else report.desktop = 'not-run: explicit --desktop required'
   report.phase = 'after-provenance'; write()
   report.after = verifyProductRuntime(context)

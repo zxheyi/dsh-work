@@ -7,7 +7,8 @@ import path from 'node:path'
 import { desktop } from '../apps/desktop/main.mjs'
 
 const missing = process.argv.includes('--missing-runtime')
-const name = missing ? 'missing' : 'normal'
+const rendererCrash = process.argv.includes('--renderer-crash')
+const name = missing ? 'missing' : rendererCrash ? 'renderer-crash' : 'normal'
 const output = path.resolve('artifacts/desktop', name)
 fs.mkdirSync(output, { recursive: true })
 const reportPath = path.join(output, 'result.json')
@@ -89,16 +90,19 @@ try {
   await new Promise(resolve => setTimeout(resolve, 100))
   assert.equal(BrowserWindow.getAllWindows().length, 1)
   assert.equal(window.webContents.getURL(), 'dsh-work://status/index.html')
-  phase = 'window-close-stops-runtime'
-  // This exercises the real main.mjs close/before-quit path while Harness is ready.
+  phase = rendererCrash ? 'renderer-crash-stops-runtime' : 'window-close-stops-runtime'
+  let crashObserved = false
+  if (rendererCrash) window.webContents.once('render-process-gone', () => { crashObserved = true })
+  // Exercise the real main.mjs window-close or renderer-gone shutdown entry.
   app.once('will-quit', () => {
     clearInterval(progress)
     const status = host.snapshot()
-    const passed = status.canStart && (missing ? status.code === 'runtime-unavailable' : status.state === 'stopped')
-    write(passed ? 'pass' : 'fail', { terminal: status, screenshots: missing ? ['stopped.png', 'failed.png'] : ['stopped.png', 'ready.png'] })
+    const passed = status.canStart && (missing ? status.code === 'runtime-unavailable' : status.state === 'stopped') && (!rendererCrash || crashObserved)
+    write(passed ? 'pass' : 'fail', { terminal: status, crashObserved, screenshots: missing ? ['stopped.png', 'failed.png'] : ['stopped.png', 'ready.png'] })
     if (!passed) process.exitCode = 1
   })
-  window.close()
+  if (rendererCrash) window.webContents.forcefullyCrashRenderer()
+  else window.close()
 } catch {
   clearInterval(progress)
   write('fail')

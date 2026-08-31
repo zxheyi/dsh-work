@@ -35,22 +35,26 @@ export function createRuntimeHost({ launch, startupMs = 30_000, stopMs = 8_000, 
     owner.started.resolve(value)
     owner.stopped.resolve(value)
   }
+  const armReapDeadline = owner => {
+    if (owner.reapTimer !== undefined) return
+    owner.reapTimer = setTimeout(() => {
+      if (current !== owner) return
+      // Keep ownership until close, even when process exit is already known.
+      publish('failed', 'cleanup-unconfirmed', value => settle(owner, value))
+    }, reapMs)
+  }
   const armStopDeadline = owner => {
-    if (owner.stopTimer !== undefined) return
+    if (owner.exited || owner.stopTimer !== undefined) return
     clearTimeout(owner.startTimer)
     owner.stopTimer = setTimeout(() => {
-      if (current !== owner) return
+      if (current !== owner || owner.exited) return
       owner.failure = 'forced-stop'
       try { owner.child.kill('SIGKILL') } catch {}
-      owner.reapTimer = setTimeout(() => {
-        if (current !== owner) return
-        // Keep ownership until close. Never start a replacement over a live child.
-        publish('failed', 'cleanup-unconfirmed', value => settle(owner, value))
-      }, reapMs)
+      armReapDeadline(owner)
     }, stopMs)
   }
   const stopOwned = (owner, failure) => {
-    if (current !== owner) return
+    if (current !== owner || owner.exited) return
     owner.failure ||= failure
     // Native EOF waits for Ready. An early user stop must retain the original
     // startup deadline; an explicit fault must still enter bounded cleanup.
@@ -85,6 +89,7 @@ export function createRuntimeHost({ launch, startupMs = 30_000, stopMs = 8_000, 
         ['ready', 'disposed'].includes(message.event)
       if (!valid || ++owner.messages > 2) { stopOwned(owner, 'invalid-lifecycle-message'); return }
       if (message.event === 'disposed') { owner.disposed = true; return }
+      if (owner.exited) return
       if (owner.ready || owner.disposed) { stopOwned(owner, 'invalid-lifecycle-message'); return }
       owner.ready = true
       clearTimeout(owner.startTimer)
@@ -111,6 +116,16 @@ export function createRuntimeHost({ launch, startupMs = 30_000, stopMs = 8_000, 
       // Native rejection may disconnect before close. Bound cleanup without
       // replacing its exit classification or resetting an existing deadline.
       else armStopDeadline(owner)
+    })
+    child.once('exit', (exitCode, signal) => {
+      if (current !== owner) return
+      owner.exited = true
+      clearTimeout(owner.startTimer); clearTimeout(owner.stopTimer)
+      owner.failure ||= !owner.stopping ? 'unexpected-exit' :
+        exitCode !== 0 || signal ? 'runtime-exit-failed' : null
+      armReapDeadline(owner)
+      // Report the failure now, but never release ownership before stdio closes.
+      if (owner.failure) publish('failed', owner.failure)
     })
     child.once('close', (exitCode, signal) => {
       if (current !== owner) return

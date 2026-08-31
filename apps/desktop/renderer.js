@@ -10,6 +10,9 @@ const recovery = {
   'cleanup-unconfirmed': '无法确认子进程已回收，暂时禁止重启。请检查宿主进程状态。',
   'forced-stop': '停止超时，已强制结束直接子进程；这不代表完整进程树已回收。',
   'startup-timeout': '启动超时。请检查隔离 Profile 与已锁定运行时后重试。',
+  'unexpected-exit': 'Harness 意外退出。待直接子进程及管道关闭后可重试；完整进程树清理尚未验证。',
+  'lifecycle-disconnected': '与 Harness 的生命周期通道断开。待直接子进程关闭后可重试；完整进程树清理尚未验证。',
+  'runtime-exit-failed': 'Harness 启动或退出失败。请检查隔离 Profile，待直接子进程关闭后重试。',
 }
 const start = document.getElementById('start'), stop = document.getElementById('stop')
 const render = value => {

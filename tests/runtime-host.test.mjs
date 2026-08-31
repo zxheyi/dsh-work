@@ -210,6 +210,61 @@ test('unexpected exit zero is failure; missing disposal is not successful stop',
   assert.equal(host.snapshot().code, 'disposal-unconfirmed')
 })
 
+test('observed exit forbids later signals and retains ownership until stdio closes', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { host, children, message } = fixture({ startupMs: 100, stopMs: 30, reapMs: 20 })
+  const started = host.start(); message('ready'); await started
+  const child = children[0]
+  child.emit('exit', 1, null)
+  const stopped = host.stop()
+  t.mock.timers.tick(30)
+  assert.equal(child.killed, undefined)
+  assert.equal((await stopped).code, 'cleanup-unconfirmed')
+  assert.equal(host.snapshot().canStart, false)
+  await host.start()
+  assert.equal(children.length, 1)
+  child.emit('close', 1, null)
+  assert.equal(host.snapshot().code, 'unexpected-exit')
+  assert.equal(host.snapshot().canStart, true)
+})
+
+test('exit during startup rejects late Ready and cannot be revived by stale events', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { host, children, message } = fixture()
+  const states = []
+  host.subscribe(value => states.push(value.state))
+  const started = host.start()
+  children[0].emit('exit', 1, null)
+  message('ready')
+  children[0].emit('disconnect')
+  children[0].stdin.emit('error', Error('private'))
+  t.mock.timers.tick(50)
+  assert.equal(states.includes('ready'), false)
+  assert.equal((await started).code, 'cleanup-unconfirmed')
+  assert.equal(children[0].killed, undefined)
+  children[0].emit('close', 1, null)
+  const retry = host.start()
+  children[0].emit('disconnect')
+  children[0].emit('exit', 1, null)
+  assert.equal(host.snapshot().state, 'starting')
+  message('ready'); await retry
+  const stop = host.stop(); message('disposed'); children[1].emit('close', 0, null)
+  assert.equal((await stop).state, 'stopped')
+})
+
+test('a queued disposal fact after exit still permits a confirmed normal stop', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { host, children, message } = fixture()
+  const started = host.start(); message('ready'); await started
+  const stopped = host.stop()
+  children[0].emit('exit', 0, null)
+  t.mock.timers.tick(19)
+  message('disposed')
+  children[0].emit('close', 0, null)
+  assert.equal((await stopped).state, 'stopped')
+  assert.equal(children[0].killed, undefined)
+})
+
 test('forced stop remains failed and unreaped ownership blocks restart until close', async () => {
   const { host, children, message } = fixture()
   const first = host.start(); message('ready'); await first

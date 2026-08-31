@@ -3,6 +3,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
 import { createRuntimeHost } from '../packages/runtime-host/index.mjs'
 import { prepareDevelopmentProfile, createOfficialLauncher } from '../packages/runtime-host/official-launcher.mjs'
 import { createOutputGuard } from '../prototypes/m0-runtime-upgrade/output-guard.mjs'
@@ -73,6 +75,67 @@ test('product successful startup tolerates EOF before Ready', { timeout: 45_000 
     assert.equal((await host.stop()).state, 'stopped')
     assert.equal((await pending).state, 'stopped')
   } finally {
+    await host?.stop()
+    if (!host || host.snapshot().canStart) fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('an abruptly terminated owned CLI reports failure and can explicitly retry without touching another process', { timeout: 60_000 }, async () => {
+  assert.ok(process.env.DSH_WORK_NODE)
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-crash-retry-'))
+  const guard = createOutputGuard(1024 * 1024)
+  // The unrelated sentinel is also test-owned and self-expires if this test dies.
+  const sentinel = spawn(process.env.DSH_WORK_NODE, ['-e',
+    'process.stdin.resume(); process.stdin.on("end", () => process.exit(0)); setTimeout(() => process.exit(0), 60000)'],
+  { shell: false, windowsHide: true, stdio: ['pipe', 'ignore', 'ignore'] })
+  sentinel.stdin.on('error', () => {})
+  const sentinelClosed = once(sentinel, 'close')
+  const events = []
+  let host, child, launches = 0, unsubscribe, timer
+  try {
+    await once(sentinel, 'spawn')
+    prepareDevelopmentProfile(home)
+    const originalPatch = fs.readFileSync(path.join(home, 'profiles/dsh-work/cordis.patch.yml'))
+    const launch = createOfficialLauncher({ node: process.env.DSH_WORK_NODE, home })
+    host = createRuntimeHost({ launch: () => {
+      launches++
+      if (launches > 1) assert.ok(events.includes('close:1'), 'replacement requires independently observed close')
+      child = launch()
+      const generation = launches
+      child.once('exit', () => events.push(`exit:${generation}`))
+      child.once('close', () => events.push(`close:${generation}`))
+      child.stdout.on('data', bytes => guard.observe(bytes, 'stdout'))
+      child.stderr.on('data', bytes => guard.observe(bytes, 'stderr'))
+      return child
+    } })
+    assert.equal((await host.start()).state, 'ready')
+    const failed = new Promise((resolve, reject) => {
+      timer = setTimeout(() => reject(Error('owned CLI did not reach a retryable failure')), 15_000)
+      unsubscribe = host.subscribe(value => {
+        if (value.state === 'failed' && value.canStart) { clearTimeout(timer); resolve(value) }
+      })
+    })
+    // Fault injection uses the exact retained ChildProcess, never a name or PID scan.
+    assert.equal(child.kill('SIGKILL'), true)
+    const result = await failed
+    assert.ok(['unexpected-exit', 'lifecycle-disconnected'].includes(result.code))
+    assert.equal(launches, 1, 'a failure never automatically restarts Harness')
+    assert.deepEqual(events, ['exit:1', 'close:1'])
+    assert.equal(sentinel.exitCode, null)
+    assert.equal(sentinel.signalCode, null)
+    assert.deepEqual(fs.readFileSync(path.join(home, 'profiles/dsh-work/cordis.patch.yml')), originalPatch)
+    unsubscribe()
+    assert.equal((await host.start()).state, 'ready')
+    assert.equal(launches, 2)
+    assert.equal((await host.stop()).state, 'stopped')
+    assert.equal(sentinel.exitCode, null)
+    assert.equal(sentinel.signalCode, null)
+    assert.equal(guard.status().sensitive, false)
+    assert.equal(guard.status().overflow, false)
+  } finally {
+    clearTimeout(timer); unsubscribe?.()
+    sentinel.stdin.end()
+    await sentinelClosed
     await host?.stop()
     if (!host || host.snapshot().canStart) fs.rmSync(home, { recursive: true, force: true })
   }

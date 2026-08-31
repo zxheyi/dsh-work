@@ -6,12 +6,13 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const electron = require('electron')
 if (!process.env.DSH_WORK_NODE) throw new Error('Set DSH_WORK_NODE to a verified standalone Node')
-for (const mode of ['normal', 'missing']) {
+for (const mode of ['normal', 'missing', 'renderer-crash', 'runtime-recovery']) {
   const runId = randomUUID()
   const reportPath = `artifacts/desktop/${mode}/result.json`
   fs.mkdirSync(path.dirname(reportPath), { recursive: true })
   fs.writeFileSync(reportPath, JSON.stringify({ status: 'fail', phase: 'launch', runId }))
-  const child = spawn(electron, ['tests/desktop-e2e.mjs', ...(mode === 'missing' ? ['--missing-runtime'] : [])], {
+  const entry = mode === 'runtime-recovery' ? 'tests/desktop-recovery-e2e.mjs' : 'tests/desktop-e2e.mjs'
+  const child = spawn(electron, [entry, ...(mode === 'missing' ? ['--missing-runtime'] : mode === 'renderer-crash' ? ['--renderer-crash'] : [])], {
     shell: false, env: { ...process.env, DSH_WORK_E2E_RUN_ID: runId, ELECTRON_ENABLE_SECURITY_WARNINGS: '1' }, stdio: 'ignore',
   })
   const exit = await new Promise(resolve => {
@@ -30,5 +31,5 @@ for (const mode of ['normal', 'missing']) {
   report.screenshotsSHA256 = Object.fromEntries(report.screenshots.map(file => [file,
     createHash('sha256').update(fs.readFileSync(path.join(path.dirname(reportPath), file))).digest('hex')]))
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2))
-  console.log(`Electron ${mode} E2E passed: sandbox, controls, navigation denial, window-close lifecycle`)
+  console.log(`Electron ${mode} E2E passed: ${report.phase}`)
 }

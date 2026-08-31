@@ -74,3 +74,34 @@ Windows invalid Profile plus early EOF and same-home retry passed in 11.69 secon
 This closes the reported early-stop regression for the tested inputs and revision, not every possible Windows failure. Future lifecycle changes must run fresh native gates. Do not weaken the `runtime-exit-failed` assertion, turn force into success, or patch Harness.
 
 Rollback: revert the behavior slice(s), keeping historical probes and accepted baseline reviewable. No user Harness home is migrated or removed. Temporary homes created by tests are test-owned; development homes are isolated and not automatically recursively deleted by the app.
+
+## Surviving-host abnormal-exit recovery
+
+Status: `local-development-pass` on macOS arm64; fresh Windows verification for this slice is `NOT_RUN`. The broader M0 remains `PARTIAL`. The [ownership research](../research/desktop-crash-recovery.md) separates this slice from host-death and complete process-tree recovery. Tests use the existing supervisor interface, real official CLI/Profile and Electron renderer seam. No new production interface, native dependency, persistent lease or automatic recovery is introduced.
+
+The baseline controller observed only `close`. Node emits `exit` when the process ends, but `close` can wait for shared stdio. Treating that wait as a still-running process could trigger an unnecessary force attempt or display stale Ready. The controller now latches observed exit, cancels termination deadlines, waits at most the existing reap allowance for `close`, and keeps ownership if closure remains unconfirmed. An exit is not permission to kill a PID, release the owner, reuse a workspace, or declare an entire tree recovered. [Node 24.11.1 event contract](https://nodejs.org/download/release/v24.11.1/docs/api/child_process.html#event-close).
+
+| Scenario | Baseline | Required result | Change | Caller/check |
+| --- | --- | --- | --- | --- |
+| Process exits before delayed stdio close | Startup/stop deadline may still attempt force; Ready may remain displayed | Latch exit; no later signals or Ready; bounded wait for close | Change | All supervisor callers; virtual-time regression |
+| Exit observed but close never confirmed | Force/reap path conflates process life and pipe ownership | Fixed `cleanup-unconfirmed`; retain ownership and refuse retry until close | Change | Renderer start/stop; window close/before-quit/renderer-gone shared controller |
+| Unexpected direct-child death with surviving host | Fixed failure, depending on disconnect/close order | Preserve failure; no automatic restart; explicit retry only after close | Preserve | Actual owned CLI kill and user-visible retry |
+| Ordinary stop, early stop, startup timeout and live-child fault | Phase-aware deadlines and failed forced cleanup | Preserve native Ready/EOF and prior error precedence | Preserve | Existing unit, CLI and desktop gates |
+| Late Ready/disposal/channel events after exit | Can change live state until close | Never reannounce Ready or send a signal; allow a queued disposal fact before close | Change | Event-order unit matrix |
+| User directories, unrelated processes, stale generations | No user-home mutation or process-name/PID recovery | Preserve; only test-created processes may receive injected faults | Preserve | Isolated Profile/unrelated sentinel; generation and launcher tests |
+
+### Verification and remaining gates
+
+The behavior ledger above was established before implementation. The delayed-close regression first failed because the old controller attempted to kill the already-exited fixture after its stop deadline. The renderer regression first failed because the fixed recovery explanation was absent. Both passed after their respective minimal changes.
+
+On 2026-08-31, `node scripts/verify-local.mjs <verified-context.json> --desktop` passed on macOS arm64 with Node 24.11.1 and Electron 44.0.0:
+
+- 45 unit/contract tests and the repository contract gate passed. The new event-order cases cover no signal after exit, retained ownership without close, no late Ready, queued disposal, and stale-generation isolation; previous deadline, reentrancy and security coverage remains in place.
+- Six real official CLI cases passed, including abrupt termination of the exact test-owned child, independently observed exit/close before replacement, structured failure, no automatic restart, unchanged Profile patch, an unrelated test-owned sentinel still alive after recovery, and successful explicit retry. This fixture does not create arbitrary descendants or prove old-workspace integrity.
+- Four actual Electron modes passed: normal operation/window close, missing runtime, intentionally crashed renderer, and runtime failure through the real status window/bridge followed by clicking retry. The [recovery driver](../../tests/desktop-recovery-e2e.mjs) records the renderer's failure/button states, independently observes child exit/close before replacement, captures failed/recovered screenshots, then stops the replacement. It composes existing production interfaces with a test-owned launcher; the other modes separately exercise actual `main.mjs` shutdown wiring.
+- Renderer crash was observed and the surviving main process reached confirmed direct-child stop before quitting. Neither renderer crash nor the recovery driver is an Electron main-process death test. Independent review prompted the additional combined UI/CLI check and independent close observation; passing separate unit tests alone was not treated as equivalent evidence.
+- Before/after upstream and runtime provenance matched. Harness source, the native Bundle, public interfaces and dependency pins were unchanged. The initial aggregate report binds base `4ad0c66` plus dirty-worktree input hashes; a clean-commit rerun must identify its own revision in `artifacts/verification/result.json`.
+
+The existing native workflow invokes this same runner and will include the new CLI case and both new Electron modes on the next authorized push. The earlier Windows receipt at `96f7ff9` does not validate this new slice; it remains historical evidence only.
+
+The stronger host-death/descendant cases remain open until an ownership ADR is accepted and independently verified on both native platforms. The pending decision must define containment scope, identity-preserving cleanup, old-home reuse rules, macOS/Windows mechanisms, and any new helper's provenance/security/packaging. No production native mechanism is selected or introduced here. Do not mark these cases complete using this surviving-host slice.
