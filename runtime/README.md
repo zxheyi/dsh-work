@@ -36,3 +36,13 @@ These POSIX shell examples require the verified standalone Node path; on PowerSh
 `test:desktop` explicitly opens real Electron windows and records normal and missing-runtime scenarios plus screenshots under ignored `artifacts/desktop/`. Ordinary `pnpm test` remains headless. The Electron UI uses a private custom protocol and no remote scripts, fonts or content. Sender checks and sandboxed preload follow the [Electron security guidance](https://www.electronjs.org/docs/latest/tutorial/security); startup scheduling observes the [ESM ready-event caveat](https://www.electronjs.org/docs/latest/tutorial/esm).
 
 The local status page is not the Harness browser UI. Its readiness evidence comes from public `appReady`; these desktop screenshots do not verify the upstream React UI or its peer-dependency mismatch. Visual review is a candidate until compared with a product-approved baseline; screenshots alone do not imply visual acceptance.
+
+## Reproducible native verification
+
+```sh
+node scripts/verify-local.mjs /absolute/path/to/context.json --desktop
+```
+
+Without `--desktop`, the same command runs only headless checks. The runner invalidates stale success first, verifies product provenance before/after, runs unit/contract/real Profile checks and optional Electron E2E, then compares the Git revision and SHA-256 of every repository input. A dirty-tree run is labelled; only a clean revision-bound run is a candidate for CI handoff. Reports and sanitized test logs live under ignored `artifacts/verification/`; desktop reports bind per-run IDs and screenshot hashes.
+
+[Desktop lifecycle CI](../.github/workflows/desktop-lifecycle.yml) runs the same command on native macOS arm64 and Windows x64 after push/PR. It is development verification, not an installer or M0 release gate replacement. Configuration in Git is not evidence that a remote run happened or passed.

@@ -34,6 +34,7 @@ export const requiredFiles = [
   'package.json',
   'pnpm-lock.yaml',
   'docs/acceptance/electron-lifecycle-slice.md',
+  '.github/workflows/desktop-lifecycle.yml',
   'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md',
   'docs/research/dsh-alpha2-upgrade.md',
   '.github/workflows/m0-runtime-upgrade.yml',
