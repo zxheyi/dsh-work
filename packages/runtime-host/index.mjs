@@ -35,13 +35,9 @@ export function createRuntimeHost({ launch, startupMs = 30_000, stopMs = 8_000, 
     owner.started.resolve(value)
     owner.stopped.resolve(value)
   }
-  const stopOwned = (owner, failure) => {
-    if (current !== owner) return
-    owner.failure ||= failure
-    if (owner.stopping) return
-    owner.stopping = true
+  const armStopDeadline = owner => {
+    if (owner.stopTimer !== undefined) return
     clearTimeout(owner.startTimer)
-    publish('stopping', owner.failure)
     owner.stopTimer = setTimeout(() => {
       if (current !== owner) return
       owner.failure = 'forced-stop'
@@ -52,7 +48,20 @@ export function createRuntimeHost({ launch, startupMs = 30_000, stopMs = 8_000, 
         publish('failed', 'cleanup-unconfirmed', value => settle(owner, value))
       }, reapMs)
     }, stopMs)
-    try { owner.child.stdin.end() } catch { owner.failure ||= 'control-pipe-error' }
+  }
+  const stopOwned = (owner, failure) => {
+    if (current !== owner) return
+    owner.failure ||= failure
+    // Native EOF waits for Ready. An early user stop must retain the original
+    // startup deadline; an explicit fault must still enter bounded cleanup.
+    if (owner.ready || owner.failure) armStopDeadline(owner)
+    if (owner.stopping) return
+    owner.stopping = true
+    publish('stopping', owner.failure)
+    try { owner.child.stdin.end() } catch {
+      owner.failure ||= 'control-pipe-error'
+      armStopDeadline(owner)
+    }
   }
   const start = () => {
     if (current) return state === 'starting' ? current.started.promise : Promise.resolve(snapshot())
@@ -78,8 +87,8 @@ export function createRuntimeHost({ launch, startupMs = 30_000, stopMs = 8_000, 
       if (message.event === 'disposed') { owner.disposed = true; return }
       if (owner.ready || owner.disposed) { stopOwned(owner, 'invalid-lifecycle-message'); return }
       owner.ready = true
-      if (owner.stopping) return
       clearTimeout(owner.startTimer)
+      if (owner.stopping) { armStopDeadline(owner); return }
       publish('ready', null, value => owner.started.resolve(value))
     })
     const consume = chunk => {
@@ -91,11 +100,17 @@ export function createRuntimeHost({ launch, startupMs = 30_000, stopMs = 8_000, 
     child.stdout.on('data', consume)
     child.stderr.on('data', consume)
     child.stdin.on('error', () => {
+      if (current !== owner) return
       if (!owner.stopping) stopOwned(owner, 'control-pipe-error')
+      else armStopDeadline(owner)
     })
     child.on('error', () => stopOwned(owner, 'process-error'))
     child.on('disconnect', () => {
+      if (current !== owner) return
       if (!owner.stopping) stopOwned(owner, 'lifecycle-disconnected')
+      // Native rejection may disconnect before close. Bound cleanup without
+      // replacing its exit classification or resetting an existing deadline.
+      else armStopDeadline(owner)
     })
     child.once('close', (exitCode, signal) => {
       if (current !== owner) return

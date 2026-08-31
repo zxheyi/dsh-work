@@ -61,6 +61,145 @@ test('early stop ignores late Ready but cannot hide startup rejection', async ()
   assert.equal((await starting).canStart, true)
 })
 
+test('early EOF preserves startup allowance for a later native rejection', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { host, children } = fixture({ startupMs: 300, stopMs: 80 })
+  const starting = host.start()
+  const stopping = host.stop()
+  t.mock.timers.tick(81)
+  assert.equal(children[0].killed, undefined)
+  children[0].emit('close', 1, null)
+  assert.equal((await stopping).code, 'runtime-exit-failed')
+  assert.equal((await starting).code, 'runtime-exit-failed')
+})
+
+test('late Ready starts one stop budget without publishing ready or extending it', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { host, children, message } = fixture({ startupMs: 300, stopMs: 80 })
+  const states = []
+  host.subscribe(value => states.push(value.state))
+  const starting = host.start()
+  const stopping = host.stop()
+  t.mock.timers.tick(81)
+  assert.equal(children[0].killed, undefined)
+  message('ready')
+  t.mock.timers.tick(79)
+  assert.equal(children[0].killed, undefined)
+  const duplicate = host.stop()
+  t.mock.timers.tick(1)
+  assert.equal(children[0].killed, true)
+  children[0].emit('close', null, 'SIGKILL')
+  assert.equal((await stopping).code, 'forced-stop')
+  assert.deepEqual(await duplicate, await starting)
+  assert.deepEqual(states, ['starting', 'stopping', 'failed'])
+})
+
+test('early stop near the original startup deadline cannot reset or discard it', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { host, children } = fixture({ startupMs: 100, stopMs: 30 })
+  const starting = host.start()
+  t.mock.timers.tick(90)
+  const stopping = host.stop()
+  t.mock.timers.tick(10) // Original startup deadline; now bounded failure cleanup.
+  t.mock.timers.tick(29)
+  const duplicate = host.stop()
+  assert.equal(children[0].killed, undefined)
+  t.mock.timers.tick(1)
+  assert.equal(children[0].killed, true)
+  t.mock.timers.tick(20)
+  assert.equal((await stopping).code, 'cleanup-unconfirmed')
+  assert.equal((await starting).canStart, false)
+  assert.equal((await duplicate).canStart, false)
+  await host.start()
+  assert.equal(children.length, 1)
+  children[0].emit('close', null, 'SIGKILL')
+  assert.equal(host.snapshot().code, 'forced-stop')
+  assert.equal(host.snapshot().canStart, true)
+})
+
+test('startup timeout wins before a later Ready even when already stopping', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { host, children, message } = fixture({ startupMs: 100, stopMs: 30 })
+  const starting = host.start()
+  const stopping = host.stop()
+  t.mock.timers.tick(100)
+  message('ready')
+  message('disposed')
+  children[0].emit('close', 0, null)
+  assert.equal((await stopping).code, 'startup-timeout')
+  assert.equal((await starting).code, 'startup-timeout')
+})
+
+test('explicit startup faults keep bounded cleanup before and after an early stop', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  for (const earlyStop of [false, true]) {
+    for (const fault of ['error', 'message', 'output', 'pipe', 'disconnect']) {
+      const { host, children } = fixture({ startupMs: 300, stopMs: 30, outputLimit: 4 })
+      const starting = host.start()
+      if (earlyStop) void host.stop()
+      const child = children[0]
+      if (fault === 'output') child.stderr.write('private')
+      else if (fault === 'message') child.emit('message', { secret: 'private' })
+      else if (fault === 'pipe') child.stdin.emit('error', Error('private'))
+      else if (fault === 'disconnect') child.emit('disconnect')
+      else child.emit('error', Error('private'))
+      t.mock.timers.tick(30)
+      assert.equal(child.killed, true, `${earlyStop}/${fault}`)
+      child.emit('close', null, 'SIGKILL')
+      assert.equal((await starting).code, 'forced-stop')
+    }
+  }
+})
+
+test('control-channel closure during early stop preserves the native exit classification', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  for (const fault of ['pipe', 'disconnect']) {
+    const { host, children, message } = fixture({ startupMs: 300, stopMs: 30 })
+    const starting = host.start()
+    const stopping = host.stop()
+    if (fault === 'pipe') children[0].stdin.emit('error', Error('private'))
+    else children[0].emit('disconnect')
+    t.mock.timers.tick(20)
+    if (fault === 'pipe') children[0].stdin.emit('error', Error('private'))
+    else children[0].emit('disconnect')
+    message('disposed')
+    children[0].emit('close', 1, null)
+    assert.equal((await starting).code, 'runtime-exit-failed')
+    assert.equal((await stopping).code, 'runtime-exit-failed')
+  }
+})
+
+test('repeated channel closure and late Ready cannot extend failure cleanup', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { host, children, message } = fixture({ startupMs: 300, stopMs: 30 })
+  const starting = host.start()
+  const stopping = host.stop()
+  children[0].emit('disconnect')
+  t.mock.timers.tick(20)
+  children[0].stdin.emit('error', Error('private'))
+  message('ready')
+  t.mock.timers.tick(9)
+  assert.equal(children[0].killed, undefined)
+  t.mock.timers.tick(1)
+  assert.equal(children[0].killed, true)
+  children[0].emit('close', null, 'SIGKILL')
+  assert.equal((await starting).code, 'forced-stop')
+  assert.equal((await stopping).code, 'forced-stop')
+})
+
+test('an early EOF write failure starts bounded stop cleanup immediately', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { host, children } = fixture({ startupMs: 300, stopMs: 30 })
+  const starting = host.start()
+  children[0].stdin.end = () => { throw Error('private path') }
+  const stopping = host.stop()
+  t.mock.timers.tick(30)
+  assert.equal(children[0].killed, true)
+  children[0].emit('close', null, 'SIGKILL')
+  assert.equal((await starting).code, 'forced-stop')
+  assert.equal((await stopping).code, 'forced-stop')
+})
+
 test('unexpected exit zero is failure; missing disposal is not successful stop', async () => {
   const { host, children, message } = fixture()
   const first = host.start(); message('ready'); await first
