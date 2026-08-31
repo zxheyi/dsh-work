@@ -25,6 +25,8 @@ These values are the accepted M0 baseline, not an implementation-complete runtim
 
 ## Required compatibility checks
 
+Upgrade candidate (2026-08-31): [ADR 0003](decisions/0003-dsh-alpha2-runtime-upgrade.md) and the [isolated alpha.2 probe](../prototypes/m0-runtime-upgrade/README.md) record a newer released pair. It is not yet the current selection. The candidate executable gate checks actual source/artifacts before and after execution; old contract-text checks and old Windows CI cannot substitute for its native evidence.
+
 The repository gate must verify:
 
 - the expected upstream remote and exact source revision;

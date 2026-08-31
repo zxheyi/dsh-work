@@ -29,6 +29,25 @@ export const requiredFiles = [
   '.github/branch-protection.json',
   'scripts/verify-pr-contract.mjs',
   'scripts/verify-pr-contract.test.mjs',
+  'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md',
+  'docs/research/dsh-alpha2-upgrade.md',
+  '.github/workflows/m0-runtime-upgrade.yml',
+  'scripts/verify-upstream-candidate.mjs',
+  'scripts/verify-upstream-candidate.test.mjs',
+  'scripts/probe-output.test.mjs',
+  'scripts/candidate-evidence.test.mjs',
+  'prototypes/m0-runtime-upgrade/README.md',
+  'prototypes/m0-runtime-upgrade/package.json',
+  'prototypes/m0-runtime-upgrade/pnpm-lock.yaml',
+  'prototypes/m0-runtime-upgrade/source-pin.json',
+  'prototypes/m0-runtime-upgrade/runtime-pin.json',
+  'prototypes/m0-runtime-upgrade/prepare.mjs',
+  'prototypes/m0-runtime-upgrade/verify.mjs',
+  'prototypes/m0-runtime-upgrade/output-guard.mjs',
+  'prototypes/m0-runtime-upgrade/lifecycle.test.mjs',
+  'prototypes/m0-runtime-upgrade/fixture/package.json',
+  'prototypes/m0-runtime-upgrade/fixture/cordis.patch.yml',
+  'prototypes/m0-runtime-upgrade/fixture/index.mjs',
 ]
 
 const linkedMarkdownFiles = [
@@ -48,6 +67,9 @@ const linkedMarkdownFiles = [
   'docs/research/m0-lifecycle-prototype.md',
   'docs/upstream-compatibility.md',
   '.github/BRANCH_PROTECTION.md',
+  'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md',
+  'docs/research/dsh-alpha2-upgrade.md',
+  'prototypes/m0-runtime-upgrade/README.md',
 ]
 
 function read(root, relativePath) {

@@ -1,0 +1,56 @@
+name: M0 runtime upgrade candidate
+
+on:
+  push:
+    branches: [research/m0-architecture]
+    paths:
+      - 'prototypes/m0-runtime-upgrade/**'
+      - 'scripts/**'
+      - '.github/workflows/m0-runtime-upgrade.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: m0-runtime-upgrade-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-candidate:
+    name: candidate-${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.11.1
+      - name: Install build-only package manager
+        run: npm install --global pnpm@10.34.4
+      - name: Materialize locked candidate packages without lifecycle scripts
+        run: pnpm install --dir prototypes/m0-runtime-upgrade --frozen-lockfile --ignore-scripts
+      - name: Verify repository gates
+        run: node --test scripts/*.test.mjs
+      - name: Verify documentation contract
+        run: node scripts/verify-contract.mjs
+      - name: Download and verify official candidate artifacts
+        run: node prototypes/m0-runtime-upgrade/prepare.mjs
+      - name: Verify native CLI lifecycle and before/after provenance
+        run: node prototypes/m0-runtime-upgrade/verify.mjs
+      - name: Retain sanitized candidate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-evidence-${{ matrix.os }}
+          path: |
+            prototypes/m0-runtime-upgrade/artifacts/result.json
+            prototypes/m0-runtime-upgrade/artifacts/lifecycle.tap
+          if-no-files-found: warn
+          retention-days: 14

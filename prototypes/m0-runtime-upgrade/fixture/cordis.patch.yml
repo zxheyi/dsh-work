@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-work-lifecycle-probe
+      name: '@dsh-work/lifecycle-probe'
