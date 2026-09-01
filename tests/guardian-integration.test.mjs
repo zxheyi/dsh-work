@@ -87,8 +87,15 @@ test('guardian owns cleanup after its Electron client disappears before Harness 
     await waitFor(() => fs.existsSync(path.join(productRoot, 'runtime/active.json')),
       'guardian did not claim a generation')
     const generation = activeGeneration(productRoot)
-    assert.equal(await first.dispose(), true)
+    const acknowledged = await first.dispose()
+    await waitFor(() => {
+      try {
+        return JSON.parse(fs.readFileSync(path.join(productRoot, 'runtime/generations', generation,
+          'dsh-work-terminal.json'))).status === 'clean'
+      } catch { return false }
+    }, 'guardian did not independently confirm direct-child cleanup')
     await starting
+    if (!acknowledged) t.diagnostic('guardian cleanup completed after the client acknowledgement window')
     first = null
 
     second = await startClient(productRoot)
