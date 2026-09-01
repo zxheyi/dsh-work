@@ -1,13 +1,12 @@
 import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { BrowserWindow } from 'electron'
+import type { DesktopSession } from '../apps/desktop/main.ts'
 import type { RuntimeSnapshot } from '../packages/runtime-contract/index.ts'
-import type { GuardianClient } from '../packages/runtime-guardian/client.ts'
 
 const emittedDesktopEntry: string = '../dist/apps/desktop/main.js'
 const { desktop } = await import(emittedDesktopEntry) as {
-  desktop: Promise<{ host: GuardianClient; window: BrowserWindow }>
+  desktop: Promise<DesktopSession>
 }
 
 const configuredProductRoot = process.env.DSH_WORK_HOST_DEATH_ROOT

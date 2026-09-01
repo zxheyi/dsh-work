@@ -30,3 +30,9 @@ test('product build emits JavaScript entries and required desktop assets', () =>
   }
   assert.equal(fs.existsSync(new URL('../dist/packages/lifecycle-bundle/index.ts', import.meta.url)), false)
 })
+
+test('desktop entry exports one immutable session instead of mutable host state', () => {
+  const source = fs.readFileSync(new URL('../apps/desktop/main.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /export\s+let\s+(?:host|window)\b/)
+  assert.match(source, /Object\.freeze\(\{\s*host,\s*window\s*\}\)/)
+})

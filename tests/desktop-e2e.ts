@@ -3,12 +3,12 @@ import { app, BrowserWindow } from 'electron'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
+import type { DesktopSession } from '../apps/desktop/main.ts'
 import type { RuntimeSnapshot } from '../packages/runtime-contract/index.ts'
-import type { GuardianClient } from '../packages/runtime-guardian/client.ts'
 
 const emittedDesktopEntry: string = '../dist/apps/desktop/main.js'
 const { desktop } = await import(emittedDesktopEntry) as {
-  desktop: Promise<{ host: GuardianClient; window: BrowserWindow }>
+  desktop: Promise<DesktopSession>
 }
 
 const missing = process.argv.includes('--missing-runtime')
@@ -28,7 +28,7 @@ assert.ok(userData)
 app.setPath('userData', userData)
 app.commandLine.appendSwitch('disable-background-networking')
 if (missing) process.env.DSH_WORK_NODE = path.join(output, 'deliberately-missing-node')
-let host: GuardianClient | null = null
+let host: DesktopSession['host'] | null = null
 async function run(): Promise<void> {
 try {
   const active = await desktop
