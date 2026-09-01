@@ -17,7 +17,7 @@
 
 DSH Work does not aim to reimplement [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It aims to build a desktop product layer for real work on top of the upstream Agent runtime and plugin architecture. The desktop shell should own only operating-system integration and process lifecycle; project, file, research, artifact, and other work capabilities should be composed through Harness-native plugins.
 
-> **Current status:** Electron and the official Harness alpha.2 runtime boundary are selected. Production implementation will enter main through separate, verifiable changes. There is no release ready for daily use; features described below remain goals.
+> **Current status:** Electron and the official Harness alpha.2 runtime boundary are selected. The machine-readable runtime baseline, frozen dependencies, and native verification path are now on main. The minimum desktop lifecycle remains a separate change; there is no release ready for daily use.
 
 ## Why DSH Work
 
@@ -72,16 +72,17 @@ The upstream project provides the Agent runtime and plugin architecture. DSH Wor
 
 ## Development and contributing
 
-The repository has completed its first desktop-stack and upstream-integration decisions; production implementation has not entered main yet. Phase 0 establishes the repository contract. Read [`AGENTS.md`](AGENTS.md) and [`docs/workflow.md`](docs/workflow.md) before starting work. The frozen Chinese v1 record of the AI Native delivery workflow lives in [`docs/workflow-v1.zh-CN.md`](docs/workflow-v1.zh-CN.md). The current product scope, first milestone, and decision process live in [`docs/product-scope.md`](docs/product-scope.md), [`docs/acceptance/m0.md`](docs/acceptance/m0.md), and [`docs/decisions/README.md`](docs/decisions/README.md).
+The repository has completed its first desktop-stack and upstream-integration decisions and has promoted the accepted runtime baseline to main. Phase 0 establishes the repository contract. Read [`AGENTS.md`](AGENTS.md) and [`docs/workflow.md`](docs/workflow.md) before starting work. The frozen Chinese v1 record of the AI Native delivery workflow lives in [`docs/workflow-v1.zh-CN.md`](docs/workflow-v1.zh-CN.md). The current product scope, first milestone, runtime inputs, and decision process live in [`docs/product-scope.md`](docs/product-scope.md), [`docs/acceptance/m0.md`](docs/acceptance/m0.md), [`runtime/README.md`](runtime/README.md), and [`docs/decisions/README.md`](docs/decisions/README.md).
 
-The current contract gate is independent of the future product toolchain:
+Install the frozen dependency graph and run the repository gates:
 
 ```bash
-node --test scripts/verify-contract.test.mjs
-node scripts/verify-contract.mjs
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm test
+pnpm check
 ```
 
-The technology stack and upstream runtime boundary are accepted through ADRs. The runtime baseline and minimum desktop lifecycle will be delivered as separate changes.
+See [`runtime/README.md`](runtime/README.md) for the complete official source, npm package, and native Node byte verification. The minimum desktop lifecycle remains a separate change.
 
 Before proposing a large implementation, use GitHub Issues to discuss product scope, architecture decisions, or plugin boundaries.
 

@@ -26,9 +26,21 @@ export const requiredFiles = [
   '.github/branch-protection.json',
   'scripts/verify-pr-contract.mjs',
   'scripts/verify-pr-contract.test.mjs',
+  '.gitignore',
+  'runtime/baseline.json',
+  'runtime/README.md',
+  'package.json',
+  'pnpm-lock.yaml',
+  '.github/workflows/runtime-baseline.yml',
+  'scripts/runtime-provenance.mjs',
+  'scripts/prepare-product-runtime.mjs',
+  'scripts/verify-product-runtime.mjs',
+  'scripts/product-dependencies.test.mjs',
+  'scripts/product-runtime-diagnostics.test.mjs',
 ]
 
 const linkedMarkdownFiles = [
+  'runtime/README.md',
   'README.md',
   'README.en.md',
   'AGENTS.md',
@@ -156,6 +168,37 @@ export function verifyContract(root) {
     requireText(errors, runtimeDecision, token, 'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md')
   }
 
+  const expectedNodeArtifacts = {
+    'darwin-x64': {
+      filename: 'node-v24.11.1-darwin-x64.tar.gz',
+      sha256: '096081b6d6fcdd3f5ba0f5f1d44a47e83037ad2e78eada26671c252fe64dd111',
+    },
+    'darwin-arm64': {
+      filename: 'node-v24.11.1-darwin-arm64.tar.gz',
+      sha256: 'b05aa3a66efe680023f930bd5af3fdbbd542794da5644ca2ad711d68cbd4dc35',
+    },
+    'win32-x64': {
+      filename: 'node-v24.11.1-win-x64.zip',
+      sha256: '5355ae6d7c49eddcfde7d34ac3486820600a831bf81dc3bdca5c8db6a9bb0e76',
+    },
+  }
+  try {
+    const baseline = JSON.parse(read(root, 'runtime/baseline.json'))
+    if (baseline.status !== 'accepted' || baseline.decision !== 'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md' ||
+        baseline.source?.repository !== 'https://github.com/deepseek-ai/deepseek-harness.git' ||
+        baseline.source?.tag !== 'dsh-v0.1.2-alpha.2' || baseline.source?.commit !== '0a53fb55bea101816fa226bb964ae2bed71c343b' ||
+        baseline.runtime?.package !== '@deepseek-ai/dsh' || baseline.runtime?.version !== '0.1.2-alpha.2' ||
+        baseline.runtime?.integrity !== 'sha512-4TvTC5kRKlgtSU2UTBv+cID9a2Z+6+m6mpvjXWJfVzuTkflCff6s4MsQpFJTCmwFh/k7zNWe7qFXcLYMV/5VvA==' ||
+        baseline.runtime?.node !== '24.11.1' || baseline.runtime?.pnpm !== '10.34.4' ||
+        baseline.runtime?.tarball !== 'https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.2-alpha.2.tgz' ||
+        JSON.stringify(baseline.runtime?.nodeArtifacts) !== JSON.stringify(expectedNodeArtifacts) ||
+        baseline.electron !== '44.0.0') {
+      errors.push('runtime/baseline.json: active selection does not match accepted decisions')
+    }
+  } catch {
+    errors.push('runtime/baseline.json: invalid active baseline')
+  }
+
   const workflow = read(root, 'docs/workflow.md')
   for (const heading of ['## Upstream-first architecture', '## State machine', '## Stage contracts', '## Verification ladder', '## Definition of Done']) {
     requireText(errors, workflow, heading, 'docs/workflow.md')
@@ -247,6 +290,23 @@ export function verifyContract(root) {
     'node scripts/verify-pr-contract.mjs "$GITHUB_EVENT_PATH"',
   ]) {
     requireText(errors, workflowYaml, token, '.github/workflows/contract.yml')
+  }
+
+  const runtimeWorkflow = read(root, '.github/workflows/runtime-baseline.yml')
+  for (const token of [
+    'name: Runtime baseline',
+    'pull_request:',
+    'branches: [main]',
+    'runs-on: ${{ matrix.os }}',
+    'node-version: 24.11.1',
+    'pnpm@10.34.4',
+    'prepare-product-runtime.mjs',
+    'verify-product-runtime.mjs',
+  ]) {
+    requireText(errors, runtimeWorkflow, token, '.github/workflows/runtime-baseline.yml')
+  }
+  if (runtimeWorkflow.includes('prototypes/')) {
+    errors.push('.github/workflows/runtime-baseline.yml: production workflow must not depend on research prototypes')
   }
 
   let protection

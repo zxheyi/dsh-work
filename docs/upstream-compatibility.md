@@ -21,7 +21,7 @@ DSH Work must not modify or copy upstream source to implement product behavior, 
 | Package manager boundary | pnpm `10.34.4` only in controlled build/materialization; no package manager at ordinary launch | Development materialization passed; packaged proof pending |
 | Last compatibility verification | 2026-09-01, macOS arm64 and Windows x64 product CLI/Profile and Electron lifecycle | [CI 33465087985](https://github.com/zxheyi/dsh-work/actions/runs/33465087985), tested `4fd63dd`; [frozen receipt and scope](https://github.com/zxheyi/dsh-work/blob/4fd63ddefc347238f5a5c717a10bd59a2f326693/docs/acceptance/electron-lifecycle-slice.md#native-receipt) |
 
-These values are the accepted M0 baseline, not an implementation-complete runtime manifest. The machine-readable active selection is delivered separately from this architecture decision. Historical rc.2/alpha.1 observations remain associated with their original revisions. Product implementation must use only the accepted alpha.2 public services; later HEAD behavior is not implicitly available.
+These values are the accepted M0 baseline, not an implementation-complete distribution manifest. The machine-readable active selection is [`runtime/baseline.json`](../runtime/baseline.json). Historical rc.2/alpha.1 observations remain associated with their original revisions. Product implementation must use only the accepted alpha.2 public services; later HEAD behavior is not implicitly available.
 
 ## Required compatibility checks
 
