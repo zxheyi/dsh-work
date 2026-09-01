@@ -9,6 +9,7 @@ import { createRequire } from 'node:module'
 import { createRuntimeHost } from '../packages/runtime-host/index.mjs'
 import { createOfficialLauncher, prepareDevelopmentProfile } from '../packages/runtime-host/official-launcher.mjs'
 import { createStatusWindow, registerDesktopScheme } from '../apps/desktop/window.mjs'
+import { removeOwnedTestHome } from './support/owned-test-home.mjs'
 
 const output = path.resolve('artifacts/desktop/runtime-recovery')
 const require = createRequire(import.meta.url)
@@ -34,16 +35,6 @@ const assertRuntimeManifest = label => {
   assert.deepEqual(fs.readFileSync(runtimeManifest), runtimeManifestBytes)
   manifestChecks.push(label)
 }
-const removeOwnedHome = () => {
-  if (!fs.existsSync(home)) return
-  const link = path.join(home, 'profiles/dsh-work/node_modules/@deepseek-ai/dsh-cmdline')
-  if (fs.existsSync(link)) {
-    assert.equal(fs.lstatSync(link).isSymbolicLink(), true, 'only the test-created package junction may be detached')
-    fs.unlinkSync(link)
-  }
-  fs.rmSync(home, { recursive: true, force: true })
-}
-
 async function run() {
   try {
     prepareDevelopmentProfile(home)
@@ -105,7 +96,7 @@ async function run() {
     assert.deepEqual(events, ['exit:1', 'close:1', 'exit:2', 'close:2'])
     assert.equal(host.snapshot().canStart, true)
     assertRuntimeManifest('manifest-after-recovery-stop')
-    removeOwnedHome()
+    removeOwnedTestHome(home)
     assertRuntimeManifest('manifest-after-home-cleanup')
     window.destroy()
     assertRuntimeManifest('manifest-after-window-destroy')
@@ -118,7 +109,7 @@ async function run() {
     process.exitCode = 1
   } finally {
     await host?.stop()
-    if (!host || host.snapshot().canStart) removeOwnedHome()
+    if (!host || host.snapshot().canStart) removeOwnedTestHome(home)
     window?.destroy()
     app.quit()
   }

@@ -55,7 +55,8 @@ try {
   }
   const scriptTests = fs.readdirSync(path.join(root, 'scripts')).filter(file => file.endsWith('.test.mjs')).map(file => `scripts/${file}`)
   run('unit', ['--test', '--test-reporter=tap', ...scriptTests,
-    'tests/runtime-host.test.mjs', 'tests/official-launcher.test.mjs', 'tests/desktop-security.test.mjs', 'tests/renderer.test.mjs'])
+    'tests/runtime-host.test.mjs', 'tests/official-launcher.test.mjs', 'tests/desktop-security.test.mjs',
+    'tests/renderer.test.mjs', 'tests/owned-test-home.test.mjs'])
   provenance('after-unit')
   run('contract', ['scripts/verify-contract.mjs'])
   provenance('after-contract')
