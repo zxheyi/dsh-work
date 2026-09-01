@@ -37,6 +37,7 @@ export const requiredFiles = [
   'tsconfig.build.json',
   '.github/workflows/runtime-baseline.yml',
   'scripts/runtime-provenance.mjs',
+  'scripts/build-product.mjs',
   'scripts/prepare-product-runtime.mjs',
   'scripts/verify-product-runtime.mjs',
   'scripts/product-dependencies.test.mjs',
@@ -52,7 +53,7 @@ export const requiredFiles = [
   'apps/desktop/style.css',
   'apps/desktop/window.mjs',
   'packages/lifecycle-bundle/cordis.patch.yml',
-  'packages/lifecycle-bundle/index.mjs',
+  'packages/lifecycle-bundle/index.ts',
   'packages/lifecycle-bundle/package.json',
   'packages/runtime-host/index.ts',
   'packages/runtime-host/official-launcher.ts',
@@ -257,7 +258,7 @@ export function verifyContract(root) {
   try {
     const manifest = JSON.parse(read(root, 'package.json'))
     const expectedScripts = {
-      build: 'tsc -p tsconfig.build.json',
+      build: 'node scripts/build-product.mjs',
       typecheck: 'tsc -p tsconfig.json',
       check: 'pnpm typecheck && node scripts/verify-contract.mjs',
     }
@@ -426,14 +427,14 @@ export function verifyContract(root) {
     requireText(errors, lifecycleAcceptance, heading, 'docs/acceptance/electron-lifecycle-slice.md')
   }
 
-  const lifecycleBundle = read(root, 'packages/lifecycle-bundle/index.mjs')
+  const lifecycleBundle = read(root, 'packages/lifecycle-bundle/index.ts')
   for (const token of [
     "import { exitOnStdinEnd } from '@deepseek-ai/dsh-cmdline'",
-    'ctx.appReady.onReady',
+    'appReady.onReady',
     'ctx.effect',
     "protocol: 'dsh-work.lifecycle.v1'",
   ]) {
-    requireText(errors, lifecycleBundle, token, 'packages/lifecycle-bundle/index.mjs')
+    requireText(errors, lifecycleBundle, token, 'packages/lifecycle-bundle/index.ts')
   }
 
   const launcher = read(root, 'packages/runtime-host/official-launcher.ts')

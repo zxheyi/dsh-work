@@ -172,13 +172,13 @@ test('removing the Harness-native lifecycle boundary fails verification', () => 
       fs.copyFileSync(path.join(repositoryRoot, relativePath), target)
     }
 
-    const target = path.join(root, 'packages/lifecycle-bundle/index.mjs')
+    const target = path.join(root, 'packages/lifecycle-bundle/index.ts')
     const original = fs.readFileSync(target, 'utf8')
-    fs.writeFileSync(target, original.replace('ctx.appReady.onReady', 'ctx.internalReady.onReady'))
+    fs.writeFileSync(target, original.replace('appReady.onReady', 'ctx.internalReady.onReady'))
 
     assert.ok(
       verifyContract(root).includes(
-        'packages/lifecycle-bundle/index.mjs: missing required contract text "ctx.appReady.onReady"',
+        'packages/lifecycle-bundle/index.ts: missing required contract text "appReady.onReady"',
       ),
     )
   } finally {

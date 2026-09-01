@@ -54,7 +54,9 @@ try {
     console.log(`${name}: pass`)
   }
   const scriptTests = fs.readdirSync(path.join(root, 'scripts')).filter(file => file.endsWith('.test.mjs')).map(file => `scripts/${file}`)
+  run('build', ['scripts/build-product.mjs'])
   run('unit', ['--test', '--test-reporter=tap', ...scriptTests,
+    'tests/typescript-toolchain.test.ts',
     'tests/runtime-host.test.mjs', 'tests/official-launcher.test.mjs', 'tests/desktop-security.test.mjs',
     'tests/renderer.test.mjs', 'tests/owned-test-home.test.mjs', 'tests/generation-store.test.mjs',
     'tests/runtime-guardian.test.mjs', 'tests/guardian-client.test.mjs'])

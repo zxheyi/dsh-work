@@ -60,8 +60,10 @@ export function prepareProductProfile(home: string): void {
     ensureOwnedDirectory(directory)
   }
   const bundle = path.join(profile, 'node_modules/@dsh-work/lifecycle')
+  const builtBundle = path.join(root, 'dist/packages/lifecycle-bundle')
+  if (!fs.existsSync(path.join(builtBundle, 'index.js'))) throw new Error('built lifecycle Bundle unavailable')
   fs.rmSync(bundle, { recursive: true, force: true })
-  fs.cpSync(path.join(root, 'packages/lifecycle-bundle'), bundle, { recursive: true })
+  fs.cpSync(builtBundle, bundle, { recursive: true })
   const cmdline = path.dirname(require.resolve('@deepseek-ai/dsh-cmdline/package.json'))
   const link = path.join(profile, 'node_modules/@deepseek-ai/dsh-cmdline')
   fs.rmSync(link, { recursive: true, force: true })
