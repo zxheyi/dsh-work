@@ -30,15 +30,17 @@ The migration changes DSH Work implementation language and build inputs only. De
 
 ## Acceptance and verification
 
-- [ ] A clean install exposes pinned TypeScript build and test tooling as development-only dependencies.
-- [ ] `pnpm typecheck` checks all migrated product source and product tests with strict settings and no emitted files.
-- [ ] `pnpm build` emits native JavaScript and required static/package assets beneath ignored `dist/`.
-- [ ] Electron starts the emitted desktop entry, and the generated Harness Profile contains an emitted JavaScript lifecycle Bundle rather than TypeScript source.
-- [ ] Existing unit, contract, official CLI/Profile integration, guardian recovery, and Electron E2E checks pass against the migrated implementation.
-- [ ] Bootstrap contract and provenance scripts remain directly runnable from a clean checkout before product output exists.
-- [ ] No production dependency or parallel Harness extension boundary is introduced.
+- [x] A clean install exposes pinned TypeScript build and test tooling as development-only dependencies.
+- [x] `pnpm typecheck` checks all migrated product source and product tests with strict settings and no emitted files.
+- [x] `pnpm build` emits native JavaScript and required static/package assets beneath ignored `dist/`.
+- [x] Electron starts the emitted desktop entry, and the generated Harness Profile contains an emitted JavaScript lifecycle Bundle rather than TypeScript source.
+- [x] Existing unit, contract, official CLI/Profile integration, guardian recovery, and Electron E2E checks pass against the migrated implementation.
+- [x] Bootstrap contract and provenance scripts remain directly runnable from a clean checkout before product output exists.
+- [x] No production dependency or parallel Harness extension boundary is introduced.
 
 Implementation evidence comes from `pnpm typecheck`, `pnpm build`, `pnpm test`, `pnpm check`, the runtime integration suite, and the desktop lifecycle verifier on native macOS and Windows. Change this decision to `implemented` only after the complete migrated source and those affected gates pass.
+
+The migration candidate passed strict type checking, 68 unit/contract tests, 10 official CLI/Profile and guardian integration scenarios, and all five Electron lifecycle modes on native macOS arm64. Product source and product tests are TypeScript; the remaining `.mjs` files are the bounded bootstrap/build/provenance/contract exception. The delayed-startup fixture also remains directly executable JavaScript because the official Harness test Profile loads it from generated `node_modules` without a TypeScript loader. Native Windows x64 evidence is still required before changing this decision from `accepted` to `implemented`.
 
 ## Alternatives considered
 
