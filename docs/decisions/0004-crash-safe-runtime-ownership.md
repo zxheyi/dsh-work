@@ -1,6 +1,6 @@
 # 0004: Crash-safe runtime ownership and Profile generations
 
-Status: accepted
+Status: implemented
 
 Date: 2026-09-01
 
@@ -70,10 +70,10 @@ A future Windows Job Object, macOS native service, or other stronger containment
 - [x] Integration tests prove the official CLI/Profile reaches Ready, stops, and reuses one clean generation across guardian launches.
 - [x] Host-death tests terminate the exact test-owned Electron host before and after Ready, then independently observe bounded guardian cleanup without treating a safety timeout as success.
 - [x] Recovery tests leave an uncertain generation untouched, start a distinct generation only after explicit action, and prove an unrelated test-owned process remains alive.
-- [ ] macOS arm64 and Windows x64 run the same revision-bound lifecycle and recovery matrix with runtime provenance before and after.
-- [ ] Repository checks prove the pinned upstream source, runtime package family, Harness-native Bundle, narrow renderer bridge, and absence of research-path dependencies remain unchanged.
+- [x] macOS arm64 and Windows x64 run the same revision-bound lifecycle and recovery matrix with runtime provenance before and after.
+- [x] Repository checks prove the pinned upstream source, runtime package family, Harness-native Bundle, narrow renderer bridge, and absence of research-path dependencies remain unchanged.
 
-Implementation evidence belongs to the dependent PR and native CI run. Acceptance of this ADR does not claim those checks have passed.
+Implementation evidence is bound to revision `1b3ced4219ef011498e1d4fd4803d8f30c57a8fb`: [runtime matrix](https://github.com/zxheyi/dsh-work/actions/runs/33481966105) and [desktop lifecycle/recovery matrix](https://github.com/zxheyi/dsh-work/actions/runs/33481966097). Both macOS arm64 and Windows x64 passed, including exact Electron host termination before and after Ready.
 
 ## Alternatives considered
 

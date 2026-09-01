@@ -1,6 +1,6 @@
 # Electron lifecycle: first production slice
 
-Status: guardian implementation candidate; every merge candidate requires fresh native macOS and Windows verification.
+Status: implemented; every merge candidate requires fresh native macOS and Windows verification.
 
 ## User outcome
 
@@ -50,6 +50,8 @@ pnpm verify:local
 ```
 
 The verifier checks runtime provenance before and after unit, contract, official CLI/Profile, and five actual Electron modes: normal operation, missing runtime, renderer crash, direct-child failure with explicit retry, and exact Electron host death before and after Harness Ready. Reports and screenshot hashes are written below ignored `artifacts/` paths.
+
+Revision `1b3ced4219ef011498e1d4fd4803d8f30c57a8fb` passed the full [runtime matrix](https://github.com/zxheyi/dsh-work/actions/runs/33481966105) and [desktop lifecycle/recovery matrix](https://github.com/zxheyi/dsh-work/actions/runs/33481966097) on macOS arm64 and Windows x64.
 
 The implementation was distilled from the frozen [research branch at `4fd63dd`](https://github.com/zxheyi/dsh-work/tree/4fd63ddefc347238f5a5c717a10bd59a2f326693). Historical experiments and diagnostic ledgers remain there; they are evidence, not production dependencies.
 

@@ -214,7 +214,7 @@ export function verifyContract(root) {
 
   const ownershipDecision = read(root, 'docs/decisions/0004-crash-safe-runtime-ownership.md')
   for (const token of [
-    'Status: accepted',
+    'Status: implemented',
     'external **runtime guardian**',
     '`active.json` is claimed with exclusive creation',
     'the recorded PID is never signaled or probed as authority',
