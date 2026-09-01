@@ -13,6 +13,9 @@ export const requiredFiles = [
   'docs/acceptance/m0.md',
   'docs/decisions/README.md',
   'docs/decisions/TEMPLATE.md',
+  'docs/decisions/0001-electron-desktop-host.md',
+  'docs/decisions/0002-official-dsh-cli-runtime.md',
+  'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md',
   'docs/upstream-compatibility.md',
   '.github/ISSUE_TEMPLATE/config.yml',
   '.github/ISSUE_TEMPLATE/feature_request.yml',
@@ -35,6 +38,9 @@ const linkedMarkdownFiles = [
   'docs/workflow-v1.zh-CN.md',
   'docs/acceptance/m0.md',
   'docs/decisions/README.md',
+  'docs/decisions/0001-electron-desktop-host.md',
+  'docs/decisions/0002-official-dsh-cli-runtime.md',
+  'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md',
   'docs/upstream-compatibility.md',
   '.github/BRANCH_PROTECTION.md',
 ]
@@ -125,6 +131,29 @@ export function verifyContract(root) {
     'the absence of product modifications in the pinned upstream source tree',
   ]) {
     requireText(errors, upstream, token, 'docs/upstream-compatibility.md')
+  }
+
+  const hostDecision = read(root, 'docs/decisions/0001-electron-desktop-host.md')
+  for (const token of ['Status: accepted', 'Accept Electron `44.0.0` as the M0 desktop host']) {
+    requireText(errors, hostDecision, token, 'docs/decisions/0001-electron-desktop-host.md')
+  }
+
+  requireText(
+    errors,
+    read(root, 'docs/decisions/0002-official-dsh-cli-runtime.md'),
+    'Status: superseded by ADR 0003',
+    'docs/decisions/0002-official-dsh-cli-runtime.md',
+  )
+
+  const runtimeDecision = read(root, 'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md')
+  for (const token of [
+    'Status: accepted',
+    '`0a53fb55bea101816fa226bb964ae2bed71c343b`',
+    '`@deepseek-ai/dsh@0.1.2-alpha.2`',
+    'Node.js `24.11.1`',
+    'pnpm `10.34.4`',
+  ]) {
+    requireText(errors, runtimeDecision, token, 'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md')
   }
 
   const workflow = read(root, 'docs/workflow.md')
