@@ -8,6 +8,7 @@ export type WorkErrorCode =
   | 'work/deliverable-exists'
   | 'work/deliverable-invalid'
   | 'work/invalid-transition'
+  | 'work/recovery-conflict'
 
 export class WorkError extends Error {
   readonly code: WorkErrorCode
@@ -88,6 +89,44 @@ export interface WorkControllerOptions {
   readonly createRequestId?: () => string
   readonly workspaceRoot: string
   readonly harness: HarnessWorkPort
+  readonly store?: WorkStore
+}
+
+export interface WorkStore {
+  load(): Promise<WorkSnapshot | null>
+  save(work: WorkSnapshot): Promise<void>
+}
+
+export interface WorkDomainState {
+  readonly work: WorkSnapshot | null
+}
+
+export interface WorkDomainGlobal {
+  get(): WorkDomainState
+  set(state: WorkDomainState): Promise<void>
+}
+
+export function createMemoryWorkStore(initial: WorkSnapshot | null = null): WorkStore {
+  let stored = initial ? structuredClone(initial) : null
+  return {
+    async load() {
+      return stored ? structuredClone(stored) : null
+    },
+    async save(work) {
+      stored = structuredClone(work)
+    },
+  }
+}
+
+export function createDomainWorkStore(global: WorkDomainGlobal): WorkStore {
+  return {
+    async load() {
+      return global.get().work
+    },
+    async save(work) {
+      await global.set({ work })
+    },
+  }
 }
 
 export interface EnsureWorkspaceRequest {
@@ -161,10 +200,49 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
   const createId = options.createId ?? randomUUID
   const createSessionId = options.createSessionId ?? randomUUID
   const createRequestId = options.createRequestId ?? randomUUID
+  const store = options.store ?? createMemoryWorkStore()
   let work: WorkSnapshot | null = null
+
+  const freezeSnapshot = (snapshot: WorkSnapshot): WorkSnapshot => Object.freeze({
+    ...snapshot,
+    workspace: Object.freeze({ ...snapshot.workspace }),
+    primarySession: Object.freeze({ ...snapshot.primarySession }),
+    deliverable: snapshot.deliverable ? Object.freeze({ ...snapshot.deliverable }) : null,
+  })
+
+  const initialize = async (): Promise<void> => {
+    const restored = await store.load()
+    if (!restored) return
+    const workspace = await options.harness.ensureWorkspace({
+      path: restored.workspace.path,
+      title: restored.title,
+    })
+    if (workspace.workspaceId !== restored.workspace.workspaceId || workspace.path !== restored.workspace.path) {
+      throw new WorkError('work/recovery-conflict', 'Harness resolved a different Workspace during Work recovery.')
+    }
+    const session = await options.harness.ensurePrimarySession({
+      sessionId: restored.primarySession.sessionId,
+      workspaceId: restored.workspace.workspaceId,
+      cwd: restored.workspace.path,
+    })
+    if (session.sessionId !== restored.primarySession.sessionId) {
+      throw new WorkError('work/recovery-conflict', 'Harness resolved a different Primary Session during Work recovery.')
+    }
+    work = freezeSnapshot(restored)
+  }
+
+  let initialization: Promise<void> | null = null
+  const ready = (): Promise<void> => initialization ??= initialize()
+  const commit = async (next: WorkSnapshot): Promise<WorkSnapshot> => {
+    const frozen = freezeSnapshot(next)
+    await store.save(frozen)
+    work = frozen
+    return frozen
+  }
 
   return {
     async create(spec) {
+      await ready()
       if (work) throw new WorkError('work/already-exists', 'The first-phase product supports one Work.')
       const workId = createId()
       const workspace = await options.harness.ensureWorkspace({
@@ -180,7 +258,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         sessionId: ensuredSession.sessionId,
         turnCount: 0,
       })
-      work = Object.freeze({
+      return commit({
         workId,
         title: spec.title,
         goal: spec.goal,
@@ -189,14 +267,15 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         deliverable: null,
         status: 'working',
       })
-      return work
     },
 
     async get() {
+      await ready()
       return work
     },
 
     async dispatch(request, signal) {
+      await ready()
       if (!work || work.workId !== request.workId) {
         throw new WorkError('work/not-found', `Work not found: ${request.workId}`)
       }
@@ -209,7 +288,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
           sessionId: work.primarySession.sessionId,
           instruction: request.command.instruction,
         }, signal)
-        work = Object.freeze({
+        return commit({
           ...work,
           primarySession: Object.freeze({
             ...work.primarySession,
@@ -247,7 +326,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         ) {
           throw new WorkError('work/deliverable-invalid', 'The file deliverable must resolve inside the managed Workspace.')
         }
-        work = Object.freeze({
+        return commit({
           ...work,
           deliverable: Object.freeze({
             kind: 'file',
@@ -259,14 +338,13 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         if (work.status !== 'awaiting-review') {
           throw new WorkError('work/invalid-transition', 'Work must be awaiting review before completion.')
         }
-        work = Object.freeze({ ...work, status: 'completed' })
+        return commit({ ...work, status: 'completed' })
       } else {
         if (work.status !== 'completed') {
           throw new WorkError('work/invalid-transition', 'Work must be completed before delivery.')
         }
-        work = Object.freeze({ ...work, status: 'delivered' })
+        return commit({ ...work, status: 'delivered' })
       }
-      return work
     },
   }
 }

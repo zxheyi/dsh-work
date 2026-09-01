@@ -77,21 +77,29 @@ export function prepareProductProfile(home: string): void {
     path.join(profile, 'node_modules/@dsh-work'), path.join(profile, 'node_modules/@deepseek-ai')]) {
     ensureOwnedDirectory(directory)
   }
-  const bundle = path.join(profile, 'node_modules/@dsh-work/lifecycle')
-  const builtBundle = path.join(root, 'dist/packages/lifecycle-bundle')
-  if (!fs.existsSync(path.join(builtBundle, 'index.js'))) throw new Error('built lifecycle Bundle unavailable')
-  fs.rmSync(bundle, { recursive: true, force: true })
-  fs.cpSync(builtBundle, bundle, { recursive: true })
-  const cmdline = path.dirname(require.resolve('@deepseek-ai/dsh-cmdline/package.json'))
-  const link = path.join(profile, 'node_modules/@deepseek-ai/dsh-cmdline')
-  fs.rmSync(link, { recursive: true, force: true })
-  fs.symlinkSync(cmdline, link, 'junction')
+  for (const [name, builtName] of [
+    ['lifecycle', 'lifecycle-bundle'],
+    ['work', 'work-bundle'],
+    ['work-domain', 'work-domain'],
+  ] as const) {
+    const bundle = path.join(profile, 'node_modules/@dsh-work', name)
+    const builtBundle = path.join(root, 'dist/packages', builtName)
+    if (!fs.existsSync(path.join(builtBundle, 'index.js'))) throw new Error(`built ${name} Bundle unavailable`)
+    fs.rmSync(bundle, { recursive: true, force: true })
+    fs.cpSync(builtBundle, bundle, { recursive: true })
+  }
+  for (const dependency of ['@deepseek-ai/dsh-cmdline', '@deepseek-ai/dsh-storage-domain', 'zod']) {
+    const installed = path.dirname(require.resolve(`${dependency}/package.json`))
+    const link = path.join(profile, 'node_modules', dependency)
+    fs.rmSync(link, { recursive: true, force: true })
+    fs.symlinkSync(installed, link, 'junction')
+  }
   fs.writeFileSync(path.join(profile, 'package.json'), JSON.stringify({
     private: true,
     type: 'module',
     dsh: {
       profile: {
-        bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@dsh-work/lifecycle'],
+        bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@dsh-work/work', '@dsh-work/lifecycle'],
         patchReload: 'startup',
       },
     },

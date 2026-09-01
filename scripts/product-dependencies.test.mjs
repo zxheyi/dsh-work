@@ -10,6 +10,8 @@ test('product dependencies match the accepted baseline with a frozen DSH family'
   assert.deepEqual(manifest.dependencies, {
     '@deepseek-ai/dsh': baseline.runtime.version,
     '@deepseek-ai/dsh-cmdline': baseline.runtime.version,
+    '@deepseek-ai/dsh-storage-domain': baseline.runtime.version,
+    zod: '4.5.4',
   })
   assert.deepEqual(manifest.devDependencies, {
     '@types/node': '24.13.3',

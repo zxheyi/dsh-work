@@ -7,6 +7,7 @@ import test from 'node:test'
 import {
   WorkError,
   createHarnessWorkPort,
+  createMemoryWorkStore,
   createWorkController,
   type HarnessWorkPort,
 } from '../packages/work-domain/index.ts'
@@ -282,4 +283,53 @@ test('does not deliver a Work before review completion', async () => {
     controller.dispatch({ workId: created.workId, command: { type: 'deliver' } }),
     (error: unknown) => error instanceof WorkError && error.code === 'work/invalid-transition',
   )
+})
+
+test('restores the Work, managed Workspace, and Primary Session after restart', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-restart-'))
+  const store = createMemoryWorkStore()
+  const first = createWorkController({
+    createId: () => 'work-restored',
+    createSessionId: () => 'session-restored',
+    createRequestId: () => 'request-before-restart',
+    workspaceRoot,
+    harness: testHarness(),
+    store,
+  })
+  const created = await first.create({ title: 'Restore', goal: 'Continue after restarting.' })
+  await fs.mkdir(created.workspace.path, { recursive: true })
+  await fs.writeFile(path.join(created.workspace.path, 'restored.md'), 'durable')
+  await first.dispatch({
+    workId: created.workId,
+    command: { type: 'submit-turn', instruction: 'Produce the durable result.' },
+  })
+  const beforeRestart = await first.dispatch({
+    workId: created.workId,
+    command: { type: 'record-file', path: 'restored.md' },
+  })
+
+  const recoveries: string[] = []
+  const restartedHarness: HarnessWorkPort = {
+    async ensureWorkspace(request) {
+      recoveries.push(`workspace:${request.path}`)
+      return { workspaceId: 'workspace-1', path: request.path }
+    },
+    async ensurePrimarySession(request) {
+      recoveries.push(`session:${request.sessionId}`)
+      return { sessionId: request.sessionId }
+    },
+    async submitTurn() {},
+  }
+  const restarted = createWorkController({
+    workspaceRoot,
+    harness: restartedHarness,
+    store,
+  })
+
+  assert.deepEqual(await restarted.get(), beforeRestart)
+  assert.deepEqual(recoveries, [
+    `workspace:${beforeRestart.workspace.path}`,
+    'session:session-restored',
+  ])
+  await fs.rm(workspaceRoot, { recursive: true, force: true })
 })

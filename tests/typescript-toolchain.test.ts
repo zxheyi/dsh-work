@@ -25,6 +25,10 @@ test('product build emits JavaScript entries and required desktop assets', () =>
     '../dist/apps/desktop/style.css',
     '../dist/packages/lifecycle-bundle/index.js',
     '../dist/packages/lifecycle-bundle/package.json',
+    '../dist/packages/work-domain/index.js',
+    '../dist/packages/work-bundle/index.js',
+    '../dist/packages/work-bundle/package.json',
+    '../dist/packages/work-bundle/cordis.patch.yml',
   ]) {
     assert.equal(fs.existsSync(new URL(relativePath, import.meta.url)), true, relativePath)
   }
