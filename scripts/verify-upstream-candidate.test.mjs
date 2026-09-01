@@ -43,12 +43,16 @@ test('runtime gate rejects corrupt tarballs and modified installed package bytes
     const integrity = `sha512-${createHash('sha512').update(fs.readFileSync(tarball)).digest('base64')}`
     const pin = { package: '@test/runtime', version: '1.0.0', integrity }
     assert.equal(verifyPublishedPackage(tarball, installed, pin), 2)
-    assert.throws(() => verifyPublishedPackage(tarball, installed, { ...pin, integrity: 'sha512-wrong' }), /integrity mismatch/)
-    assert.throws(() => verifyPublishedPackage(tarball, installed, { ...pin, version: '2.0.0' }), /version mismatch/)
+    assert.throws(() => verifyPublishedPackage(tarball, installed, { ...pin, integrity: 'sha512-wrong' }),
+      error => error?.code === 'package-archive-failed' && /integrity mismatch/.test(error.message))
+    assert.throws(() => verifyPublishedPackage(tarball, installed, { ...pin, version: '2.0.0' }),
+      error => error?.code === 'package-metadata-failed' && /version mismatch/.test(error.message))
     fs.appendFileSync(path.join(installed, 'lib/bin.js'), 'product patch\n')
-    assert.throws(() => verifyPublishedPackage(tarball, installed, pin), /installed package differs/)
+    assert.throws(() => verifyPublishedPackage(tarball, installed, pin),
+      error => error?.code === 'package-bytes-failed' && /installed package differs/.test(error.message))
     fs.writeFileSync(path.join(installed, 'lib/bin.js'), 'official bytes\n')
     fs.writeFileSync(path.join(installed, 'lib/package.json'), '{"type":"module"}')
-    assert.throws(() => verifyPublishedPackage(tarball, installed, pin), /installed package inventory differs/)
+    assert.throws(() => verifyPublishedPackage(tarball, installed, pin),
+      error => error?.code === 'package-inventory-failed' && /inventory differs/.test(error.message))
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })

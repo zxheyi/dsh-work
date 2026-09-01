@@ -12,8 +12,10 @@ class ProductRuntimeVerificationError extends Error {
     this.code = code
   }
 }
-const checked = (code, action) => {
-  try { return action() } catch { throw new ProductRuntimeVerificationError(code) }
+const checked = (code, action, allowed = new Set()) => {
+  try { return action() } catch (error) {
+    throw new ProductRuntimeVerificationError(allowed.has(error?.code) ? error.code : code)
+  }
 }
 export const productRuntimeFailureCode = error =>
   error instanceof ProductRuntimeVerificationError ? error.code : 'product-provenance-failed'
@@ -28,8 +30,10 @@ export function verifyProductRuntime({ source, tarball, node, nodeArchive }) {
     return value
   })
   const sourceCommit = checked('source-provenance-failed', () => verifySource(source, baseline.source))
+  const packageCodes = new Set(['package-archive-failed', 'package-metadata-failed',
+    'package-inventory-failed', 'package-bytes-failed'])
   const packageFiles = checked('package-provenance-failed', () => verifyPublishedPackage(
-    tarball, fs.realpathSync(path.join(root, 'node_modules/@deepseek-ai/dsh')), baseline.runtime))
+    tarball, fs.realpathSync(path.join(root, 'node_modules/@deepseek-ai/dsh')), baseline.runtime), packageCodes)
   const nodeSHA256 = checked('node-provenance-failed', () => verifyNodeArchive(nodeArchive, node, artifacts))
   const family = checked('family-provenance-failed', () => {
     const found = new Set()

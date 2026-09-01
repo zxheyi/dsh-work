@@ -19,16 +19,28 @@ export function verifySource(directory, pin) {
 const digest = (bytes, algorithm = 'sha256', format = 'hex') => createHash(algorithm).update(bytes).digest(format)
 const readJSON = file => JSON.parse(fs.readFileSync(file, 'utf8'))
 const tar = (...args) => execFileSync('tar', args, { timeout: 30_000, maxBuffer: 128 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] })
+const packageFailure = (code, message) => {
+  const error = new Error(message)
+  error.code = code
+  throw error
+}
+const packageOperation = (code, action) => {
+  try { return action() } catch (error) {
+    if (String(error?.code).startsWith('package-')) throw error
+    return packageFailure(code, 'published package verification unavailable')
+  }
+}
 
 export function verifyPublishedPackage(tarball, installed, pin) {
-  if (`sha512-${digest(fs.readFileSync(tarball), 'sha512', 'base64')}` !== pin.integrity) {
-    throw new Error('published package integrity mismatch')
+  if (`sha512-${digest(packageOperation('package-archive-failed', () => fs.readFileSync(tarball)), 'sha512', 'base64')}` !== pin.integrity) {
+    packageFailure('package-archive-failed', 'published package integrity mismatch')
   }
-  const manifest = readJSON(path.join(installed, 'package.json'))
+  const manifest = packageOperation('package-metadata-failed', () => readJSON(path.join(installed, 'package.json')))
   if (manifest.name !== pin.package || manifest.version !== pin.version || manifest.bin?.dsh !== 'lib/bin.js') {
-    throw new Error('installed runtime name/version mismatch')
+    packageFailure('package-metadata-failed', 'installed runtime name/version mismatch')
   }
-  const entries = tar('-tf', tarball).toString('utf8').trim().split(/\r?\n/).filter(entry => !entry.endsWith('/'))
+  const entries = packageOperation('package-archive-failed', () =>
+    tar('-tf', tarball).toString('utf8').trim().split(/\r?\n/).filter(entry => !entry.endsWith('/')))
   const installedEntries = []
   function inventory(directory, prefix = '') {
     for (const name of fs.readdirSync(directory)) {
@@ -38,23 +50,27 @@ export function verifyPublishedPackage(tarball, installed, pin) {
       const file = path.join(directory, name)
       const relative = `${prefix}${name}`
       const stat = fs.lstatSync(file)
-      if (stat.isSymbolicLink()) throw new Error('installed package inventory differs: unexpected symlink')
+      if (stat.isSymbolicLink()) packageFailure('package-inventory-failed', 'installed package inventory differs: unexpected symlink')
       if (stat.isDirectory()) inventory(file, `${relative}/`)
       else installedEntries.push(`package/${relative}`)
     }
   }
-  inventory(installed)
+  packageOperation('package-inventory-failed', () => inventory(installed))
   if (JSON.stringify(installedEntries.sort()) !== JSON.stringify([...entries].sort())) {
-    throw new Error('installed package inventory differs from official archive')
+    packageFailure('package-inventory-failed', 'installed package inventory differs from official archive')
   }
   for (const entry of entries) {
-    if (!entry.startsWith('package/') || entry.includes('..') || entry.includes('\\')) throw new Error('unsafe package entry')
+    if (!entry.startsWith('package/') || entry.includes('..') || entry.includes('\\')) {
+      packageFailure('package-archive-failed', 'unsafe package entry')
+    }
     const file = path.join(installed, entry.slice('package/'.length))
-    if (!fs.existsSync(file) || !fs.readFileSync(file).equals(tar('-xOf', tarball, entry))) {
-      throw new Error('installed package differs from official archive')
+    const matches = packageOperation('package-bytes-failed', () =>
+      fs.existsSync(file) && fs.readFileSync(file).equals(tar('-xOf', tarball, entry)))
+    if (!matches) {
+      packageFailure('package-bytes-failed', 'installed package differs from official archive')
     }
   }
-  if (!entries.includes('package/lib/bin.js')) throw new Error('published launcher missing')
+  if (!entries.includes('package/lib/bin.js')) packageFailure('package-archive-failed', 'published launcher missing')
   return entries.length
 }
 
