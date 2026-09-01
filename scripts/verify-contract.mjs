@@ -16,6 +16,7 @@ export const requiredFiles = [
   'docs/decisions/0001-electron-desktop-host.md',
   'docs/decisions/0002-official-dsh-cli-runtime.md',
   'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md',
+  'docs/decisions/0004-crash-safe-runtime-ownership.md',
   'docs/upstream-compatibility.md',
   '.github/ISSUE_TEMPLATE/config.yml',
   '.github/ISSUE_TEMPLATE/feature_request.yml',
@@ -84,6 +85,7 @@ const linkedMarkdownFiles = [
   'docs/decisions/0001-electron-desktop-host.md',
   'docs/decisions/0002-official-dsh-cli-runtime.md',
   'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md',
+  'docs/decisions/0004-crash-safe-runtime-ownership.md',
   'docs/upstream-compatibility.md',
   '.github/BRANCH_PROTECTION.md',
 ]
@@ -197,6 +199,18 @@ export function verifyContract(root) {
     'pnpm `10.34.4`',
   ]) {
     requireText(errors, runtimeDecision, token, 'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md')
+  }
+
+  const ownershipDecision = read(root, 'docs/decisions/0004-crash-safe-runtime-ownership.md')
+  for (const token of [
+    'Status: accepted',
+    'external **runtime guardian**',
+    '`active.json` is claimed with exclusive creation',
+    'the recorded PID is never signaled or probed as authority',
+    'explicit isolated recovery',
+    'does not guarantee containment of arbitrary descendants',
+  ]) {
+    requireText(errors, ownershipDecision, token, 'docs/decisions/0004-crash-safe-runtime-ownership.md')
   }
 
   const expectedNodeArtifacts = {
