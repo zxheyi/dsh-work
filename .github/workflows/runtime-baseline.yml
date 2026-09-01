@@ -1,0 +1,52 @@
+name: Runtime baseline
+
+on:
+  pull_request:
+    paths:
+      - runtime/**
+      - scripts/**
+      - package.json
+      - pnpm-lock.yaml
+      - .github/workflows/runtime-baseline.yml
+  push:
+    branches: [main]
+    paths:
+      - runtime/**
+      - scripts/**
+      - package.json
+      - pnpm-lock.yaml
+      - .github/workflows/runtime-baseline.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-baseline-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-baseline:
+    name: runtime-${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.11.1
+      - name: Install the accepted package manager
+        run: npm install --global pnpm@10.34.4
+      - name: Install the frozen product graph without lifecycle scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Run repository tests and contract checks
+        run: |
+          pnpm test
+          pnpm check
+      - name: Materialize official runtime inputs
+        run: node scripts/prepare-product-runtime.mjs
+      - name: Verify official source, package, and native Node bytes
+        run: node scripts/verify-product-runtime.mjs artifacts/runtime/context.json

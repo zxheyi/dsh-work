@@ -1,0 +1,24 @@
+{
+  "name": "dsh-work",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Electron desktop composition of the official DeepSeek Harness CLI",
+  "packageManager": "pnpm@10.34.4",
+  "scripts": {
+    "test": "node --test scripts/*.test.mjs",
+    "check": "node scripts/verify-contract.mjs",
+    "runtime:prepare": "node scripts/prepare-product-runtime.mjs",
+    "runtime:verify": "node scripts/verify-product-runtime.mjs artifacts/runtime/context.json"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-cmdline": "0.1.2-alpha.2"
+  },
+  "devDependencies": {
+    "electron": "44.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["electron"]
+  }
+}
