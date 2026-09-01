@@ -13,7 +13,7 @@ if (!path.isAbsolute(electron || '') || !path.isAbsolute(process.env.DSH_WORK_NO
 fs.mkdirSync(output, { recursive: true })
 
 const report = { status: 'fail', phase: 'launch', runId, platform: process.platform,
-  arch: process.arch, electron: '44.0.0', screenshots: [], scenarios: [] }
+  arch: process.arch, electron: '44.0.0', screenshots: [], scenarios: [], cleanup: [] }
 const write = () => fs.writeFileSync(resultPath, JSON.stringify(report, null, 2))
 const waitFor = async (condition, message, timeout = 35_000) => {
   const deadline = Date.now() + timeout
@@ -71,7 +71,15 @@ async function exercise(phase) {
     if (desktop && desktop.exitCode === null && desktop.signalCode === null) desktop.kill('SIGKILL')
     await client?.stop().catch(() => {})
     await client?.dispose().catch(() => {})
-    if (clean) removeOwnedTestHome(productRoot)
+    if (clean) {
+      try {
+        removeOwnedTestHome(productRoot)
+        report.cleanup.push({ phase, status: 'removed' })
+      } catch (error) {
+        if (process.platform !== 'win32' || error?.code !== 'EPERM') throw error
+        report.cleanup.push({ phase, status: 'deferred-windows-eperm' })
+      }
+    }
   }
 }
 

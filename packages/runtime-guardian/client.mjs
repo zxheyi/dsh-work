@@ -88,11 +88,7 @@ export async function createGuardianClient({ node, productRoot }, {
       disposing = true
       return new Promise(resolve => {
         const timeout = setTimeout(() => resolve(false), waitMs)
-        // Windows releases the process directory handle at `close`, while a
-        // detached POSIX IPC child may not emit `close` promptly after `exit`.
-        child.once(process.platform === 'win32' ? 'close' : 'exit', () => {
-          clearTimeout(timeout); resolve(true)
-        })
+        child.once('exit', () => { clearTimeout(timeout); resolve(true) })
         child.disconnect()
       })
     },

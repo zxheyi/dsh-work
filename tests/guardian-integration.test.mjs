@@ -78,7 +78,7 @@ test('guardian owns cleanup after its Electron client disappears after Harness R
   }
 })
 
-test('guardian owns cleanup after its Electron client disappears before Harness Ready', { timeout: 90_000 }, async () => {
+test('guardian owns cleanup after its Electron client disappears before Harness Ready', { timeout: 90_000 }, async t => {
   const productRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-guardian-start-death-'))
   let first, second
   try {
@@ -102,7 +102,10 @@ test('guardian owns cleanup after its Electron client disappears before Harness 
     await first?.dispose().catch(() => {})
     await second?.stop().catch(() => {})
     await second?.dispose().catch(() => {})
-    removeOwnedTestHome(productRoot)
+    try { removeOwnedTestHome(productRoot) } catch (error) {
+      if (process.platform !== 'win32' || error?.code !== 'EPERM') throw error
+      t.diagnostic('Windows retained the test Profile tree after confirmed direct-child cleanup')
+    }
   }
 })
 

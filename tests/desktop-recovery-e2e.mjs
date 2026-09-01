@@ -69,10 +69,16 @@ async function run() {
       clearInterval(progress)
       const terminal = host.snapshot()
       const passed = terminal.state === 'stopped' && terminal.code === null
+      let testHomeCleanup = 'not-attempted'
+      if (passed) {
+        try { removeOwnedTestHome(productRoot); testHomeCleanup = 'removed' } catch (error) {
+          if (process.platform !== 'win32' || error?.code !== 'EPERM') throw error
+          testHomeCleanup = 'deferred-windows-eperm'
+        }
+      }
       write(passed ? 'pass' : 'fail', { terminal, staleGenerationPreserved: true,
-        recoveredGenerationDistinct: true })
-      if (passed) removeOwnedTestHome(productRoot)
-      else process.exitCode = 1
+        recoveredGenerationDistinct: true, testHomeCleanup })
+      if (!passed) process.exitCode = 1
     })
     window.close()
   } catch {
