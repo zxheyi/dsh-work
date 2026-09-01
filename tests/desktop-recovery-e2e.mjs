@@ -34,6 +34,15 @@ const assertRuntimeManifest = label => {
   assert.deepEqual(fs.readFileSync(runtimeManifest), runtimeManifestBytes)
   manifestChecks.push(label)
 }
+const removeOwnedHome = () => {
+  if (!fs.existsSync(home)) return
+  const link = path.join(home, 'profiles/dsh-work/node_modules/@deepseek-ai/dsh-cmdline')
+  if (fs.existsSync(link)) {
+    assert.equal(fs.lstatSync(link).isSymbolicLink(), true, 'only the test-created package junction may be detached')
+    fs.unlinkSync(link)
+  }
+  fs.rmSync(home, { recursive: true, force: true })
+}
 
 async function run() {
   try {
@@ -96,7 +105,7 @@ async function run() {
     assert.deepEqual(events, ['exit:1', 'close:1', 'exit:2', 'close:2'])
     assert.equal(host.snapshot().canStart, true)
     assertRuntimeManifest('manifest-after-recovery-stop')
-    fs.rmSync(home, { recursive: true, force: true })
+    removeOwnedHome()
     assertRuntimeManifest('manifest-after-home-cleanup')
     window.destroy()
     assertRuntimeManifest('manifest-after-window-destroy')
@@ -109,7 +118,7 @@ async function run() {
     process.exitCode = 1
   } finally {
     await host?.stop()
-    if ((!host || host.snapshot().canStart) && fs.existsSync(home)) fs.rmSync(home, { recursive: true, force: true })
+    if (!host || host.snapshot().canStart) removeOwnedHome()
     window?.destroy()
     app.quit()
   }
