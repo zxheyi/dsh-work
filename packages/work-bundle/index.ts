@@ -24,6 +24,10 @@ const deliverableSchema = z.object({
   kind: z.literal('file'),
   path: z.string().min(1),
 })
+const failureSchema = z.object({
+  requestId: z.string().min(1),
+  message: z.string().min(1),
+})
 const workSnapshotSchema = z.object({
   workId: z.string().min(1),
   title: z.string(),
@@ -32,6 +36,8 @@ const workSnapshotSchema = z.object({
   primarySession: primarySessionSchema,
   deliverable: deliverableSchema.nullable(),
   status: z.enum(['working', 'awaiting-review', 'completed', 'delivered']),
+  execution: z.enum(['idle', 'failed']),
+  lastFailure: failureSchema.nullable(),
 })
 
 export const workDomainSpec = defineDomain({

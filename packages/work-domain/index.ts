@@ -9,12 +9,13 @@ export type WorkErrorCode =
   | 'work/deliverable-invalid'
   | 'work/invalid-transition'
   | 'work/recovery-conflict'
+  | 'work/turn-failed'
 
 export class WorkError extends Error {
   readonly code: WorkErrorCode
 
-  constructor(code: WorkErrorCode, message: string) {
-    super(message)
+  constructor(code: WorkErrorCode, message: string, options?: ErrorOptions) {
+    super(message, options)
     this.name = 'WorkError'
     this.code = code
   }
@@ -33,9 +34,17 @@ export interface WorkSnapshot {
   readonly primarySession: WorkPrimarySession
   readonly deliverable: WorkFileDeliverable | null
   readonly status: WorkStatus
+  readonly execution: WorkExecution
+  readonly lastFailure: WorkFailure | null
 }
 
 export type WorkStatus = 'working' | 'awaiting-review' | 'completed' | 'delivered'
+export type WorkExecution = 'idle' | 'failed'
+
+export interface WorkFailure {
+  readonly requestId: string
+  readonly message: string
+}
 
 export interface WorkWorkspace {
   readonly workspaceId: string
@@ -208,6 +217,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
     workspace: Object.freeze({ ...snapshot.workspace }),
     primarySession: Object.freeze({ ...snapshot.primarySession }),
     deliverable: snapshot.deliverable ? Object.freeze({ ...snapshot.deliverable }) : null,
+    lastFailure: snapshot.lastFailure ? Object.freeze({ ...snapshot.lastFailure }) : null,
   })
 
   const initialize = async (): Promise<void> => {
@@ -266,6 +276,8 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         primarySession,
         deliverable: null,
         status: 'working',
+        execution: 'idle',
+        lastFailure: null,
       })
     },
 
@@ -283,17 +295,32 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         if (work.status === 'completed' || work.status === 'delivered') {
           throw new WorkError('work/invalid-transition', `Cannot submit a Turn while Work is ${work.status}.`)
         }
-        await options.harness.submitTurn({
-          requestId: createRequestId(),
-          sessionId: work.primarySession.sessionId,
-          instruction: request.command.instruction,
-        }, signal)
+        const requestId = createRequestId()
+        try {
+          await options.harness.submitTurn({
+            requestId,
+            sessionId: work.primarySession.sessionId,
+            instruction: request.command.instruction,
+          }, signal)
+        } catch (cause) {
+          await commit({
+            ...work,
+            execution: 'failed',
+            lastFailure: {
+              requestId,
+              message: 'Harness did not accept the Turn.',
+            },
+          })
+          throw new WorkError('work/turn-failed', 'Harness did not accept the Turn.', { cause })
+        }
         return commit({
           ...work,
           primarySession: Object.freeze({
             ...work.primarySession,
             turnCount: work.primarySession.turnCount + 1,
           }),
+          execution: 'idle',
+          lastFailure: null,
         })
       } else if (request.command.type === 'record-file') {
         if (work.deliverable) {

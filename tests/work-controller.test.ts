@@ -51,6 +51,8 @@ test('creates the only Work and returns it through the public controller', async
     },
     deliverable: null,
     status: 'working',
+    execution: 'idle',
+    lastFailure: null,
   })
   assert.deepEqual(await controller.get(), created)
 })
@@ -332,4 +334,61 @@ test('restores the Work, managed Workspace, and Primary Session after restart', 
     'session:session-restored',
   ])
   await fs.rm(workspaceRoot, { recursive: true, force: true })
+})
+
+test('continues in the same Primary Session after a failed Turn dispatch', async () => {
+  const store = createMemoryWorkStore()
+  let attempt = 0
+  const requestIds = ['request-failed', 'request-continued']
+  const sessionIds: string[] = []
+  const harness: HarnessWorkPort = {
+    async ensureWorkspace(request) {
+      return { workspaceId: 'workspace-continue', path: request.path }
+    },
+    async ensurePrimarySession(request) {
+      return { sessionId: request.sessionId }
+    },
+    async submitTurn(request) {
+      sessionIds.push(request.sessionId)
+      attempt++
+      if (attempt === 1) throw new Error('upstream detail must not be persisted')
+    },
+  }
+  const first = createWorkController({
+    createId: () => 'work-continue',
+    createSessionId: () => 'session-continue',
+    createRequestId: () => requestIds.shift()!,
+    workspaceRoot: '/managed',
+    harness,
+    store,
+  })
+  const created = await first.create({ title: 'Continue', goal: 'Recover without losing context.' })
+
+  await assert.rejects(
+    first.dispatch({
+      workId: created.workId,
+      command: { type: 'submit-turn', instruction: 'Attempt the work.' },
+    }),
+    (error: unknown) => error instanceof WorkError && error.code === 'work/turn-failed',
+  )
+  assert.deepEqual((await first.get())?.lastFailure, {
+    requestId: 'request-failed',
+    message: 'Harness did not accept the Turn.',
+  })
+
+  const restarted = createWorkController({
+    createRequestId: () => requestIds.shift()!,
+    workspaceRoot: '/managed',
+    harness,
+    store,
+  })
+  const continued = await restarted.dispatch({
+    workId: created.workId,
+    command: { type: 'submit-turn', instruction: 'Continue after the failure.' },
+  })
+
+  assert.deepEqual(sessionIds, ['session-continue', 'session-continue'])
+  assert.equal(continued.execution, 'idle')
+  assert.equal(continued.lastFailure, null)
+  assert.equal(continued.primarySession.turnCount, 1)
 })
