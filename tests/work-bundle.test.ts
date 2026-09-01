@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-import workBundle, { workDomainSpec } from '../packages/work-bundle/index.ts'
+import { apply as workBundle, inject, workDomainSpec } from '../packages/work-bundle/index.ts'
 import type { WorkController, WorkDomainState } from '../packages/work-domain/index.ts'
 
 test('mounts a storageDomain-backed WorkController as a Host service', async () => {
@@ -14,7 +14,7 @@ test('mounts a storageDomain-backed WorkController as a Host service', async () 
   let closed = false
   let dispose: (() => Promise<void>) | undefined
   const context = {
-    dshHomePath: home,
+    dshHomePath: (...segments: string[]) => path.join(home, ...segments),
     storageDomain: {
       async open(spec: unknown) {
         assert.equal(spec, workDomainSpec)
@@ -54,6 +54,7 @@ test('mounts a storageDomain-backed WorkController as a Host service', async () 
   const created = await controller!.create({ title: 'Bundle', goal: 'Persist through the Host.' })
 
   assert.equal(workDomainSpec.name, 'dsh_work')
+  assert.deepEqual(inject, ['dshHomePath', 'storageDomain', 'workspaceRegistry', 'sessionController'])
   assert.equal(workDomainSpec.global.schema.safeParse(state).success, true)
   assert.equal(state.work?.workId, created.workId)
   await dispose!()

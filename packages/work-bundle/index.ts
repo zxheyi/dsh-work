@@ -1,5 +1,3 @@
-import path from 'node:path'
-
 import { defineDomain } from '@deepseek-ai/dsh-storage-domain'
 import z from 'zod'
 
@@ -51,7 +49,7 @@ export const workDomainSpec = defineDomain({
 })
 
 interface WorkBundleContext extends HarnessWorkContext {
-  readonly dshHomePath: string
+  readonly dshHomePath: (...segments: string[]) => string
   readonly storageDomain: {
     open(spec: typeof workDomainSpec): Promise<{
       readonly global: WorkDomainGlobal
@@ -63,12 +61,13 @@ interface WorkBundleContext extends HarnessWorkContext {
 }
 
 export const inject = ['dshHomePath', 'storageDomain', 'workspaceRegistry', 'sessionController']
+export const name = 'dsh-work'
 
-export default async function workBundle(context: WorkBundleContext): Promise<void> {
+export async function apply(context: WorkBundleContext): Promise<void> {
   const domain = await context.storageDomain.open(workDomainSpec)
   context.effect(() => () => domain.close())
   context.provide('workController', createWorkController({
-    workspaceRoot: path.join(context.dshHomePath, 'workspaces'),
+    workspaceRoot: context.dshHomePath('workspaces'),
     harness: createHarnessWorkPort(context),
     store: createDomainWorkStore(domain.global),
   }))
