@@ -83,12 +83,12 @@ test('guardian owns cleanup after its Electron client disappears before Harness 
   let first, second
   try {
     first = await startClient(productRoot)
-    const starting = first.start()
+    const starting = assert.rejects(first.start(), /guardian unavailable/)
     await waitFor(() => fs.existsSync(path.join(productRoot, 'runtime/active.json')),
       'guardian did not claim a generation')
     const generation = activeGeneration(productRoot)
     assert.equal(await first.dispose(), true)
-    await assert.rejects(starting, /guardian unavailable/)
+    await starting
     first = null
 
     second = await startClient(productRoot)
