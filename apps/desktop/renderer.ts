@@ -1,11 +1,15 @@
-const labels = {
+type PresentationCode = DshWorkRuntimeCode | 'desktop-unavailable'
+type PresentationStatus = Omit<DshWorkRuntimeStatus, 'code'> & { readonly code: PresentationCode | null }
+
+const labels: Record<DshWorkRuntimeState, readonly [string, string]> = {
   stopped: ['已停止', '运行时尚未启动。点击启动，在产品持有的 Profile generation 中运行 Harness。'],
   starting: ['正在启动', '正在启动官方 CLI，等待 Harness 完成原生插件初始化。'],
   ready: ['运行就绪', 'Harness 已确认 Ready。可以停止并再次启动，验证生命周期闭环。'],
   stopping: ['正在停止', '已发送 EOF，等待 Harness 释放插件并退出；超时将报告清理异常。'],
   failed: ['运行异常', '本次运行未能正常完成。请按当前可用操作重试或隔离恢复。'],
 }
-const recovery = {
+
+const recovery: Partial<Record<PresentationCode, string>> = {
   'runtime-unavailable': '未找到匹配的独立运行时。请按开发说明配置 DSH_WORK_NODE 后重启桌面。',
   'cleanup-unconfirmed': '无法确认子进程已回收，暂时禁止重启。请检查宿主进程状态。',
   'forced-stop': '停止超时，已强制结束直接子进程；这不代表完整进程树已回收。',
@@ -16,28 +20,51 @@ const recovery = {
   'recovery-required': '上一个 Profile generation 的状态无法确认。你可以显式启动一个隔离 generation；旧数据不会被复用或删除。',
   'guardian-unavailable': '运行时 guardian 不可用。未启动 Harness，也未尝试按 PID 恢复。',
 }
-const start = document.getElementById('start'), stop = document.getElementById('stop'), recover = document.getElementById('recover')
-const render = value => {
-  const [label, detail] = labels[value.state] || labels.failed
+
+const element = <T extends HTMLElement>(id: string): T => {
+  const value = document.getElementById(id)
+  if (!value) throw new Error(`missing desktop element: ${id}`)
+  return value as T
+}
+
+const start = element<HTMLButtonElement>('start')
+const stop = element<HTMLButtonElement>('stop')
+const recover = element<HTMLButtonElement>('recover')
+
+const render = (value: PresentationStatus): void => {
+  const [label, detail] = labels[value.state]
   document.body.dataset.state = value.state
-  document.getElementById('state').textContent = label
-  document.getElementById('detail').textContent = recovery[value.code] || detail
-  document.getElementById('indicator').dataset.state = value.state
-  const diagnostic = document.getElementById('diagnostic')
+  element('state').textContent = label
+  element('detail').textContent = value.code ? recovery[value.code] ?? detail : detail
+  element('indicator').dataset.state = value.state
+  const diagnostic = element('diagnostic')
   diagnostic.hidden = !value.code
-  diagnostic.textContent = value.code || ''
+  diagnostic.textContent = value.code ?? ''
   start.disabled = !value.canStart
   stop.disabled = !value.canStop
   recover.hidden = !value.canRecover
   recover.disabled = !value.canRecover
   start.textContent = value.canRecover ? '启动已阻止' : value.state === 'failed' ? '重试启动' : '启动 Harness'
 }
-const disconnected = () => render({ state: 'failed', code: 'desktop-unavailable', canStart: false, canStop: false, canRecover: false })
+
+const disconnected = (): void => render({
+  state: 'failed',
+  code: 'desktop-unavailable',
+  canStart: false,
+  canStop: false,
+  canRecover: false,
+})
+
 // Subscribe before reading initial state; command responses are intentionally
 // ignored because a newer subscription event may already have arrived.
 let receivedLiveStatus = false
-window.dshWork.subscribe(value => { receivedLiveStatus = true; render(value) })
-window.dshWork.snapshot().then(value => { if (!receivedLiveStatus) render(value) }).catch(() => {
+window.dshWork.subscribe(value => {
+  receivedLiveStatus = true
+  render(value)
+})
+window.dshWork.snapshot().then(value => {
+  if (!receivedLiveStatus) render(value)
+}).catch(() => {
   if (!receivedLiveStatus) disconnected()
 })
 start.addEventListener('click', () => { window.dshWork.start().catch(disconnected) })

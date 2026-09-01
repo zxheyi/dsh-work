@@ -18,6 +18,8 @@ execFileSync(process.execPath, [compiler, '-p', path.join(root, 'tsconfig.build.
 const assets = [
   'packages/lifecycle-bundle/package.json',
   'packages/lifecycle-bundle/cordis.patch.yml',
+  'apps/desktop/index.html',
+  'apps/desktop/style.css',
 ]
 for (const relativePath of assets) {
   const target = path.join(output, relativePath)

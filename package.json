@@ -18,7 +18,7 @@
     "pretest:desktop": "pnpm build",
     "test:desktop": "node scripts/run-desktop-test.mjs",
     "predesktop": "pnpm build",
-    "desktop": "electron apps/desktop/main.mjs",
+    "desktop": "electron dist/apps/desktop/main.js",
     "verify:local": "node scripts/verify-local.mjs artifacts/runtime/context.json --desktop"
   },
   "dependencies": {

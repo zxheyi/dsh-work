@@ -46,12 +46,12 @@ export const requiredFiles = [
   '.github/workflows/desktop-lifecycle.yml',
   'apps/desktop/contracts.ts',
   'apps/desktop/index.html',
-  'apps/desktop/main.mjs',
-  'apps/desktop/preload.cjs',
-  'apps/desktop/renderer.js',
-  'apps/desktop/security.mjs',
+  'apps/desktop/main.ts',
+  'apps/desktop/preload.cts',
+  'apps/desktop/renderer.ts',
+  'apps/desktop/security.ts',
   'apps/desktop/style.css',
-  'apps/desktop/window.mjs',
+  'apps/desktop/window.ts',
   'packages/lifecycle-bundle/cordis.patch.yml',
   'packages/lifecycle-bundle/index.ts',
   'packages/lifecycle-bundle/package.json',
@@ -471,9 +471,9 @@ export function verifyContract(root) {
     requireText(errors, guardianProtocol, token, 'packages/runtime-guardian/protocol.ts')
   }
 
-  const desktopMain = read(root, 'apps/desktop/main.mjs')
+  const desktopMain = read(root, 'apps/desktop/main.ts')
   for (const token of ['createGuardianClient', 'app.requestSingleInstanceLock()', 'await host.dispose()']) {
-    requireText(errors, desktopMain, token, 'apps/desktop/main.mjs')
+    requireText(errors, desktopMain, token, 'apps/desktop/main.ts')
   }
 
   const localVerifier = read(root, 'scripts/verify-local.mjs')

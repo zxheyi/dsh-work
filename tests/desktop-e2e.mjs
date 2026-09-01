@@ -3,7 +3,7 @@ import { app, BrowserWindow } from 'electron'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { desktop } from '../apps/desktop/main.mjs'
+import { desktop } from '../dist/apps/desktop/main.js'
 
 const missing = process.argv.includes('--missing-runtime')
 const rendererCrash = process.argv.includes('--renderer-crash')
@@ -92,7 +92,7 @@ try {
   phase = rendererCrash ? 'renderer-crash-stops-runtime' : 'window-close-stops-runtime'
   let crashObserved = false
   if (rendererCrash) window.webContents.once('render-process-gone', () => { crashObserved = true })
-  // Exercise the real main.mjs window-close or renderer-gone shutdown entry.
+  // Exercise the emitted desktop window-close or renderer-gone shutdown entry.
   app.once('will-quit', () => {
     clearInterval(progress)
     const status = host.snapshot()

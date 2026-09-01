@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import { desktop } from '../apps/desktop/main.mjs'
+import { desktop } from '../dist/apps/desktop/main.js'
 
 const productRoot = process.env.DSH_WORK_HOST_DEATH_ROOT
 const reportPath = process.env.DSH_WORK_HOST_DEATH_REPORT

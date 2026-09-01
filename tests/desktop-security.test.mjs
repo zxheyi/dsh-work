@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { bindStatusBridge, resourceForRequest, STATUS_URL } from '../apps/desktop/security.mjs'
+import { bindStatusBridge, resourceForRequest, STATUS_URL } from '../apps/desktop/security.ts'
 
 test('status bridge admits only the exact local main frame and zero-argument methods', async () => {
   const handlers = new Map(), calls = []

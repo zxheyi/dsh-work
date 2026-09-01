@@ -21,6 +21,10 @@ export interface DesktopBridge {
 }
 
 declare global {
+  type DshWorkRuntimeState = RuntimeState
+  type DshWorkRuntimeCode = RuntimeCode
+  type DshWorkRuntimeStatus = RuntimeStatus
+
   interface Window {
     readonly dshWork: DesktopBridge
   }
