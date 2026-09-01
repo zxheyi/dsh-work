@@ -57,6 +57,64 @@ test('creates the only Work and returns it through the public controller', async
   assert.deepEqual(await controller.get(), created)
 })
 
+test('lists the singleton Work through the public controller', async () => {
+  const controller = createWorkController({
+    createId: () => 'work-listed',
+    createSessionId: () => 'session-listed',
+    workspaceRoot: '/managed',
+    harness: testHarness(),
+  })
+
+  assert.deepEqual(await controller.list(), [])
+
+  const created = await controller.create({
+    title: 'Listed Work',
+    goal: 'Expose a product-owned list projection.',
+  })
+
+  assert.deepEqual(await controller.list(), [created])
+})
+
+test('follows a complete baseline and committed Work upserts', async () => {
+  let persisted = false
+  const controller = createWorkController({
+    createId: () => 'work-followed',
+    createSessionId: () => 'session-followed',
+    workspaceRoot: '/managed',
+    harness: testHarness(),
+    store: {
+      async load() {
+        return null
+      },
+      async save() {
+        persisted = true
+      },
+    },
+  })
+  const abort = new AbortController()
+  const frames = controller.follow(abort.signal)[Symbol.asyncIterator]()
+
+  assert.deepEqual(await frames.next(), {
+    done: false,
+    value: { type: 'baseline', value: { items: [] } },
+  })
+
+  const pendingUpsert = frames.next()
+  const created = await controller.create({
+    title: 'Followed Work',
+    goal: 'Reconnect from a complete snapshot and continue with increments.',
+  })
+  const upsert = await pendingUpsert
+
+  assert.equal(persisted, true)
+  assert.deepEqual(upsert, {
+    done: false,
+    value: { type: 'upsert', work: created },
+  })
+  abort.abort()
+  await frames.return?.()
+})
+
 test('rejects a second Work instead of silently replacing the first one', async () => {
   const controller = createWorkController({
     createId: () => 'work-1',

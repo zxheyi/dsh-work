@@ -64,8 +64,18 @@ export interface WorkFileDeliverable {
 export interface WorkController {
   create(spec: CreateWorkSpec): Promise<WorkSnapshot>
   get(): Promise<WorkSnapshot | null>
+  list(): Promise<readonly WorkSnapshot[]>
+  follow(signal?: AbortSignal): AsyncIterable<WorkFollowFrame>
   dispatch(request: DispatchWorkRequest, signal?: AbortSignal): Promise<WorkSnapshot>
 }
+
+export interface WorkBaseline {
+  readonly items: readonly WorkSnapshot[]
+}
+
+export type WorkFollowFrame =
+  | { readonly type: 'baseline'; readonly value: WorkBaseline }
+  | { readonly type: 'upsert'; readonly work: WorkSnapshot }
 
 export interface DispatchWorkRequest {
   readonly workId: string
@@ -211,6 +221,10 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
   const createRequestId = options.createRequestId ?? randomUUID
   const store = options.store ?? createMemoryWorkStore()
   let work: WorkSnapshot | null = null
+  const followers = new Set<{
+    readonly frames: WorkFollowFrame[]
+    wake: (() => void) | null
+  }>()
 
   const freezeSnapshot = (snapshot: WorkSnapshot): WorkSnapshot => Object.freeze({
     ...snapshot,
@@ -243,10 +257,18 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
 
   let initialization: Promise<void> | null = null
   const ready = (): Promise<void> => initialization ??= initialize()
+  const publish = (frame: WorkFollowFrame): void => {
+    for (const follower of followers) {
+      follower.frames.push(frame)
+      follower.wake?.()
+      follower.wake = null
+    }
+  }
   const commit = async (next: WorkSnapshot): Promise<WorkSnapshot> => {
     const frozen = freezeSnapshot(next)
     await store.save(frozen)
     work = frozen
+    publish(Object.freeze({ type: 'upsert', work: frozen }))
     return frozen
   }
 
@@ -284,6 +306,45 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
     async get() {
       await ready()
       return work
+    },
+
+    async list() {
+      await ready()
+      return Object.freeze(work ? [work] : [])
+    },
+
+    async *follow(signal = new AbortController().signal) {
+      await ready()
+      if (signal.aborted) return
+      const follower = {
+        frames: [] as WorkFollowFrame[],
+        wake: null as (() => void) | null,
+      }
+      const wake = (): void => {
+        follower.wake?.()
+        follower.wake = null
+      }
+      followers.add(follower)
+      signal.addEventListener('abort', wake)
+      try {
+        yield Object.freeze({
+          type: 'baseline' as const,
+          value: Object.freeze({ items: Object.freeze(work ? [work] : []) }),
+        })
+        while (!signal.aborted) {
+          const frame = follower.frames.shift()
+          if (frame) {
+            yield frame
+            continue
+          }
+          await new Promise<void>((resolve) => {
+            follower.wake = resolve
+          })
+        }
+      } finally {
+        signal.removeEventListener('abort', wake)
+        followers.delete(follower)
+      }
     },
 
     async dispatch(request, signal) {
