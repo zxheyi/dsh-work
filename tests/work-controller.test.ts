@@ -48,6 +48,7 @@ test('creates the only Work and returns it through the public controller', async
       sessionId: 'session-1',
       turnCount: 0,
     },
+    deliverable: null,
   })
   assert.deepEqual(await controller.get(), created)
 })
@@ -180,4 +181,57 @@ test('dispatches multiple Turns through the same Primary Session', async () => {
     { requestId: 'request-2', sessionId: 'session-turns', instruction: 'Revise the introduction.' },
   ])
   assert.deepEqual(updated.primarySession, { sessionId: 'session-turns', turnCount: 2 })
+})
+
+test('records one existing file inside the managed Workspace as the deliverable', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-deliverable-'))
+  const harness = testHarness()
+  const controller = createWorkController({
+    createId: () => 'work-file',
+    createSessionId: () => 'session-file',
+    workspaceRoot,
+    harness,
+  })
+  const created = await controller.create({ title: 'File', goal: 'Produce one reviewable file.' })
+  await fs.mkdir(created.workspace.path, { recursive: true })
+  await fs.writeFile(path.join(created.workspace.path, 'launch-brief.md'), '# Launch brief\n')
+
+  const updated = await controller.dispatch({
+    workId: created.workId,
+    command: { type: 'record-file', path: 'launch-brief.md' },
+  })
+
+  assert.deepEqual(updated.deliverable, {
+    kind: 'file',
+    path: 'launch-brief.md',
+  })
+  assert.equal(updated.primarySession.turnCount, 0)
+  await fs.rm(workspaceRoot, { recursive: true, force: true })
+})
+
+test('rejects a second file deliverable', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-one-file-'))
+  const controller = createWorkController({
+    createId: () => 'work-one-file',
+    createSessionId: () => 'session-one-file',
+    workspaceRoot,
+    harness: testHarness(),
+  })
+  const created = await controller.create({ title: 'One file', goal: 'Keep one clear outcome.' })
+  await fs.mkdir(created.workspace.path, { recursive: true })
+  await fs.writeFile(path.join(created.workspace.path, 'first.md'), 'first')
+  await fs.writeFile(path.join(created.workspace.path, 'second.md'), 'second')
+  await controller.dispatch({
+    workId: created.workId,
+    command: { type: 'record-file', path: 'first.md' },
+  })
+
+  await assert.rejects(
+    controller.dispatch({
+      workId: created.workId,
+      command: { type: 'record-file', path: 'second.md' },
+    }),
+    (error: unknown) => error instanceof WorkError && error.code === 'work/deliverable-exists',
+  )
+  await fs.rm(workspaceRoot, { recursive: true, force: true })
 })

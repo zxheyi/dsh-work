@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
-export type WorkErrorCode = 'work/already-exists' | 'work/not-found'
+export type WorkErrorCode =
+  | 'work/already-exists'
+  | 'work/not-found'
+  | 'work/deliverable-exists'
+  | 'work/deliverable-invalid'
 
 export class WorkError extends Error {
   readonly code: WorkErrorCode
@@ -25,6 +29,7 @@ export interface WorkSnapshot {
   readonly goal: string
   readonly workspace: WorkWorkspace
   readonly primarySession: WorkPrimarySession
+  readonly deliverable: WorkFileDeliverable | null
 }
 
 export interface WorkWorkspace {
@@ -37,6 +42,11 @@ export interface WorkPrimarySession {
   readonly turnCount: number
 }
 
+export interface WorkFileDeliverable {
+  readonly kind: 'file'
+  readonly path: string
+}
+
 export interface WorkController {
   create(spec: CreateWorkSpec): Promise<WorkSnapshot>
   get(): Promise<WorkSnapshot | null>
@@ -45,12 +55,19 @@ export interface WorkController {
 
 export interface DispatchWorkRequest {
   readonly workId: string
-  readonly command: SubmitTurnCommand
+  readonly command: WorkCommand
 }
+
+export type WorkCommand = SubmitTurnCommand | RecordFileCommand
 
 export interface SubmitTurnCommand {
   readonly type: 'submit-turn'
   readonly instruction: string
+}
+
+export interface RecordFileCommand {
+  readonly type: 'record-file'
+  readonly path: string
 }
 
 export interface WorkControllerOptions {
@@ -157,6 +174,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         goal: spec.goal,
         workspace,
         primarySession,
+        deliverable: null,
       })
       return work
     },
@@ -169,18 +187,58 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
       if (!work || work.workId !== request.workId) {
         throw new WorkError('work/not-found', `Work not found: ${request.workId}`)
       }
-      await options.harness.submitTurn({
-        requestId: createRequestId(),
-        sessionId: work.primarySession.sessionId,
-        instruction: request.command.instruction,
-      }, signal)
-      work = Object.freeze({
-        ...work,
-        primarySession: Object.freeze({
-          ...work.primarySession,
-          turnCount: work.primarySession.turnCount + 1,
-        }),
-      })
+      if (request.command.type === 'submit-turn') {
+        await options.harness.submitTurn({
+          requestId: createRequestId(),
+          sessionId: work.primarySession.sessionId,
+          instruction: request.command.instruction,
+        }, signal)
+        work = Object.freeze({
+          ...work,
+          primarySession: Object.freeze({
+            ...work.primarySession,
+            turnCount: work.primarySession.turnCount + 1,
+          }),
+        })
+      } else {
+        if (work.deliverable) {
+          throw new WorkError('work/deliverable-exists', 'The first-phase product supports one file deliverable.')
+        }
+        const workspacePath = await fs.realpath(work.workspace.path)
+        const candidatePath = path.resolve(workspacePath, request.command.path)
+        const relativePath = path.relative(workspacePath, candidatePath)
+        if (
+          path.isAbsolute(request.command.path)
+          || relativePath === ''
+          || relativePath === '..'
+          || relativePath.startsWith(`..${path.sep}`)
+          || path.isAbsolute(relativePath)
+        ) {
+          throw new WorkError('work/deliverable-invalid', 'The file deliverable must be inside the managed Workspace.')
+        }
+        let resolvedFilePath: string
+        try {
+          resolvedFilePath = await fs.realpath(candidatePath)
+          if (!(await fs.stat(resolvedFilePath)).isFile()) throw new Error('not a regular file')
+        } catch {
+          throw new WorkError('work/deliverable-invalid', 'The file deliverable must be an existing regular file.')
+        }
+        const resolvedRelativePath = path.relative(workspacePath, resolvedFilePath)
+        if (
+          resolvedRelativePath === '..'
+          || resolvedRelativePath.startsWith(`..${path.sep}`)
+          || path.isAbsolute(resolvedRelativePath)
+        ) {
+          throw new WorkError('work/deliverable-invalid', 'The file deliverable must resolve inside the managed Workspace.')
+        }
+        work = Object.freeze({
+          ...work,
+          deliverable: Object.freeze({
+            kind: 'file',
+            path: resolvedRelativePath.split(path.sep).join(path.posix.sep),
+          }),
+        })
+      }
       return work
     },
   }
