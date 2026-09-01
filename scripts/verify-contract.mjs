@@ -37,10 +37,41 @@ export const requiredFiles = [
   'scripts/verify-product-runtime.mjs',
   'scripts/product-dependencies.test.mjs',
   'scripts/product-runtime-diagnostics.test.mjs',
+  'docs/acceptance/electron-lifecycle-slice.md',
+  '.github/workflows/desktop-lifecycle.yml',
+  'apps/desktop/contracts.d.ts',
+  'apps/desktop/index.html',
+  'apps/desktop/main.mjs',
+  'apps/desktop/preload.cjs',
+  'apps/desktop/renderer.js',
+  'apps/desktop/security.mjs',
+  'apps/desktop/style.css',
+  'apps/desktop/window.mjs',
+  'packages/lifecycle-bundle/cordis.patch.yml',
+  'packages/lifecycle-bundle/index.mjs',
+  'packages/lifecycle-bundle/package.json',
+  'packages/runtime-host/index.mjs',
+  'packages/runtime-host/official-launcher.mjs',
+  'scripts/local-evidence.test.mjs',
+  'scripts/run-desktop-test.mjs',
+  'scripts/verify-local.mjs',
+  'tests/desktop-e2e.mjs',
+  'tests/desktop-recovery-e2e.mjs',
+  'tests/desktop-security.test.mjs',
+  'tests/official-launcher.test.mjs',
+  'tests/owned-test-home.test.mjs',
+  'tests/renderer.test.mjs',
+  'tests/runtime-host.test.mjs',
+  'tests/runtime-integration.test.mjs',
+  'tests/fixtures/delayed-startup/index.mjs',
+  'tests/fixtures/delayed-startup/package.json',
+  'tests/support/owned-test-home.mjs',
+  'tests/support/runtime-output-guard.mjs',
 ]
 
 const linkedMarkdownFiles = [
   'runtime/README.md',
+  'docs/acceptance/electron-lifecycle-slice.md',
   'README.md',
   'README.en.md',
   'AGENTS.md',
@@ -307,6 +338,56 @@ export function verifyContract(root) {
   }
   if (runtimeWorkflow.includes('prototypes/')) {
     errors.push('.github/workflows/runtime-baseline.yml: production workflow must not depend on research prototypes')
+  }
+
+  const lifecycleAcceptance = read(root, 'docs/acceptance/electron-lifecycle-slice.md')
+  for (const heading of [
+    '## User outcome',
+    '## Ownership boundary',
+    '## Acceptance contract',
+    '## Security and diagnostics',
+    '## Verification',
+    '## Remaining M0 gates',
+  ]) {
+    requireText(errors, lifecycleAcceptance, heading, 'docs/acceptance/electron-lifecycle-slice.md')
+  }
+
+  const lifecycleBundle = read(root, 'packages/lifecycle-bundle/index.mjs')
+  for (const token of [
+    "import { exitOnStdinEnd } from '@deepseek-ai/dsh-cmdline'",
+    'ctx.appReady.onReady',
+    'ctx.effect',
+    "protocol: 'dsh-work.lifecycle.v1'",
+  ]) {
+    requireText(errors, lifecycleBundle, token, 'packages/lifecycle-bundle/index.mjs')
+  }
+
+  const launcher = read(root, 'packages/runtime-host/official-launcher.mjs')
+  for (const token of [
+    "require.resolve('@deepseek-ai/dsh/package.json')",
+    "'--profile', 'dsh-work'",
+    'shell: false',
+    'DSH_TELEMETRY_DISABLED',
+  ]) {
+    requireText(errors, launcher, token, 'packages/runtime-host/official-launcher.mjs')
+  }
+
+  const desktopWorkflow = read(root, '.github/workflows/desktop-lifecycle.yml')
+  for (const token of [
+    'name: Desktop lifecycle',
+    'branches: [main]',
+    'runs-on: ${{ matrix.os }}',
+    'node-version: 24.11.1',
+    'pnpm@10.34.4',
+    'prepare-product-runtime.mjs',
+    'verify-local.mjs artifacts/runtime/context.json --desktop',
+  ]) {
+    requireText(errors, desktopWorkflow, token, '.github/workflows/desktop-lifecycle.yml')
+  }
+  for (const forbidden of ['prototypes/', 'research/m0-architecture']) {
+    if (desktopWorkflow.includes(forbidden)) {
+      errors.push(`.github/workflows/desktop-lifecycle.yml: production workflow must not contain ${JSON.stringify(forbidden)}`)
+    }
   }
 
   let protection

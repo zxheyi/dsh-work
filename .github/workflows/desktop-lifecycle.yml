@@ -1,0 +1,60 @@
+name: Desktop lifecycle
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/**'
+      - 'packages/**'
+      - 'runtime/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/desktop-lifecycle.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-lifecycle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-development:
+    name: desktop-${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.11.1
+      - name: Install build-only package manager
+        run: npm install --global pnpm@10.34.4
+      - name: Materialize locked product packages
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Install accepted Electron artifact
+        run: node node_modules/electron/install.js
+      - name: Prepare immutable upstream artifact receipts
+        run: node scripts/prepare-product-runtime.mjs
+      - name: Verify product source, runtime, desktop and shutdown
+        run: node scripts/verify-local.mjs artifacts/runtime/context.json --desktop
+      - name: Retain sanitized revision-bound development evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-evidence-${{ matrix.os }}
+          path: |
+            artifacts/verification/
+            artifacts/desktop/
+          if-no-files-found: warn
+          retention-days: 14

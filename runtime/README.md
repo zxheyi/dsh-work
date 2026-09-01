@@ -22,8 +22,22 @@ The verifier checks the exact upstream remote, tag, commit and byte-clean source
 
 ## Current boundary
 
-This baseline makes `main` installable and independently verifiable. It does not yet provide a desktop window, a lifecycle Bundle, packaging, signing, or a runnable release. Those product behaviors land through separate PRs so runtime provenance stays reviewable on its own.
+This baseline makes `main` installable and independently verifiable. The repository also contains a separately reviewable development-only [Electron lifecycle slice](../docs/acceptance/electron-lifecycle-slice.md). It does not provide packaging, signing, persistent user Profiles, or a runnable release.
 
 Only Electron's install script is allowed by the root manifest when scripts are enabled. No Harness source build or patch step is introduced. The known upstream React/React DOM peer mismatch remains a browser-rendering gate, not a reason for an unreviewed override.
 
 Rollback the bounded runtime-baseline change before dependent behavior is adopted, or revert it together with its dependent changes. Do not change global installations or downgrade an existing user Profile. Any future baseline change requires a superseding ADR and new native evidence.
+
+## Development desktop
+
+After preparing the verified runtime and installing Electron's accepted artifact, launch or test the status window with the explicit standalone Node path from `artifacts/runtime/context.json`:
+
+```sh
+node node_modules/electron/install.js
+DSH_WORK_NODE=/absolute/path/to/verified/node pnpm desktop
+DSH_WORK_NODE=/absolute/path/to/verified/node pnpm test:runtime
+DSH_WORK_NODE=/absolute/path/to/verified/node pnpm test:desktop
+pnpm verify:local
+```
+
+On PowerShell, set `$env:DSH_WORK_NODE` before the relevant command. A missing or mismatched runtime produces a safe error state and never a global-tool fallback. `verify:local` runs the full revision-bound provenance, lifecycle, and actual Electron matrix using the prepared context.
