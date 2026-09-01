@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { createOfficialLauncher, prepareDevelopmentProfile } from '../packages/runtime-host/official-launcher.mjs'
+import { removeOwnedTestHome } from './support/owned-test-home.mjs'
 
 test('launcher uses explicit CLI, loopback, empty control pipe and an environment allowlist', () => {
   const node = process.execPath, home = os.tmpdir()
@@ -41,12 +42,23 @@ test('launcher uses explicit CLI, loopback, empty control pipe and an environmen
   }
 })
 
-test('Profile preparation refuses an existing user directory without overwriting it', () => {
+test('Profile preparation refreshes only the managed Profile, preserves generation content and rejects linked parents', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-home-boundary-'))
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-unrelated-profile-'))
   try {
     fs.writeFileSync(path.join(home, 'user-content'), 'preserved')
-    assert.throws(() => prepareDevelopmentProfile(home))
-    assert.deepEqual(fs.readdirSync(home), ['user-content'])
+    prepareDevelopmentProfile(home)
     assert.equal(fs.readFileSync(path.join(home, 'user-content'), 'utf8'), 'preserved')
-  } finally { fs.rmSync(home, { recursive: true, force: true }) }
+    assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'profiles/dsh-work/package.json'))).dsh.profile.patchReload, 'startup')
+    prepareDevelopmentProfile(home)
+    assert.equal(fs.readFileSync(path.join(home, 'user-content'), 'utf8'), 'preserved')
+    fs.rmSync(path.join(home, 'profiles'), { recursive: true, force: true })
+    fs.symlinkSync(outside, path.join(home, 'profiles'), 'junction')
+    assert.throws(() => prepareDevelopmentProfile(home), /owned Profile path/)
+    assert.deepEqual(fs.readdirSync(outside), [])
+    assert.throws(() => prepareDevelopmentProfile('relative-home'))
+  } finally {
+    removeOwnedTestHome(home)
+    fs.rmSync(outside, { recursive: true, force: true })
+  }
 })

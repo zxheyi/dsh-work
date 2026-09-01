@@ -2,7 +2,6 @@
 import { app, BrowserWindow } from 'electron'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { desktop } from '../apps/desktop/main.mjs'
 
@@ -18,7 +17,7 @@ const write = (status, extra = {}) => fs.writeFileSync(reportPath, JSON.stringif
   platform: process.platform, arch: process.arch, electron: process.versions.electron, ...extra }, null, 2))
 write('fail')
 const progress = setInterval(() => write('fail'), 250)
-app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-electron-test-')))
+app.setPath('userData', process.env.DSH_WORK_E2E_USER_DATA)
 app.commandLine.appendSwitch('disable-background-networking')
 if (missing) process.env.DSH_WORK_NODE = path.join(output, 'deliberately-missing-node')
 let host, window
@@ -42,7 +41,7 @@ try {
   phase = 'bridge-isolation'
   assert.equal(process.versions.electron, '44.0.0')
   phase = 'bridge-key-list'
-  assert.equal(await js('JSON.stringify(Object.keys(window.dshWork).sort())'), JSON.stringify(['snapshot', 'start', 'stop', 'subscribe']))
+  assert.equal(await js('JSON.stringify(Object.keys(window.dshWork).sort())'), JSON.stringify(['recover', 'snapshot', 'start', 'stop', 'subscribe']))
   phase = 'renderer-globals'
   assert.equal(await js('JSON.stringify([typeof require, typeof process, typeof ipcRenderer])'), JSON.stringify(['undefined', 'undefined', 'undefined']))
   phase = 'security-preferences'
