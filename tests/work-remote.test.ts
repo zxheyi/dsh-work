@@ -61,6 +61,7 @@ test('projects Work state without exposing Harness Workspace or Session internal
 
   assert.deepEqual(created, {
     workId: 'work-remote',
+    revision: 1,
     title: 'Remote Work',
     goal: 'Expose only product-owned state.',
     turnCount: 0,

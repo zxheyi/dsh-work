@@ -15,6 +15,7 @@ export type WorkDispatchRequest = DispatchWorkRequest
 
 export interface WorkView {
   readonly workId: string
+  readonly revision: number
   readonly title: string
   readonly goal: string
   readonly turnCount: number
@@ -56,6 +57,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
 function projectWork(work: WorkSnapshot): WorkView {
   return Object.freeze({
     workId: work.workId,
+    revision: work.revision,
     title: work.title,
     goal: work.goal,
     turnCount: work.primarySession.turnCount,

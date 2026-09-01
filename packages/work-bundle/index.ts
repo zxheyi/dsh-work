@@ -28,6 +28,7 @@ const failureSchema = z.object({
 })
 const workSnapshotSchema = z.object({
   workId: z.string().min(1),
+  revision: z.number().int().positive(),
   title: z.string(),
   goal: z.string(),
   workspace: workspaceSchema,

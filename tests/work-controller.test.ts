@@ -39,6 +39,7 @@ test('creates the only Work and returns it through the public controller', async
 
   assert.deepEqual(created, {
     workId: 'work-1',
+    revision: 1,
     title: 'Prepare launch brief',
     goal: 'Produce a launch brief that is ready to deliver.',
     workspace: {
@@ -243,6 +244,7 @@ test('dispatches multiple Turns through the same Primary Session', async () => {
     { requestId: 'request-2', sessionId: 'session-turns', instruction: 'Revise the introduction.' },
   ])
   assert.deepEqual(updated.primarySession, { sessionId: 'session-turns', turnCount: 2 })
+  assert.equal(updated.revision, 3)
 })
 
 test('records one existing file inside the managed Workspace as the deliverable', async () => {

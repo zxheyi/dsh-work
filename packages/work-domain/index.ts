@@ -28,6 +28,7 @@ export interface CreateWorkSpec {
 
 export interface WorkSnapshot {
   readonly workId: string
+  readonly revision: number
   readonly title: string
   readonly goal: string
   readonly workspace: WorkWorkspace
@@ -265,7 +266,10 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
     }
   }
   const commit = async (next: WorkSnapshot): Promise<WorkSnapshot> => {
-    const frozen = freezeSnapshot(next)
+    const frozen = freezeSnapshot({
+      ...next,
+      revision: work ? work.revision + 1 : 1,
+    })
     await store.save(frozen)
     work = frozen
     publish(Object.freeze({ type: 'upsert', work: frozen }))
@@ -292,6 +296,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
       })
       return commit({
         workId,
+        revision: 1,
         title: spec.title,
         goal: spec.goal,
         workspace,
