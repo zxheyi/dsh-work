@@ -21,6 +21,7 @@ interface RuntimeBaseline {
 interface LauncherPaths {
   readonly node: string
   readonly home: string
+  readonly port?: number
 }
 
 interface LauncherDependencies {
@@ -121,7 +122,7 @@ export function prepareProductProfile(home: string): void {
 export const prepareDevelopmentProfile = prepareProductProfile
 
 export function createOfficialLauncher(
-  { node, home }: LauncherPaths,
+  { node, home, port = 0 }: LauncherPaths,
   { spawnProcess = spawnRuntime, probe = probeRuntime }: LauncherDependencies = {},
 ): () => RuntimeChild {
   return () => {
@@ -152,7 +153,7 @@ export function createOfficialLauncher(
     })
     if (version.trim() !== `v${baseline.runtime.node}`) throw new Error('Node version mismatch')
     return spawnProcess(node, [path.join(installed, 'lib/bin.js'), '--profile', 'dsh-work',
-      '--no-open', '--host', '127.0.0.1', '--port', '0'], {
+      '--no-open', '--host', '127.0.0.1', '--port', String(port)], {
       cwd: home,
       env,
       shell: false,

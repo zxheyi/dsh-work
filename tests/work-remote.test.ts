@@ -6,6 +6,7 @@ import { RemoteError, remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
 
 import { createWorkController, type HarnessWorkPort } from '../packages/work-domain/index.ts'
 import WorkRemoteController from '../packages/work-api/index.ts'
+import { TYPERT_REMOTE } from '../packages/work-api/remote.ts'
 
 function harness(): HarnessWorkPort {
   return {
@@ -49,6 +50,28 @@ test('exports the narrow Work surface through public Typert markers', () => {
     { method: 'list', mode: 'unary' },
     { method: 'follow', mode: 'stream' },
   ])
+})
+
+test('publishes strict Work descriptors for the Client Remote mount', () => {
+  assert.deepEqual(TYPERT_REMOTE.descriptors.map(descriptor =>
+    `${descriptor.namespace}/${descriptor.method}`), [
+    'work/create',
+    'work/dispatch',
+    'work/list',
+    'work/follow',
+  ])
+  const dispatch = TYPERT_REMOTE.descriptors.find(descriptor => descriptor.method === 'dispatch')
+  assert.ok(dispatch)
+  const request = dispatch.parameters[0]
+  const codec = request?.codec
+  assert.equal(codec?.mode, 'strict')
+  if (!codec || codec.mode !== 'strict') {
+    throw new Error('Work dispatch must publish a strict request codec')
+  }
+  assert.throws(() => codec.schema.parse({
+    workId: 'work-1',
+    command: { type: 'deliver', unexpected: true },
+  }))
 })
 
 test('projects Work state without exposing Harness Workspace or Session internals', async () => {

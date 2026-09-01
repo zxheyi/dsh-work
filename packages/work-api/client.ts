@@ -1,155 +1,58 @@
-import { Service, type Context } from '@deepseek-ai/cordis'
+import type { Context } from '@deepseek-ai/cordis'
 import {
-  remoteErrorOf,
-  type RemoteFailure,
-  type RemoteResult,
-} from '@deepseek-ai/dsh-typert-protocol'
+  RemoteSnapshotStream,
+  RemoteStreamCarrierError,
+  type ClientRemote,
+} from '@deepseek-ai/dsh-api-gateway/client'
+import type { WorkRemoteFollowFrame } from './index.ts'
+import { ClientWorkModel, WorksController } from './client-model.ts'
+import { TYPERT_REMOTE } from './remote.ts'
 
-import type {
-  WorkCreateSpec,
-  WorkDispatchRequest,
-  WorkListValue,
-  WorkRemoteFollowFrame,
-  WorkView,
-} from './index.ts'
+export * from './client-model.ts'
 
-export interface WorkClientRemote {
-  create(spec: WorkCreateSpec): Promise<RemoteResult<WorkView>>
-  dispatch(request: WorkDispatchRequest, signal?: AbortSignal): Promise<RemoteResult<WorkView>>
-  list(): Promise<RemoteResult<WorkListValue>>
-  follow(signal?: AbortSignal): AsyncIterable<WorkRemoteFollowFrame>
+type WorkBaselineFrame = Extract<WorkRemoteFollowFrame, { readonly type: 'baseline' }>
+type WorkIncrementFrame = Extract<WorkRemoteFollowFrame, { readonly type: 'upsert' }>
+
+export type WorkStateStream = RemoteSnapshotStream<WorkBaselineFrame, WorkIncrementFrame>
+
+export function createWorkStateStream(
+  remote: ClientRemote,
+  model: ClientWorkModel,
+): WorkStateStream {
+  return new RemoteSnapshotStream<WorkBaselineFrame, WorkIncrementFrame>(remote.$stream({
+    name: 'Work state stream',
+    open: signal => remote.work.follow(signal),
+    ended: accepted => accepted
+      ? new RemoteStreamCarrierError('Work state stream ended without a terminal result')
+      : new Error('Work state stream ended before its opening snapshot'),
+    carrierFailed: () => {
+      model.handleCarrierFailure()
+    },
+  }), {
+    name: 'Work state stream',
+    isSnapshot: (frame): frame is WorkBaselineFrame => frame.type === 'baseline',
+    replace: frame => {
+      model.replaceBaseline(frame.value)
+    },
+    update: frame => {
+      model.upsertView(frame.work)
+    },
+    failed: error => {
+      model.handleStreamFailure(error)
+    },
+  })
 }
 
-export interface WorkClientSnapshot {
-  readonly items: readonly WorkView[]
-  readonly state: 'idle' | 'loading' | 'error'
-  readonly phase: 'pending' | 'ready'
-  readonly error: RemoteFailure | null
-}
+export const inject = ['remote']
 
-export interface WorkSource {
-  getSnapshot(): WorkClientSnapshot
-  subscribe(listener: () => void): () => void
-}
-
-export interface IWorks {
-  readonly list: WorkSource
-  create(spec: WorkCreateSpec): Promise<WorkView>
-  dispatch(request: WorkDispatchRequest, signal?: AbortSignal): Promise<WorkView>
-}
-
-declare module '@deepseek-ai/cordis' {
-  interface Context {
-    readonly works: IWorks
-  }
-}
-
-export class ClientWorkModel implements WorkSource {
-  private readonly remote: WorkClientRemote
-  private items: readonly WorkView[] = Object.freeze([])
-  private state: WorkClientSnapshot['state'] = 'loading'
-  private phase: WorkClientSnapshot['phase'] = 'pending'
-  private error: RemoteFailure | null = null
-  private readonly listeners = new Set<() => void>()
-  private snapshot: WorkClientSnapshot = this.buildSnapshot()
-
-  constructor(remote: WorkClientRemote) {
-    this.remote = remote
-  }
-
-  async create(spec: WorkCreateSpec): Promise<RemoteResult<WorkView>> {
-    const result = await this.remote.create(spec)
-    if (result.ok) this.upsertView(result.value)
-    return result
-  }
-
-  async dispatch(
-    request: WorkDispatchRequest,
-    signal?: AbortSignal,
-  ): Promise<RemoteResult<WorkView>> {
-    const result = await this.remote.dispatch(request, signal)
-    if (result.ok) this.upsertView(result.value)
-    return result
-  }
-
-  replaceBaseline(value: WorkListValue): void {
-    const incoming = value.items[0]
-    const installed = this.items[0]
-    if (incoming && (!installed || incoming.revision >= installed.revision)) {
-      this.items = Object.freeze([incoming])
-    }
-    this.state = 'idle'
-    this.phase = 'ready'
-    this.error = null
-    this.publish()
-  }
-
-  upsertView(work: WorkView): void {
-    const installed = this.items[0]
-    if (installed && installed.workId === work.workId && installed.revision > work.revision) return
-    this.items = Object.freeze([work])
-    this.publish()
-  }
-
-  handleCarrierFailure(): void {
-    this.state = 'loading'
-    this.error = null
-    this.publish()
-  }
-
-  handleStreamFailure(error: unknown): void {
-    const failure = remoteErrorOf(error)
-    if (!failure) throw error
-    this.state = 'error'
-    this.error = failure
-    this.publish()
-  }
-
-  subscribe(listener: () => void): () => void {
-    this.listeners.add(listener)
-    return () => {
-      this.listeners.delete(listener)
-    }
-  }
-
-  getSnapshot(): WorkClientSnapshot {
-    return this.snapshot
-  }
-
-  private buildSnapshot(): WorkClientSnapshot {
-    return Object.freeze({
-      items: this.items,
-      state: this.state,
-      phase: this.phase,
-      error: this.error,
-    })
-  }
-
-  private publish(): void {
-    this.snapshot = this.buildSnapshot()
-    for (const listener of this.listeners) listener()
-  }
-}
-
-export class WorksController extends Service implements IWorks {
-  readonly list: WorkSource
-  private readonly model: ClientWorkModel
-
-  constructor(ctx: Context, model: ClientWorkModel) {
-    super(ctx, 'works')
-    this.model = model
-    this.list = model
-  }
-
-  async create(spec: WorkCreateSpec): Promise<WorkView> {
-    const result = await this.model.create(spec)
-    if (!result.ok) throw result.error
-    return result.value
-  }
-
-  async dispatch(request: WorkDispatchRequest, signal?: AbortSignal): Promise<WorkView> {
-    const result = await this.model.dispatch(request, signal)
-    if (!result.ok) throw result.error
-    return result.value
+export async function apply(ctx: Context): Promise<() => Promise<void>> {
+  const disposeRemote = await ctx.remote.$mount(TYPERT_REMOTE)
+  const model = new ClientWorkModel(ctx.remote.work)
+  new WorksController(ctx, model)
+  const control = createWorkStateStream(ctx.remote, model)
+  control.start()
+  return async () => {
+    await control.dispose()
+    await disposeRemote()
   }
 }

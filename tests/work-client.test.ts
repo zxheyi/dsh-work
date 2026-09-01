@@ -8,7 +8,7 @@ import {
   ClientWorkModel,
   WorksController,
   type WorkClientRemote,
-} from '../packages/work-api/client.ts'
+} from '../packages/work-api/client-model.ts'
 import type {
   WorkCreateSpec,
   WorkDispatchRequest,
