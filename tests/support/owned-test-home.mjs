@@ -25,6 +25,8 @@ export function removeOwnedTestHome(home) {
     }
   }
   detachLinks(home)
-  fs.rmSync(home, { recursive: true, force: true })
+  // Windows can retain a just-exited process directory handle briefly. Node's
+  // bounded EPERM/EBUSY retry applies only when maxRetries is explicit.
+  fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
   return detached
 }

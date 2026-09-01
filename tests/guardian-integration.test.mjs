@@ -36,12 +36,14 @@ test('official Harness clean stop reuses one persistent generation across guardi
     const generation = activeGeneration(productRoot)
     assert.equal((await first.stop()).state, 'stopped')
     assert.equal(await first.dispose(), true)
+    first = null
 
     second = await startClient(productRoot)
     assert.equal((await second.start()).state, 'ready')
     assert.equal(activeGeneration(productRoot), generation)
     assert.equal((await second.stop()).state, 'stopped')
     assert.equal(await second.dispose(), true)
+    second = null
   } finally {
     await first?.stop().catch(() => {})
     await first?.dispose().catch(() => {})
@@ -59,12 +61,14 @@ test('guardian owns cleanup after its Electron client disappears after Harness R
     assert.equal((await first.start()).state, 'ready')
     const generation = activeGeneration(productRoot)
     assert.equal(await first.dispose(), true)
+    first = null
 
     second = await startClient(productRoot)
     assert.equal((await second.start()).state, 'ready')
     assert.equal(activeGeneration(productRoot), generation)
     assert.equal((await second.stop()).state, 'stopped')
     assert.equal(await second.dispose(), true)
+    second = null
   } finally {
     await first?.stop().catch(() => {})
     await first?.dispose().catch(() => {})
@@ -85,12 +89,14 @@ test('guardian owns cleanup after its Electron client disappears before Harness 
     const generation = activeGeneration(productRoot)
     assert.equal(await first.dispose(), true)
     await assert.rejects(starting, /guardian unavailable/)
+    first = null
 
     second = await startClient(productRoot)
     assert.equal((await second.start()).state, 'ready')
     assert.equal(activeGeneration(productRoot), generation)
     assert.equal((await second.stop()).state, 'stopped')
     assert.equal(await second.dispose(), true)
+    second = null
   } finally {
     await first?.stop().catch(() => {})
     await first?.dispose().catch(() => {})
@@ -128,6 +134,7 @@ test('explicit isolated recovery preserves uncertain bytes and never touches an 
     assert.equal(sentinel.signalCode, null)
     assert.equal((await client.stop()).state, 'stopped')
     assert.equal(await client.dispose(), true)
+    client = null
   } finally {
     sentinel.stdin.end()
     await sentinelClosed
