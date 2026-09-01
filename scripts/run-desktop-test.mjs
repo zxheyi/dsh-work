@@ -18,7 +18,7 @@ for (const mode of selected) {
   const reportPath = `artifacts/desktop/${mode}/result.json`
   fs.mkdirSync(path.dirname(reportPath), { recursive: true })
   fs.writeFileSync(reportPath, JSON.stringify({ status: 'fail', phase: 'launch', runId }))
-  const entry = mode === 'runtime-recovery' ? 'tests/desktop-recovery-e2e.mjs' : 'tests/desktop-e2e.mjs'
+  const entry = mode === 'runtime-recovery' ? 'tests/desktop-recovery-e2e.ts' : 'tests/desktop-e2e.ts'
   const executable = mode === 'host-death' ? process.execPath : electron
   const args = mode === 'host-death' ? ['scripts/run-host-death-test.mjs'] :
     [`--user-data-dir=${userData}`, entry,

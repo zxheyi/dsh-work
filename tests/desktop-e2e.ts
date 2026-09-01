@@ -3,7 +3,13 @@ import { app, BrowserWindow } from 'electron'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { desktop } from '../dist/apps/desktop/main.js'
+import type { GuardianClient } from '../packages/runtime-guardian/client.ts'
+import type { GuardianSnapshot } from '../packages/runtime-guardian/protocol.ts'
+
+const emittedDesktopEntry: string = '../dist/apps/desktop/main.js'
+const { desktop } = await import(emittedDesktopEntry) as {
+  desktop: Promise<{ host: GuardianClient; window: BrowserWindow }>
+}
 
 const missing = process.argv.includes('--missing-runtime')
 const rendererCrash = process.argv.includes('--renderer-crash')
@@ -12,20 +18,23 @@ const output = path.resolve('artifacts/desktop', name)
 fs.mkdirSync(output, { recursive: true })
 const reportPath = path.join(output, 'result.json')
 let phase = 'boot'
-const write = (status, extra = {}) => fs.writeFileSync(reportPath, JSON.stringify({ status, phase,
+const write = (status: 'pass' | 'fail', extra: Record<string, unknown> = {}): void => fs.writeFileSync(reportPath, JSON.stringify({ status, phase,
   runId: process.env.DSH_WORK_E2E_RUN_ID,
   platform: process.platform, arch: process.arch, electron: process.versions.electron, ...extra }, null, 2))
 write('fail')
 const progress = setInterval(() => write('fail'), 250)
-app.setPath('userData', process.env.DSH_WORK_E2E_USER_DATA)
+const userData = process.env.DSH_WORK_E2E_USER_DATA
+assert.ok(userData)
+app.setPath('userData', userData)
 app.commandLine.appendSwitch('disable-background-networking')
 if (missing) process.env.DSH_WORK_NODE = path.join(output, 'deliberately-missing-node')
-let host, window
-async function run() {
+let host: GuardianClient | null = null
+async function run(): Promise<void> {
 try {
-  ({ host, window } = await desktop)
-  const js = source => window.webContents.executeJavaScript(source)
-  const waitState = async state => {
+  const active = await desktop
+  host = active.host
+  const js = <T = unknown>(source: string): Promise<T> => active.window.webContents.executeJavaScript(source) as Promise<T>
+  const waitState = async (state: string): Promise<void> => {
     const deadline = Date.now() + 35_000
     while (Date.now() < deadline) {
       if (await js('document.body.dataset.state') === state) return
@@ -33,9 +42,9 @@ try {
     }
     throw new Error('state timeout')
   }
-  const screenshot = async state => {
+  const screenshot = async (state: string): Promise<void> => {
     await waitState(state)
-    fs.writeFileSync(path.join(output, `${state}.png`), (await window.webContents.capturePage()).toPNG())
+    fs.writeFileSync(path.join(output, `${state}.png`), (await active.window.webContents.capturePage()).toPNG())
   }
   await waitState('stopped')
   phase = 'bridge-isolation'
@@ -45,7 +54,10 @@ try {
   phase = 'renderer-globals'
   assert.equal(await js('JSON.stringify([typeof require, typeof process, typeof ipcRenderer])'), JSON.stringify(['undefined', 'undefined', 'undefined']))
   phase = 'security-preferences'
-  const prefs = window.webContents.getLastWebPreferences()
+  const preferences = active.window.webContents as unknown as {
+    getLastWebPreferences(): { sandbox?: boolean; contextIsolation?: boolean; nodeIntegration?: boolean }
+  }
+  const prefs = preferences.getLastWebPreferences()
   phase = 'sandbox-preference'; assert.equal(prefs.sandbox, true)
   phase = 'isolation-preference'; assert.equal(prefs.contextIsolation, true)
   phase = 'node-preference'; assert.equal(prefs.nodeIntegration, false)
@@ -57,7 +69,7 @@ try {
   await js("document.getElementById('start').click()")
   if (missing) {
     await screenshot('failed')
-    assert.equal(host.snapshot().code, 'runtime-unavailable')
+    assert.equal(active.host.snapshot().code, 'runtime-unavailable')
     assert.equal(await js("document.getElementById('start').disabled"), false)
     await js("document.getElementById('start').click()")
     await waitState('failed')
@@ -68,12 +80,12 @@ try {
     phase = 'stop-button'
     await js("document.getElementById('stop').click()")
     await waitState('stopped')
-    assert.equal(host.snapshot().code, null)
-    const states = await js('window.observedStates')
+    assert.equal(active.host.snapshot().code, null)
+    const states = await js<string[]>('window.observedStates')
     for (const state of ['starting', 'ready', 'stopping', 'stopped']) assert.ok(states.includes(state))
     phase = 'early-stop-through-renderer'
     await js('window.observedStates = []; window.earlyStart = window.dshWork.start(); window.earlyStop = window.dshWork.stop(); undefined')
-    const early = await js('Promise.all([window.earlyStart, window.earlyStop])')
+    const early = await js<GuardianSnapshot[]>('Promise.all([window.earlyStart, window.earlyStop])')
     assert.ok(early.every(value => value.state === 'stopped' && value.code === null && value.canStart))
     await waitState('stopped')
     assert.deepEqual(await js('window.observedStates'), ['starting', 'stopping', 'stopped'])
@@ -88,20 +100,20 @@ try {
   await js("location.href = 'https://example.com/'")
   await new Promise(resolve => setTimeout(resolve, 100))
   assert.equal(BrowserWindow.getAllWindows().length, 1)
-  assert.equal(window.webContents.getURL(), 'dsh-work://status/index.html')
+  assert.equal(active.window.webContents.getURL(), 'dsh-work://status/index.html')
   phase = rendererCrash ? 'renderer-crash-stops-runtime' : 'window-close-stops-runtime'
   let crashObserved = false
-  if (rendererCrash) window.webContents.once('render-process-gone', () => { crashObserved = true })
+  if (rendererCrash) active.window.webContents.once('render-process-gone', () => { crashObserved = true })
   // Exercise the emitted desktop window-close or renderer-gone shutdown entry.
   app.once('will-quit', () => {
     clearInterval(progress)
-    const status = host.snapshot()
+    const status = active.host.snapshot()
     const passed = status.canStart && (missing ? status.code === 'runtime-unavailable' : status.state === 'stopped') && (!rendererCrash || crashObserved)
     write(passed ? 'pass' : 'fail', { terminal: status, crashObserved, screenshots: missing ? ['stopped.png', 'failed.png'] : ['stopped.png', 'ready.png'] })
     if (!passed) process.exitCode = 1
   })
-  if (rendererCrash) window.webContents.forcefullyCrashRenderer()
-  else window.close()
+  if (rendererCrash) active.window.webContents.forcefullyCrashRenderer()
+  else active.window.close()
 } catch {
   clearInterval(progress)
   write('fail')

@@ -57,8 +57,8 @@ try {
   run('build', ['scripts/build-product.mjs'])
   run('unit', ['--test', '--test-reporter=tap', ...scriptTests,
     'tests/typescript-toolchain.test.ts',
-    'tests/runtime-host.test.ts', 'tests/official-launcher.test.ts', 'tests/desktop-security.test.mjs',
-    'tests/renderer.test.mjs', 'tests/owned-test-home.test.ts', 'tests/generation-store.test.ts',
+    'tests/runtime-host.test.ts', 'tests/official-launcher.test.ts', 'tests/desktop-security.test.ts',
+    'tests/renderer.test.ts', 'tests/owned-test-home.test.ts', 'tests/generation-store.test.ts',
     'tests/runtime-guardian.test.ts', 'tests/guardian-client.test.ts'])
   provenance('after-unit')
   run('contract', ['scripts/verify-contract.mjs'])
