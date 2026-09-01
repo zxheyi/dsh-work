@@ -6,8 +6,10 @@
   "description": "Electron desktop composition of the official DeepSeek Harness CLI",
   "packageManager": "pnpm@10.34.4",
   "scripts": {
-    "test": "node --test scripts/*.test.mjs tests/runtime-host.test.mjs tests/official-launcher.test.mjs tests/desktop-security.test.mjs tests/renderer.test.mjs tests/owned-test-home.test.mjs tests/generation-store.test.mjs tests/runtime-guardian.test.mjs tests/guardian-client.test.mjs",
-    "check": "node scripts/verify-contract.mjs",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test scripts/*.test.mjs tests/typescript-toolchain.test.ts tests/runtime-host.test.mjs tests/official-launcher.test.mjs tests/desktop-security.test.mjs tests/renderer.test.mjs tests/owned-test-home.test.mjs tests/generation-store.test.mjs tests/runtime-guardian.test.mjs tests/guardian-client.test.mjs",
+    "check": "pnpm typecheck && node scripts/verify-contract.mjs",
     "runtime:prepare": "node scripts/prepare-product-runtime.mjs",
     "runtime:verify": "node scripts/verify-product-runtime.mjs artifacts/runtime/context.json",
     "test:runtime": "node --test tests/runtime-integration.test.mjs tests/guardian-integration.test.mjs",
@@ -20,9 +22,13 @@
     "@deepseek-ai/dsh-cmdline": "0.1.2-alpha.2"
   },
   "devDependencies": {
-    "electron": "44.0.0"
+    "@types/node": "24.13.3",
+    "electron": "44.0.0",
+    "typescript": "7.0.2"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["electron"]
+    "onlyBuiltDependencies": [
+      "electron"
+    ]
   }
 }

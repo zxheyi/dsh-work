@@ -33,6 +33,8 @@ export const requiredFiles = [
   'runtime/README.md',
   'package.json',
   'pnpm-lock.yaml',
+  'tsconfig.json',
+  'tsconfig.build.json',
   '.github/workflows/runtime-baseline.yml',
   'scripts/runtime-provenance.mjs',
   'scripts/prepare-product-runtime.mjs',
@@ -41,7 +43,7 @@ export const requiredFiles = [
   'scripts/product-runtime-diagnostics.test.mjs',
   'docs/acceptance/electron-lifecycle-slice.md',
   '.github/workflows/desktop-lifecycle.yml',
-  'apps/desktop/contracts.d.ts',
+  'apps/desktop/contracts.ts',
   'apps/desktop/index.html',
   'apps/desktop/main.mjs',
   'apps/desktop/preload.cjs',
@@ -78,6 +80,7 @@ export const requiredFiles = [
   'tests/guardian-integration.test.mjs',
   'tests/fixtures/delayed-startup/index.mjs',
   'tests/fixtures/delayed-startup/package.json',
+  'tests/typescript-toolchain.test.ts',
   'tests/support/owned-test-home.mjs',
   'tests/support/runtime-output-guard.mjs',
 ]
@@ -249,6 +252,40 @@ export function verifyContract(root) {
       filename: 'node-v24.11.1-win-x64.zip',
       sha256: '5355ae6d7c49eddcfde7d34ac3486820600a831bf81dc3bdca5c8db6a9bb0e76',
     },
+  }
+
+  try {
+    const manifest = JSON.parse(read(root, 'package.json'))
+    const expectedScripts = {
+      build: 'tsc -p tsconfig.build.json',
+      typecheck: 'tsc -p tsconfig.json',
+      check: 'pnpm typecheck && node scripts/verify-contract.mjs',
+    }
+    for (const [name, command] of Object.entries(expectedScripts)) {
+      if (manifest.scripts?.[name] !== command) {
+        errors.push(`package.json: ${name} must remain ${JSON.stringify(command)}`)
+      }
+    }
+    if (!manifest.scripts?.test?.includes('tests/typescript-toolchain.test.ts')) {
+      errors.push('package.json: test must execute the native TypeScript smoke')
+    }
+  } catch {
+    errors.push('package.json: invalid product manifest')
+  }
+
+  try {
+    const typecheck = JSON.parse(read(root, 'tsconfig.json'))
+    const build = JSON.parse(read(root, 'tsconfig.build.json'))
+    const options = typecheck.compilerOptions || {}
+    if (options.strict !== true || options.noEmit !== true || options.module !== 'NodeNext' ||
+        options.allowImportingTsExtensions !== true || options.rewriteRelativeImportExtensions !== true) {
+      errors.push('tsconfig.json: strict Node ESM typecheck contract is incomplete')
+    }
+    if (build.compilerOptions?.noEmit !== false || build.compilerOptions?.outDir !== 'dist') {
+      errors.push('tsconfig.build.json: emitted runtime output must remain under dist')
+    }
+  } catch {
+    errors.push('TypeScript configuration is invalid')
   }
   try {
     const baseline = JSON.parse(read(root, 'runtime/baseline.json'))

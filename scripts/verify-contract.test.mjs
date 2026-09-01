@@ -107,6 +107,28 @@ test('weakening the accepted TypeScript runtime boundary fails verification', ()
   }
 })
 
+test('removing the TypeScript typecheck command fails verification', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-typescript-command-'))
+  try {
+    for (const relativePath of requiredFiles) {
+      const target = path.join(root, relativePath)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.copyFileSync(path.join(repositoryRoot, relativePath), target)
+    }
+
+    const target = path.join(root, 'package.json')
+    const manifest = JSON.parse(fs.readFileSync(target, 'utf8'))
+    manifest.scripts.typecheck = 'true'
+    fs.writeFileSync(target, JSON.stringify(manifest))
+
+    assert.ok(
+      verifyContract(root).includes('package.json: typecheck must remain "tsc -p tsconfig.json"'),
+    )
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('every active runtime baseline field is locked to the accepted decision', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-baseline-'))
   try {

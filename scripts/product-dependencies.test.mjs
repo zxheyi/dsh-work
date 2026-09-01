@@ -11,7 +11,11 @@ test('product dependencies match the accepted baseline with a frozen DSH family'
     '@deepseek-ai/dsh': baseline.runtime.version,
     '@deepseek-ai/dsh-cmdline': baseline.runtime.version,
   })
-  assert.deepEqual(manifest.devDependencies, { electron: baseline.electron })
+  assert.deepEqual(manifest.devDependencies, {
+    '@types/node': '24.13.3',
+    electron: baseline.electron,
+    typescript: '7.0.2',
+  })
   assert.ok(lock.includes(baseline.runtime.integrity))
   const family = [...lock.matchAll(/^  '@deepseek-ai\/(dsh(?:-[^@']+)?)@([^':(]+)(?:\([^']*\))?':/gm)]
   assert.ok(family.length >= 215)
