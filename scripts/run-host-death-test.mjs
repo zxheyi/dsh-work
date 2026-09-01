@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { createGuardianClient } from '../packages/runtime-guardian/client.mjs'
+import { createGuardianClient } from '../packages/runtime-guardian/client.ts'
 import { removeOwnedTestHome } from '../tests/support/owned-test-home.mjs'
 
 const output = path.resolve('artifacts/desktop/host-death')

@@ -221,13 +221,13 @@ test('removing guardian disconnect ownership fails verification', () => {
       fs.copyFileSync(path.join(repositoryRoot, relativePath), target)
     }
 
-    const target = path.join(root, 'packages/runtime-guardian/process.mjs')
+    const target = path.join(root, 'packages/runtime-guardian/process.ts')
     const original = fs.readFileSync(target, 'utf8')
     fs.writeFileSync(target, original.replace("process.once('disconnect'", "process.once('unrelated'"))
 
     assert.ok(
       verifyContract(root).includes(
-        'packages/runtime-guardian/process.mjs: missing required contract text "process.once(\'disconnect\'"',
+        'packages/runtime-guardian/process.ts: missing required contract text "process.once(\'disconnect\'"',
       ),
     )
   } finally {

@@ -3,7 +3,7 @@ import { app } from 'electron'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createGenerationStore } from '../packages/runtime-guardian/generation-store.mjs'
+import { createGenerationStore } from '../packages/runtime-guardian/generation-store.ts'
 import { desktop } from '../apps/desktop/main.mjs'
 import { removeOwnedTestHome } from './support/owned-test-home.mjs'
 

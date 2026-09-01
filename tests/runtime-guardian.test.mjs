@@ -6,9 +6,9 @@ import path from 'node:path'
 import { PassThrough } from 'node:stream'
 import test from 'node:test'
 
-import { createGenerationStore } from '../packages/runtime-guardian/generation-store.mjs'
-import { boundedGuardianSnapshot, GUARDIAN_PROTOCOL, validGuardianCommand } from '../packages/runtime-guardian/protocol.mjs'
-import { createGuardianService } from '../packages/runtime-guardian/service.mjs'
+import { createGenerationStore } from '../packages/runtime-guardian/generation-store.ts'
+import { boundedGuardianSnapshot, GUARDIAN_PROTOCOL, validGuardianCommand } from '../packages/runtime-guardian/protocol.ts'
+import { createGuardianService } from '../packages/runtime-guardian/service.ts'
 
 const fixture = () => {
   const productRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-guardian-service-'))

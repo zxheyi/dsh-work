@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { createGuardianClient } from '../../packages/runtime-guardian/client.mjs'
+import { createGuardianClient } from '../../packages/runtime-guardian/client.ts'
 import { createStatusWindow, registerDesktopScheme } from './window.mjs'
 
 registerDesktopScheme()

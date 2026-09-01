@@ -5,8 +5,8 @@ import path from 'node:path'
 import test from 'node:test'
 import { EventEmitter } from 'node:events'
 
-import { createGuardianClient } from '../packages/runtime-guardian/client.mjs'
-import { GUARDIAN_PROTOCOL } from '../packages/runtime-guardian/protocol.mjs'
+import { createGuardianClient } from '../packages/runtime-guardian/client.ts'
+import { GUARDIAN_PROTOCOL } from '../packages/runtime-guardian/protocol.ts'
 
 test('verified standalone Node starts and cleanly disconnects an idle guardian', async () => {
   const productRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-guardian-client-'))

@@ -56,11 +56,11 @@ export const requiredFiles = [
   'packages/lifecycle-bundle/package.json',
   'packages/runtime-host/index.ts',
   'packages/runtime-host/official-launcher.ts',
-  'packages/runtime-guardian/client.mjs',
-  'packages/runtime-guardian/generation-store.mjs',
-  'packages/runtime-guardian/process.mjs',
-  'packages/runtime-guardian/protocol.mjs',
-  'packages/runtime-guardian/service.mjs',
+  'packages/runtime-guardian/client.ts',
+  'packages/runtime-guardian/generation-store.ts',
+  'packages/runtime-guardian/process.ts',
+  'packages/runtime-guardian/protocol.ts',
+  'packages/runtime-guardian/service.ts',
   'scripts/local-evidence.test.mjs',
   'scripts/run-host-death-test.mjs',
   'scripts/run-desktop-test.mjs',
@@ -447,27 +447,27 @@ export function verifyContract(root) {
     requireText(errors, launcher, token, 'packages/runtime-host/official-launcher.ts')
   }
 
-  const generationStore = read(root, 'packages/runtime-guardian/generation-store.mjs')
+  const generationStore = read(root, 'packages/runtime-guardian/generation-store.ts')
   for (const token of ["fs.openSync(file, 'wx'", 'dsh-work-terminal.json',
     "return { status: 'blocked', code: 'recovery-required' }", 'quarantine']) {
-    requireText(errors, generationStore, token, 'packages/runtime-guardian/generation-store.mjs')
+    requireText(errors, generationStore, token, 'packages/runtime-guardian/generation-store.ts')
   }
 
-  const guardianProcess = read(root, 'packages/runtime-guardian/process.mjs')
+  const guardianProcess = read(root, 'packages/runtime-guardian/process.ts')
   for (const token of ["process.once('disconnect'", 'await service.dispose()',
     'createOfficialLauncher', 'prepareProductProfile']) {
-    requireText(errors, guardianProcess, token, 'packages/runtime-guardian/process.mjs')
+    requireText(errors, guardianProcess, token, 'packages/runtime-guardian/process.ts')
   }
   for (const forbidden of ['process.kill(', '.kill(']) {
     if (guardianProcess.includes(forbidden)) {
-      errors.push(`packages/runtime-guardian/process.mjs: guardian must not contain ${JSON.stringify(forbidden)}`)
+      errors.push(`packages/runtime-guardian/process.ts: guardian must not contain ${JSON.stringify(forbidden)}`)
     }
   }
 
-  const guardianProtocol = read(root, 'packages/runtime-guardian/protocol.mjs')
+  const guardianProtocol = read(root, 'packages/runtime-guardian/protocol.ts')
   for (const token of ["'dsh-work.guardian.v1'", "['start', 'stop', 'recover', 'snapshot']",
     "'recovery-required'", 'canRecover']) {
-    requireText(errors, guardianProtocol, token, 'packages/runtime-guardian/protocol.mjs')
+    requireText(errors, guardianProtocol, token, 'packages/runtime-guardian/protocol.ts')
   }
 
   const desktopMain = read(root, 'apps/desktop/main.mjs')

@@ -5,8 +5,8 @@ import path from 'node:path'
 import test from 'node:test'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { createGuardianClient } from '../packages/runtime-guardian/client.mjs'
-import { createGenerationStore } from '../packages/runtime-guardian/generation-store.mjs'
+import { createGuardianClient } from '../packages/runtime-guardian/client.ts'
+import { createGenerationStore } from '../packages/runtime-guardian/generation-store.ts'
 import { removeOwnedTestHome } from './support/owned-test-home.mjs'
 
 const activeGeneration = productRoot => JSON.parse(

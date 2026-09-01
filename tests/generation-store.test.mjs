@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-import { createGenerationStore } from '../packages/runtime-guardian/generation-store.mjs'
+import { createGenerationStore } from '../packages/runtime-guardian/generation-store.ts'
 
 const ownedRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-generation-store-'))
 
