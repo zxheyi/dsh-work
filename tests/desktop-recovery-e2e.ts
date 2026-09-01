@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { BrowserWindow } from 'electron'
-import type { GuardianClient } from '../packages/runtime-guardian/client.ts'
+import type { DesktopSession } from '../apps/desktop/main.ts'
 import {
   createGenerationStore,
   type ClaimedGeneration,
@@ -14,7 +14,7 @@ import { removeOwnedTestHome } from './support/owned-test-home.ts'
 
 const emittedDesktopEntry: string = '../dist/apps/desktop/main.js'
 const { desktop } = await import(emittedDesktopEntry) as {
-  desktop: Promise<{ host: GuardianClient; window: BrowserWindow }>
+  desktop: Promise<DesktopSession>
 }
 
 const output = path.resolve('artifacts/desktop/runtime-recovery')
@@ -34,7 +34,7 @@ const claimed = (selection: GenerationSelection): ClaimedGeneration => {
 const stale = claimed(staleStore.claim())
 fs.writeFileSync(path.join(stale.home, 'uncertain.txt'), 'preserved')
 let phase = 'boot'
-let host: GuardianClient | null = null
+let host: DesktopSession['host'] | null = null
 const screenshots: string[] = []
 const write = (status: 'pass' | 'fail', extra: Record<string, unknown> = {}): void => fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({
   status, phase, runId: process.env.DSH_WORK_E2E_RUN_ID,

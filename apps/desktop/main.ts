@@ -1,66 +1,41 @@
 import { app, type BrowserWindow } from 'electron'
 
-import type { RuntimeSnapshot } from '../../packages/runtime-contract/index.ts'
 import { createGuardianClient, type GuardianClient } from '../../packages/runtime-guardian/client.ts'
+import { createUnavailableGuardianClient } from '../../packages/runtime-guardian/unavailable-client.ts'
 import { createStatusWindow, registerDesktopScheme } from './window.ts'
 
 registerDesktopScheme()
 app.enableSandbox()
 app.setName('DSH Work')
 
-export let host: GuardianClient | undefined
-export let window: BrowserWindow | undefined
+export interface DesktopSession {
+  readonly host: GuardianClient
+  readonly window: BrowserWindow
+}
+
+interface SecondaryDesktopSession {
+  readonly host: null
+  readonly window: null
+  readonly secondary: true
+}
+
+let session: DesktopSession | undefined
 let quitting = false
 let allowQuit = false
-
-const unavailableHost = (): GuardianClient => {
-  let status: RuntimeSnapshot = Object.freeze({
-    state: 'stopped',
-    code: null,
-    canStart: true,
-    canStop: false,
-    canRecover: false,
-  })
-  const listeners = new Set<(snapshot: RuntimeSnapshot) => void>()
-  const publishUnavailable = async (): Promise<RuntimeSnapshot> => {
-    status = Object.freeze({
-      state: 'failed',
-      code: 'runtime-unavailable',
-      canStart: true,
-      canStop: false,
-      canRecover: false,
-    })
-    for (const listener of [...listeners]) {
-      try { listener(status) } catch {}
-    }
-    return status
-  }
-  return Object.freeze({
-    start: publishUnavailable,
-    stop: async () => status,
-    recover: async () => status,
-    snapshot: () => status,
-    subscribe(listener: (snapshot: RuntimeSnapshot) => void): () => void {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    },
-    dispose: async () => true,
-  })
-}
 
 const shutdown = async (): Promise<void> => {
   if (quitting) return
   quitting = true
-  try { await host?.stop() } catch {}
+  try { await session?.host.stop() } catch {}
   // IPC disconnect transfers the remaining bounded cleanup to the external
   // guardian, so Electron may exit even if its short acknowledgement wait ends.
-  try { await host?.dispose() } catch {}
+  try { await session?.host.dispose() } catch {}
   allowQuit = true
   app.quit()
 }
 
 app.on('before-quit', event => {
-  if (allowQuit || !host) return
+  if (allowQuit || !session) return
   event.preventDefault()
   void shutdown()
 })
@@ -71,32 +46,41 @@ app.on('window-all-closed', () => {
 const primary = app.requestSingleInstanceLock()
 if (!primary) app.quit()
 
-// Do not await ready at module top level: Electron waits for ESM evaluation
-// before emitting ready. Consumers may await desktop after their entry returns.
-export const desktop = (primary ? app.whenReady().then(async () => {
+const createDesktopSession = async (): Promise<DesktopSession> => {
+  let host: GuardianClient
   try {
     host = await createGuardianClient({
       node: process.env.DSH_WORK_NODE ?? '',
       productRoot: app.getPath('userData'),
     })
   } catch {
-    host = unavailableHost()
+    host = createUnavailableGuardianClient()
   }
-  window = await createStatusWindow(host, { accepting: () => !quitting })
-  window.on('close', event => {
-    if (!allowQuit) {
-      event.preventDefault()
-      void shutdown()
-    }
-  })
-  window.webContents.on('render-process-gone', () => { void shutdown() })
-  return { host, window }
-}) : Promise.resolve({ host: null, window: null, secondary: true })).catch(async () => {
+  try {
+    const window = await createStatusWindow(host, { accepting: () => !quitting })
+    const active = Object.freeze({ host, window })
+    session = active
+    window.on('close', event => {
+      if (!allowQuit) {
+        event.preventDefault()
+        void shutdown()
+      }
+    })
+    window.webContents.on('render-process-gone', () => { void shutdown() })
+    return active
+  } catch (error: unknown) {
+    try { await host.stop() } catch {}
+    try { await host.dispose() } catch {}
+    throw error
+  }
+}
+
+// Do not await ready at module top level: Electron waits for ESM evaluation
+// before emitting ready. Consumers may await desktop after their entry returns.
+export const desktop: Promise<DesktopSession | SecondaryDesktopSession | void> = (primary
+  ? app.whenReady().then(createDesktopSession)
+  : Promise.resolve(Object.freeze({ host: null, window: null, secondary: true } as const))).catch(() => {
   // No arbitrary exception or private path is printed by desktop diagnostics.
   console.error('DSH Work desktop initialization failed')
-  if (host) {
-    await host.stop()
-    await host.dispose()
-  }
   app.exit(1)
 })
