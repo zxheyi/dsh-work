@@ -62,8 +62,12 @@ try {
   run('runtime', ['--test', '--test-reporter=tap', 'tests/runtime-integration.test.mjs'])
   provenance('after-runtime')
   if (process.argv.includes('--desktop')) {
-    run('desktop', ['scripts/run-desktop-test.mjs'])
-    report.desktop = ['normal', 'missing', 'renderer-crash', 'runtime-recovery'].map(mode => JSON.parse(fs.readFileSync(path.join(root, 'artifacts/desktop', mode, 'result.json'))))
+    const modes = ['normal', 'missing', 'renderer-crash', 'runtime-recovery']
+    for (const mode of modes) {
+      run(`desktop-${mode}`, ['scripts/run-desktop-test.mjs', '--mode', mode])
+      provenance(`after-desktop-${mode}`)
+    }
+    report.desktop = modes.map(mode => JSON.parse(fs.readFileSync(path.join(root, 'artifacts/desktop', mode, 'result.json'))))
   } else report.desktop = 'not-run: explicit --desktop required'
   report.after = provenance('after')
   if (JSON.stringify(report.before) !== JSON.stringify(report.after) ||

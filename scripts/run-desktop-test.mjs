@@ -6,7 +6,11 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const electron = require('electron')
 if (!process.env.DSH_WORK_NODE) throw new Error('Set DSH_WORK_NODE to a verified standalone Node')
-for (const mode of ['normal', 'missing', 'renderer-crash', 'runtime-recovery']) {
+const modes = ['normal', 'missing', 'renderer-crash', 'runtime-recovery']
+const requested = process.argv.indexOf('--mode')
+const selected = requested < 0 ? modes : [process.argv[requested + 1]]
+if (selected.some(mode => !modes.includes(mode))) throw new Error('Unknown desktop test mode')
+for (const mode of selected) {
   const runId = randomUUID()
   const reportPath = `artifacts/desktop/${mode}/result.json`
   fs.mkdirSync(path.dirname(reportPath), { recursive: true })
