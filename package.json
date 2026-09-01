@@ -9,7 +9,7 @@
     "build": "node scripts/build-product.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "pretest": "pnpm build",
-    "test": "node --test scripts/*.test.mjs tests/typescript-toolchain.test.ts tests/runtime-host.test.ts tests/official-launcher.test.ts tests/desktop-security.test.ts tests/renderer.test.ts tests/owned-test-home.test.ts tests/generation-store.test.ts tests/runtime-guardian.test.ts tests/guardian-client.test.ts",
+    "test": "node --test scripts/*.test.mjs tests/typescript-toolchain.test.ts tests/runtime-contract.test.ts tests/runtime-host.test.ts tests/official-launcher.test.ts tests/desktop-security.test.ts tests/renderer.test.ts tests/owned-test-home.test.ts tests/generation-store.test.ts tests/runtime-guardian.test.ts tests/guardian-client.test.ts",
     "check": "pnpm typecheck && node scripts/verify-contract.mjs",
     "runtime:prepare": "node scripts/prepare-product-runtime.mjs",
     "runtime:verify": "node scripts/verify-product-runtime.mjs artifacts/runtime/context.json",

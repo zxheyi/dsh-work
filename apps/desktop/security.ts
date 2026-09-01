@@ -1,18 +1,12 @@
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 
-import type { GuardianSnapshot } from '../../packages/runtime-guardian/protocol.ts'
+import { RUNTIME_COMMANDS, type RuntimeControl } from '../../packages/runtime-contract/index.ts'
 
 export const STATUS_URL = 'dsh-work://status/index.html'
 export const DESKTOP_ASSETS = ['index.html', 'renderer.js', 'style.css'] as const
 export type DesktopAsset = typeof DESKTOP_ASSETS[number]
 
-export interface StatusHost {
-  start(): Promise<GuardianSnapshot> | GuardianSnapshot
-  stop(): Promise<GuardianSnapshot> | GuardianSnapshot
-  recover(): Promise<GuardianSnapshot> | GuardianSnapshot
-  snapshot(): GuardianSnapshot
-  subscribe(listener: (snapshot: GuardianSnapshot) => void): () => void
-}
+export type StatusHost = RuntimeControl
 
 interface StatusBridgeOptions {
   readonly ipcMain: IpcMain
@@ -40,8 +34,7 @@ export function bindStatusBridge({
     !window.isDestroyed() && !contents.isDestroyed() && event.sender === contents &&
     event.senderFrame === contents.mainFrame && event.senderFrame?.url === STATUS_URL &&
     contents.getURL() === STATUS_URL
-  const channels = ['start', 'stop', 'recover', 'snapshot'] as const
-  for (const command of channels) {
+  for (const command of RUNTIME_COMMANDS) {
     ipcMain.handle(`dsh-work:${command}`, (event, ...args) => {
       if (!trusted(event) || args.length || !accepting()) throw new Error('Request denied')
       return host[command]()
@@ -54,6 +47,6 @@ export function bindStatusBridge({
   })
   return () => {
     unsubscribe()
-    for (const command of channels) ipcMain.removeHandler(`dsh-work:${command}`)
+    for (const command of RUNTIME_COMMANDS) ipcMain.removeHandler(`dsh-work:${command}`)
   }
 }

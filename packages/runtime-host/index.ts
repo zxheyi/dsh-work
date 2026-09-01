@@ -1,11 +1,10 @@
 import type { ChildProcess } from 'node:child_process'
 import type { Readable, Writable } from 'node:stream'
 
-export type RuntimeHostState = 'stopped' | 'starting' | 'ready' | 'stopping' | 'failed'
-export type RuntimeHostCode = 'runtime-unavailable' | 'process-error' | 'control-pipe-error' |
-  'lifecycle-disconnected' | 'invalid-lifecycle-message' | 'startup-timeout' |
-  'output-limit' | 'unexpected-exit' | 'runtime-exit-failed' | 'disposal-unconfirmed' |
-  'forced-stop' | 'cleanup-unconfirmed'
+import type { RuntimeHostCode, RuntimeState } from '../runtime-contract/index.ts'
+
+export type { RuntimeHostCode } from '../runtime-contract/index.ts'
+export type RuntimeHostState = RuntimeState
 
 export interface RuntimeHostSnapshot {
   readonly state: RuntimeHostState

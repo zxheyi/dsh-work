@@ -1,16 +1,11 @@
-export type RuntimeState = 'stopped' | 'starting' | 'ready' | 'stopping' | 'failed'
-export type RuntimeCode = 'runtime-unavailable' | 'process-error' | 'control-pipe-error' |
-  'lifecycle-disconnected' | 'invalid-lifecycle-message' | 'startup-timeout' |
-  'output-limit' | 'unexpected-exit' | 'runtime-exit-failed' | 'disposal-unconfirmed' |
-  'forced-stop' | 'cleanup-unconfirmed' | 'recovery-required' | 'guardian-unavailable'
+import type {
+  RuntimeCode,
+  RuntimeSnapshot,
+  RuntimeState,
+} from '../../packages/runtime-contract/index.ts'
 
-export interface RuntimeStatus {
-  readonly state: RuntimeState
-  readonly code: RuntimeCode | null
-  readonly canStart: boolean
-  readonly canStop: boolean
-  readonly canRecover: boolean
-}
+export type { RuntimeCode, RuntimeState } from '../../packages/runtime-contract/index.ts'
+export type RuntimeStatus = RuntimeSnapshot
 
 export interface DesktopBridge {
   start(): Promise<RuntimeStatus>
