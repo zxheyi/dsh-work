@@ -84,6 +84,29 @@ test('changing an accepted architecture decision fails verification', () => {
   }
 })
 
+test('weakening the accepted TypeScript runtime boundary fails verification', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-typescript-decision-'))
+  try {
+    for (const relativePath of requiredFiles) {
+      const target = path.join(root, relativePath)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.copyFileSync(path.join(repositoryRoot, relativePath), target)
+    }
+
+    const target = path.join(root, 'docs/decisions/0005-typescript-product-source.md')
+    const original = fs.readFileSync(target, 'utf8')
+    fs.writeFileSync(target, original.replace('Status: accepted', 'Status: proposed'))
+
+    assert.ok(
+      verifyContract(root).includes(
+        'docs/decisions/0005-typescript-product-source.md: missing required contract text "Status: accepted"',
+      ),
+    )
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('every active runtime baseline field is locked to the accepted decision', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-baseline-'))
   try {

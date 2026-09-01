@@ -17,6 +17,7 @@ export const requiredFiles = [
   'docs/decisions/0002-official-dsh-cli-runtime.md',
   'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md',
   'docs/decisions/0004-crash-safe-runtime-ownership.md',
+  'docs/decisions/0005-typescript-product-source.md',
   'docs/upstream-compatibility.md',
   '.github/ISSUE_TEMPLATE/config.yml',
   '.github/ISSUE_TEMPLATE/feature_request.yml',
@@ -97,6 +98,7 @@ const linkedMarkdownFiles = [
   'docs/decisions/0002-official-dsh-cli-runtime.md',
   'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md',
   'docs/decisions/0004-crash-safe-runtime-ownership.md',
+  'docs/decisions/0005-typescript-product-source.md',
   'docs/upstream-compatibility.md',
   '.github/BRANCH_PROTECTION.md',
 ]
@@ -222,6 +224,16 @@ export function verifyContract(root) {
     'does not guarantee containment of arbitrary descendants',
   ]) {
     requireText(errors, ownershipDecision, token, 'docs/decisions/0004-crash-safe-runtime-ownership.md')
+  }
+
+  const typescriptDecision = read(root, 'docs/decisions/0005-typescript-product-source.md')
+  for (const token of [
+    'Status: accepted',
+    'Use strict TypeScript for DSH Work-owned product source',
+    'Compile product source to native ESM JavaScript under ignored `dist/`',
+    'Keep repository bootstrap, provenance, build orchestration, and contract-verification scripts as directly executable `.mjs`',
+  ]) {
+    requireText(errors, typescriptDecision, token, 'docs/decisions/0005-typescript-product-source.md')
   }
 
   const expectedNodeArtifacts = {
