@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { removeOwnedTestHome } from './support/owned-test-home.mjs'
+import { removeOwnedTestHome } from './support/owned-test-home.ts'
 
 test('owned test home cleanup detaches nested directory links without traversing their targets', () => {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-link-target-'))

@@ -1,4 +1,9 @@
-import { execFileSync, spawn } from 'node:child_process'
+import {
+  execFileSync,
+  spawn,
+  type ExecFileSyncOptionsWithStringEncoding,
+  type SpawnOptions,
+} from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -19,9 +24,22 @@ interface LauncherPaths {
 }
 
 interface LauncherDependencies {
-  readonly spawnProcess?: typeof spawn
-  readonly probe?: typeof execFileSync
+  readonly spawnProcess?: (
+    executable: string,
+    args: readonly string[],
+    options: SpawnOptions,
+  ) => RuntimeChild
+  readonly probe?: (
+    executable: string,
+    args: readonly string[],
+    options: ExecFileSyncOptionsWithStringEncoding,
+  ) => string
 }
+
+const spawnRuntime: NonNullable<LauncherDependencies['spawnProcess']> = (executable, args, options) =>
+  spawn(executable, args, options) as RuntimeChild
+const probeRuntime: NonNullable<LauncherDependencies['probe']> = (executable, args, options) =>
+  execFileSync(executable, args, options)
 
 function findProductRoot(entry: string): string {
   let directory = path.dirname(entry)
@@ -89,7 +107,7 @@ export const prepareDevelopmentProfile = prepareProductProfile
 
 export function createOfficialLauncher(
   { node, home }: LauncherPaths,
-  { spawnProcess = spawn, probe = execFileSync }: LauncherDependencies = {},
+  { spawnProcess = spawnRuntime, probe = probeRuntime }: LauncherDependencies = {},
 ): () => RuntimeChild {
   return () => {
     if (!path.isAbsolute(node || '') || !path.isAbsolute(home || '')) {
@@ -125,6 +143,6 @@ export function createOfficialLauncher(
       shell: false,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
-    }) as RuntimeChild
+    })
   }
 }

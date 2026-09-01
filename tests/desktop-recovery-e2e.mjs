@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createGenerationStore } from '../packages/runtime-guardian/generation-store.ts'
 import { desktop } from '../dist/apps/desktop/main.js'
-import { removeOwnedTestHome } from './support/owned-test-home.mjs'
+import { removeOwnedTestHome } from './support/owned-test-home.ts'
 
 const output = path.resolve('artifacts/desktop/runtime-recovery')
 const productRoot = process.env.DSH_WORK_E2E_USER_DATA

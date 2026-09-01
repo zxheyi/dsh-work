@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createGuardianClient } from '../packages/runtime-guardian/client.ts'
-import { removeOwnedTestHome } from '../tests/support/owned-test-home.mjs'
+import { removeOwnedTestHome } from '../tests/support/owned-test-home.ts'
 
 const output = path.resolve('artifacts/desktop/host-death')
 const resultPath = path.join(output, 'result.json')

@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
-import { removeOwnedTestHome } from '../tests/support/owned-test-home.mjs'
+import { removeOwnedTestHome } from '../tests/support/owned-test-home.ts'
 const require = createRequire(import.meta.url)
 const electron = require('electron')
 if (!process.env.DSH_WORK_NODE) throw new Error('Set DSH_WORK_NODE to a verified standalone Node')

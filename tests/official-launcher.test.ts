@@ -4,7 +4,8 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { createOfficialLauncher, prepareDevelopmentProfile } from '../packages/runtime-host/official-launcher.ts'
-import { removeOwnedTestHome } from './support/owned-test-home.mjs'
+import type { RuntimeChild } from '../packages/runtime-host/index.ts'
+import { removeOwnedTestHome } from './support/owned-test-home.ts'
 
 test('launcher uses explicit CLI, loopback, empty control pipe and an environment allowlist', () => {
   const node = process.execPath, home = os.tmpdir()
@@ -22,13 +23,14 @@ test('launcher uses explicit CLI, loopback, empty control pipe and an environmen
       spawnProcess(executable, args, options) {
         calls++
         assert.equal(executable, node)
-        assert.equal(args[0].endsWith(path.join('dsh', 'lib', 'bin.js')), true)
+        assert.equal(args[0]?.endsWith(path.join('dsh', 'lib', 'bin.js')), true)
         assert.deepEqual(args.slice(1), ['--profile', 'dsh-work', '--no-open', '--host', '127.0.0.1', '--port', '0'])
         assert.equal(options.shell, false)
         assert.deepEqual(options.stdio, ['pipe', 'pipe', 'pipe', 'ipc'])
-        assert.equal(options.env.DSH_HOME, home)
-        assert.equal(options.env.PATH, path.dirname(node))
+        assert.equal(options.env?.DSH_HOME, home)
+        assert.equal(options.env?.PATH, path.dirname(node))
         assert.equal(JSON.stringify(options).includes('forbidden-secret'), false)
+        return {} as RuntimeChild
       },
     })
     launch(); assert.equal(calls, 1)
@@ -49,9 +51,9 @@ test('Profile preparation refreshes only the managed Profile, preserves generati
     fs.writeFileSync(path.join(home, 'user-content'), 'preserved')
     prepareDevelopmentProfile(home)
     assert.equal(fs.readFileSync(path.join(home, 'user-content'), 'utf8'), 'preserved')
-    assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'profiles/dsh-work/package.json'))).dsh.profile.patchReload, 'startup')
+    assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'profiles/dsh-work/package.json'), 'utf8')).dsh.profile.patchReload, 'startup')
     const bundle = path.join(home, 'profiles/dsh-work/node_modules/@dsh-work/lifecycle')
-    const bundleManifest = JSON.parse(fs.readFileSync(path.join(bundle, 'package.json')))
+    const bundleManifest = JSON.parse(fs.readFileSync(path.join(bundle, 'package.json'), 'utf8'))
     assert.equal(bundleManifest.exports['.'], './index.js')
     assert.equal(fs.existsSync(path.join(bundle, 'index.js')), true)
     assert.equal(fs.existsSync(path.join(bundle, 'index.ts')), false)

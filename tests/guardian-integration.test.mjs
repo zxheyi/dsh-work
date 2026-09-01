@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { createGuardianClient } from '../packages/runtime-guardian/client.ts'
 import { createGenerationStore } from '../packages/runtime-guardian/generation-store.ts'
-import { removeOwnedTestHome } from './support/owned-test-home.mjs'
+import { removeOwnedTestHome } from './support/owned-test-home.ts'
 
 const activeGeneration = productRoot => JSON.parse(
   fs.readFileSync(path.join(productRoot, 'runtime/active.json'), 'utf8'),
