@@ -8,9 +8,11 @@ test('product dependencies match the accepted baseline with a frozen DSH family'
   const lock = fs.readFileSync(new URL('../pnpm-lock.yaml', import.meta.url), 'utf8')
   assert.equal(manifest.packageManager, `pnpm@${baseline.runtime.pnpm}`)
   assert.deepEqual(manifest.dependencies, {
+    '@deepseek-ai/cordis': '4.0.2',
     '@deepseek-ai/dsh': baseline.runtime.version,
     '@deepseek-ai/dsh-cmdline': baseline.runtime.version,
     '@deepseek-ai/dsh-storage-domain': baseline.runtime.version,
+    '@deepseek-ai/dsh-typert-protocol': baseline.runtime.version,
     zod: '4.5.4',
   })
   assert.deepEqual(manifest.devDependencies, {

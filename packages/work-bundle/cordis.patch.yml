@@ -1,3 +1,5 @@
 - insert:
     - id: dsh-work-domain
       name: '@dsh-work/work'
+    - id: dsh-work-api
+      name: '@dsh-work/work-api'

@@ -81,6 +81,7 @@ export function prepareProductProfile(home: string): void {
     ['lifecycle', 'lifecycle-bundle'],
     ['work', 'work-bundle'],
     ['work-domain', 'work-domain'],
+    ['work-api', 'work-api'],
   ] as const) {
     const bundle = path.join(profile, 'node_modules/@dsh-work', name)
     const builtBundle = path.join(root, 'dist/packages', builtName)
@@ -88,7 +89,13 @@ export function prepareProductProfile(home: string): void {
     fs.rmSync(bundle, { recursive: true, force: true })
     fs.cpSync(builtBundle, bundle, { recursive: true })
   }
-  for (const dependency of ['@deepseek-ai/dsh-cmdline', '@deepseek-ai/dsh-storage-domain', 'zod']) {
+  for (const dependency of [
+    '@deepseek-ai/cordis',
+    '@deepseek-ai/dsh-cmdline',
+    '@deepseek-ai/dsh-storage-domain',
+    '@deepseek-ai/dsh-typert-protocol',
+    'zod',
+  ]) {
     const installed = path.dirname(require.resolve(`${dependency}/package.json`))
     const link = path.join(profile, 'node_modules', dependency)
     fs.rmSync(link, { recursive: true, force: true })
