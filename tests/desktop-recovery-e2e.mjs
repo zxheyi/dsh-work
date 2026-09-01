@@ -5,11 +5,15 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { createRequire } from 'node:module'
 import { createRuntimeHost } from '../packages/runtime-host/index.mjs'
 import { createOfficialLauncher, prepareDevelopmentProfile } from '../packages/runtime-host/official-launcher.mjs'
 import { createStatusWindow, registerDesktopScheme } from '../apps/desktop/window.mjs'
 
 const output = path.resolve('artifacts/desktop/runtime-recovery')
+const require = createRequire(import.meta.url)
+const runtimeManifest = require.resolve('@deepseek-ai/dsh/package.json')
+const runtimeManifestBytes = fs.readFileSync(runtimeManifest)
 fs.mkdirSync(output, { recursive: true })
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-ui-recovery-'))
 app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-recovery-test-')))
@@ -17,7 +21,7 @@ app.commandLine.appendSwitch('disable-background-networking')
 app.enableSandbox()
 registerDesktopScheme()
 let phase = 'boot', host, window, child, launches = 0
-const events = [], screenshots = []
+const events = [], screenshots = [], manifestChecks = []
 const write = (status, extra = {}) => fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({
   status, phase, runId: process.env.DSH_WORK_E2E_RUN_ID,
   platform: process.platform, arch: process.arch, electron: process.versions.electron,
@@ -25,6 +29,11 @@ const write = (status, extra = {}) => fs.writeFileSync(path.join(output, 'result
 }, null, 2))
 write('fail')
 const progress = setInterval(() => write('fail'), 250)
+const assertRuntimeManifest = label => {
+  phase = label
+  assert.deepEqual(fs.readFileSync(runtimeManifest), runtimeManifestBytes)
+  manifestChecks.push(label)
+}
 
 async function run() {
   try {
@@ -86,16 +95,21 @@ async function run() {
     await wait("document.body.dataset.state === 'stopped'")
     assert.deepEqual(events, ['exit:1', 'close:1', 'exit:2', 'close:2'])
     assert.equal(host.snapshot().canStart, true)
+    assertRuntimeManifest('manifest-after-recovery-stop')
+    fs.rmSync(home, { recursive: true, force: true })
+    assertRuntimeManifest('manifest-after-home-cleanup')
+    window.destroy()
+    assertRuntimeManifest('manifest-after-window-destroy')
     phase = 'runtime-failure-ui-retry-complete'
     clearInterval(progress)
-    write('pass', { terminal: host.snapshot(), launches, events })
+    write('pass', { terminal: host.snapshot(), launches, events, manifestChecks })
   } catch {
     clearInterval(progress)
     write('fail')
     process.exitCode = 1
   } finally {
     await host?.stop()
-    if (!host || host.snapshot().canStart) fs.rmSync(home, { recursive: true, force: true })
+    if ((!host || host.snapshot().canStart) && fs.existsSync(home)) fs.rmSync(home, { recursive: true, force: true })
     window?.destroy()
     app.quit()
   }
