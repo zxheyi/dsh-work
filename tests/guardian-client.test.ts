@@ -4,9 +4,18 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { EventEmitter } from 'node:events'
+import type { ChildProcess } from 'node:child_process'
 
 import { createGuardianClient } from '../packages/runtime-guardian/client.ts'
 import { GUARDIAN_PROTOCOL } from '../packages/runtime-guardian/protocol.ts'
+
+class FakeGuardianProcess extends EventEmitter {
+  connected = true
+  exitCode: number | null = null
+
+  send(): boolean { return true }
+  disconnect(): void { this.connected = false }
+}
 
 test('verified standalone Node starts and cleanly disconnects an idle guardian', async () => {
   const productRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-guardian-client-'))
@@ -25,13 +34,10 @@ test('guardian client refuses relative paths and a mismatched Node version', asy
 })
 
 test('guardian exit rejects every in-flight request even when close is delayed', async () => {
-  const child = new EventEmitter()
-  child.connected = true
-  child.send = () => {}
-  child.disconnect = () => { child.connected = false }
+  const child = new FakeGuardianProcess()
   const creating = createGuardianClient({ node: process.execPath, productRoot: os.tmpdir() }, {
     probe: () => 'v24.11.1\n',
-    spawnProcess: () => child,
+    spawnProcess: () => child as unknown as ChildProcess,
   })
   process.nextTick(() => child.emit('message', {
     protocol: GUARDIAN_PROTOCOL,
@@ -45,19 +51,16 @@ test('guardian exit rejects every in-flight request even when close is delayed',
 })
 
 test('command responses resolve callers without duplicating the guardian status stream', async () => {
-  const child = new EventEmitter()
-  child.connected = true
-  child.send = () => {}
-  child.disconnect = () => { child.connected = false }
+  const child = new FakeGuardianProcess()
   const creating = createGuardianClient({ node: process.execPath, productRoot: os.tmpdir() }, {
-    probe: () => 'v24.11.1\n', spawnProcess: () => child,
+    probe: () => 'v24.11.1\n', spawnProcess: () => child as unknown as ChildProcess,
   })
   const stopped = { state: 'stopped', code: null, canStart: true, canStop: false, canRecover: false }
   process.nextTick(() => child.emit('message', {
     protocol: GUARDIAN_PROTOCOL, event: 'guardian-ready', value: stopped,
   }))
   const client = await creating
-  const observed = []
+  const observed: string[] = []
   client.subscribe(value => observed.push(value.state))
   const pending = client.start()
   child.emit('message', { protocol: GUARDIAN_PROTOCOL, event: 'status',
@@ -68,13 +71,11 @@ test('command responses resolve callers without duplicating the guardian status 
 })
 
 test('guardian readiness timeout disconnects the detached process for bounded cleanup', async () => {
-  const child = new EventEmitter()
-  child.connected = true
+  const child = new FakeGuardianProcess()
   let disconnects = 0
-  child.send = () => {}
   child.disconnect = () => { child.connected = false; disconnects++; child.emit('exit', 0, null) }
   await assert.rejects(() => createGuardianClient({ node: process.execPath, productRoot: os.tmpdir() }, {
-    probe: () => 'v24.11.1\n', spawnProcess: () => child, readyMs: 5,
+    probe: () => 'v24.11.1\n', spawnProcess: () => child as unknown as ChildProcess, readyMs: 5,
   }), /readiness timeout/)
   assert.equal(disconnects, 1)
 })

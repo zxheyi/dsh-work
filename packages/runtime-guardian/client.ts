@@ -1,4 +1,10 @@
-import { execFileSync, spawn } from 'node:child_process'
+import {
+  execFileSync,
+  spawn,
+  type ChildProcess,
+  type ExecFileSyncOptionsWithStringEncoding,
+  type SpawnOptions,
+} from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -15,8 +21,16 @@ interface GuardianClientPaths {
 }
 
 interface GuardianClientDependencies {
-  readonly spawnProcess?: typeof spawn
-  readonly probe?: typeof execFileSync
+  readonly spawnProcess?: (
+    executable: string,
+    args: readonly string[],
+    options: SpawnOptions,
+  ) => ChildProcess
+  readonly probe?: (
+    executable: string,
+    args: readonly string[],
+    options: ExecFileSyncOptionsWithStringEncoding,
+  ) => string
   readonly readyMs?: number
 }
 
@@ -36,6 +50,10 @@ export interface GuardianClient {
 
 const currentFile = fileURLToPath(import.meta.url)
 const entry = path.join(path.dirname(currentFile), `process${path.extname(currentFile) === '.ts' ? '.ts' : '.js'}`)
+const spawnGuardian: NonNullable<GuardianClientDependencies['spawnProcess']> = (executable, args, options) =>
+  spawn(executable, [...args], options)
+const probeGuardian: NonNullable<GuardianClientDependencies['probe']> = (executable, args, options) =>
+  execFileSync(executable, args, options)
 const unavailable: GuardianSnapshot = Object.freeze({
   state: 'failed',
   code: 'guardian-unavailable',
@@ -49,7 +67,7 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 
 export async function createGuardianClient(
   { node, productRoot }: GuardianClientPaths,
-  { spawnProcess = spawn, probe = execFileSync, readyMs = 5_000 }: GuardianClientDependencies = {},
+  { spawnProcess = spawnGuardian, probe = probeGuardian, readyMs = 5_000 }: GuardianClientDependencies = {},
 ): Promise<GuardianClient> {
   if (!path.isAbsolute(node || '') || !path.isAbsolute(productRoot || '')) {
     throw new Error('explicit guardian paths required')
