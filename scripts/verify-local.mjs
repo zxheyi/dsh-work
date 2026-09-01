@@ -3,13 +3,13 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { verifyProductRuntime } from './verify-product-runtime.mjs'
+import { productRuntimeFailureCode, verifyProductRuntime } from './verify-product-runtime.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const output = path.join(root, 'artifacts/verification')
 fs.mkdirSync(output, { recursive: true })
 const report = { status: 'fail', phase: 'read-context', platform: process.platform, arch: process.arch,
-  startedAt: new Date().toISOString(), checks: [],
+  startedAt: new Date().toISOString(), checks: [], provenance: [],
   limitations: ['development direct-child scope only', 'no complete process-tree or host-crash recovery proof',
     'no installer, signing, complete dependency byte/license audit, or full Harness browser UI',
     'screenshots are not product-approved visual acceptance', 'one native report does not prove another OS'],
@@ -25,8 +25,20 @@ try {
   report.revision = git('rev-parse', 'HEAD').trim()
   report.dirty = !!git('status', '--porcelain').trim()
   report.inputsSHA256 = inputs()
-  report.phase = 'before-provenance'; write()
-  report.before = verifyProductRuntime(context)
+  let before
+  const provenance = label => {
+    report.phase = `${label}-provenance`; write()
+    try {
+      const value = verifyProductRuntime(context)
+      if (before && JSON.stringify(before) !== JSON.stringify(value)) throw new Error('changed')
+      report.provenance.push({ label, status: 'pass' }); write()
+      return value
+    } catch (error) {
+      report.provenance.push({ label, status: 'fail', code: productRuntimeFailureCode(error) }); write()
+      throw error
+    }
+  }
+  report.before = before = provenance('before')
   const run = (name, args) => {
     report.phase = name; write()
     const startedAt = new Date().toISOString()
@@ -44,14 +56,16 @@ try {
   const scriptTests = fs.readdirSync(path.join(root, 'scripts')).filter(file => file.endsWith('.test.mjs')).map(file => `scripts/${file}`)
   run('unit', ['--test', '--test-reporter=tap', ...scriptTests,
     'tests/runtime-host.test.mjs', 'tests/official-launcher.test.mjs', 'tests/desktop-security.test.mjs', 'tests/renderer.test.mjs'])
+  provenance('after-unit')
   run('contract', ['scripts/verify-contract.mjs'])
+  provenance('after-contract')
   run('runtime', ['--test', '--test-reporter=tap', 'tests/runtime-integration.test.mjs'])
+  provenance('after-runtime')
   if (process.argv.includes('--desktop')) {
     run('desktop', ['scripts/run-desktop-test.mjs'])
     report.desktop = ['normal', 'missing', 'renderer-crash', 'runtime-recovery'].map(mode => JSON.parse(fs.readFileSync(path.join(root, 'artifacts/desktop', mode, 'result.json'))))
   } else report.desktop = 'not-run: explicit --desktop required'
-  report.phase = 'after-provenance'; write()
-  report.after = verifyProductRuntime(context)
+  report.after = provenance('after')
   if (JSON.stringify(report.before) !== JSON.stringify(report.after) ||
       JSON.stringify(report.inputsSHA256) !== JSON.stringify(inputs()) ||
       report.revision !== git('rev-parse', 'HEAD').trim()) throw new Error('inputs changed during verification')

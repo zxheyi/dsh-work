@@ -6,28 +6,50 @@ import { verifySource, verifyPublishedPackage, verifyNodeArchive } from './verif
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = file => JSON.parse(fs.readFileSync(path.join(root, file)))
+class ProductRuntimeVerificationError extends Error {
+  constructor(code) {
+    super('Product runtime provenance check failed')
+    this.code = code
+  }
+}
+const checked = (code, action) => {
+  try { return action() } catch { throw new ProductRuntimeVerificationError(code) }
+}
+export const productRuntimeFailureCode = error =>
+  error instanceof ProductRuntimeVerificationError ? error.code : 'product-provenance-failed'
+
 export function verifyProductRuntime({ source, tarball, node, nodeArchive }) {
-  const baseline = read('runtime/baseline.json')
+  const baseline = checked('configuration-provenance-failed', () => read('runtime/baseline.json'))
   // Reuse the immutable, reviewed archive receipt, not the probe's dependency
   // installation. The active selection remains runtime/baseline.json.
-  const artifacts = read('prototypes/m0-runtime-upgrade/runtime-pin.json')
-  if (artifacts.node !== baseline.runtime.node) throw new Error('Node receipt does not match baseline')
-  const sourceCommit = verifySource(source, baseline.source)
-  const packageFiles = verifyPublishedPackage(tarball, fs.realpathSync(path.join(root, 'node_modules/@deepseek-ai/dsh')), baseline.runtime)
-  const nodeSHA256 = verifyNodeArchive(nodeArchive, node, artifacts)
-  const family = new Set()
-  for (const entry of fs.readdirSync(path.join(root, 'node_modules/.pnpm'))) {
-    const scope = path.join(root, 'node_modules/.pnpm', entry, 'node_modules/@deepseek-ai')
-    if (!fs.existsSync(scope)) continue
-    for (const name of fs.readdirSync(scope).filter(name => name === 'dsh' || name.startsWith('dsh-'))) {
-      const manifest = JSON.parse(fs.readFileSync(path.join(scope, name, 'package.json')))
-      if (manifest.version !== baseline.runtime.version) throw new Error('product DSH family mismatch')
-      family.add(manifest.name)
+  const artifacts = checked('configuration-provenance-failed', () => {
+    const value = read('prototypes/m0-runtime-upgrade/runtime-pin.json')
+    if (value.node !== baseline.runtime.node) throw new Error('mismatch')
+    return value
+  })
+  const sourceCommit = checked('source-provenance-failed', () => verifySource(source, baseline.source))
+  const packageFiles = checked('package-provenance-failed', () => verifyPublishedPackage(
+    tarball, fs.realpathSync(path.join(root, 'node_modules/@deepseek-ai/dsh')), baseline.runtime))
+  const nodeSHA256 = checked('node-provenance-failed', () => verifyNodeArchive(nodeArchive, node, artifacts))
+  const family = checked('family-provenance-failed', () => {
+    const found = new Set()
+    for (const entry of fs.readdirSync(path.join(root, 'node_modules/.pnpm'))) {
+      const scope = path.join(root, 'node_modules/.pnpm', entry, 'node_modules/@deepseek-ai')
+      if (!fs.existsSync(scope)) continue
+      for (const name of fs.readdirSync(scope).filter(name => name === 'dsh' || name.startsWith('dsh-'))) {
+        const manifest = JSON.parse(fs.readFileSync(path.join(scope, name, 'package.json')))
+        if (manifest.version !== baseline.runtime.version) throw new Error('mismatch')
+        found.add(manifest.name)
+      }
     }
-  }
-  if (family.size < 215) throw new Error('product DSH closure missing')
-  const lock = fs.readFileSync(path.join(root, 'pnpm-lock.yaml'))
-  if (!lock.toString().includes(baseline.runtime.integrity)) throw new Error('product lock integrity missing')
+    if (found.size < 215) throw new Error('missing')
+    return found
+  })
+  const lock = checked('lock-provenance-failed', () => {
+    const bytes = fs.readFileSync(path.join(root, 'pnpm-lock.yaml'))
+    if (!bytes.toString().includes(baseline.runtime.integrity)) throw new Error('missing')
+    return bytes
+  })
   return { sourceCommit, runtime: baseline.runtime.version, packageFiles, node: baseline.runtime.node,
     nodeSHA256, installedDSHPackages: family.size,
     lockfileSHA256: createHash('sha256').update(lock).digest('hex'),

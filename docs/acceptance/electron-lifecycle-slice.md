@@ -105,3 +105,19 @@ On 2026-08-31, `node scripts/verify-local.mjs <verified-context.json> --desktop`
 The existing native workflow invokes this same runner and will include the new CLI case and both new Electron modes on the next authorized push. The earlier Windows receipt at `96f7ff9` does not validate this new slice; it remains historical evidence only.
 
 The stronger host-death/descendant cases remain open until an ownership ADR is accepted and independently verified on both native platforms. The pending decision must define containment scope, identity-preserving cleanup, old-home reuse rules, macOS/Windows mechanisms, and any new helper's provenance/security/packaging. No production native mechanism is selected or introduced here. Do not mark these cases complete using this surviving-host slice.
+
+## Windows post-verification provenance failure
+
+Status: `REPRODUCED`; root cause pending. [CI run 33460732471](https://github.com/zxheyi/dsh-work/actions/runs/33460732471) failed twice on Windows x64 at clean revision `98bfdf7a4915310c3e31438d4f56d0d3358c1b5c`. In both attempts, 45 tests, the contract gate, six real CLI cases and four Electron modes passed. The report then failed inside the second `verifyProductRuntime()` call before producing an `after` value. macOS passed both attempts. This proves a post-run provenance-gate failure, not its cause and not a lifecycle behavior failure.
+
+Behavior ledger, established before diagnostic and repair changes:
+
+| Scenario/input partition | Current behavior | Required behavior | Change? | Caller | Verification signal |
+| --- | --- | --- | --- | --- | --- |
+| A provenance sub-check rejects | Aggregate report exposes only `after-provenance` | Record one fixed, path-free sub-check code; retain overall failure | Change | Local/native verification runner | Unit red/green plus failed native artifact |
+| Source, npm archive/install, Node archive/executable, DSH family, lock integrity | Every mismatch fails closed | Preserve every byte/version/inventory gate; never retry a content mismatch into success | Preserve | `verifyProductRuntime()` CLI and aggregate runner | Existing candidate/product verification tests and before/after equality |
+| Unit, contract, runtime and Electron checks | All pass on the failing Windows revision | Preserve commands, assertions and failure semantics | Preserve | `verify-local.mjs` | 45 + contract + six CLI + four Electron modes |
+| Transient OS read failure, if proven | Indistinguishable from content mismatch | Remains failure until a bounded identity-preserving policy is specified and tested | Preserve for diagnosis | Provenance verifier | Native reproduction; no speculative sleep/retry |
+| Diagnostics | Generic fixed message | Fixed allowlisted code only; no paths, raw exceptions, output or credentials | Change | JSON report and CLI stderr | Negative unit checks and contract gate |
+
+The first diagnostic slice may add sub-stage observations after existing check groups, but it must not change Harness, accepted pins, test order, pass criteria, or provenance comparisons. A later repair requires a minimized Windows reproduction and a separate red/green result. Until then, fresh Windows recovery evidence remains `candidate`.
