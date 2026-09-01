@@ -42,7 +42,7 @@ try {
   phase = 'bridge-isolation'
   assert.equal(process.versions.electron, '44.0.0')
   phase = 'bridge-key-list'
-  assert.equal(await js('JSON.stringify(Object.keys(window.dshWork).sort())'), JSON.stringify(['snapshot', 'start', 'stop', 'subscribe']))
+  assert.equal(await js('JSON.stringify(Object.keys(window.dshWork).sort())'), JSON.stringify(['recover', 'snapshot', 'start', 'stop', 'subscribe']))
   phase = 'renderer-globals'
   assert.equal(await js('JSON.stringify([typeof require, typeof process, typeof ipcRenderer])'), JSON.stringify(['undefined', 'undefined', 'undefined']))
   phase = 'security-preferences'

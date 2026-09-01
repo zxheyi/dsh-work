@@ -53,17 +53,28 @@ export const requiredFiles = [
   'packages/lifecycle-bundle/package.json',
   'packages/runtime-host/index.mjs',
   'packages/runtime-host/official-launcher.mjs',
+  'packages/runtime-guardian/client.mjs',
+  'packages/runtime-guardian/generation-store.mjs',
+  'packages/runtime-guardian/process.mjs',
+  'packages/runtime-guardian/protocol.mjs',
+  'packages/runtime-guardian/service.mjs',
   'scripts/local-evidence.test.mjs',
+  'scripts/run-host-death-test.mjs',
   'scripts/run-desktop-test.mjs',
   'scripts/verify-local.mjs',
   'tests/desktop-e2e.mjs',
+  'tests/desktop-host-death-e2e.mjs',
   'tests/desktop-recovery-e2e.mjs',
   'tests/desktop-security.test.mjs',
   'tests/official-launcher.test.mjs',
+  'tests/generation-store.test.mjs',
+  'tests/guardian-client.test.mjs',
   'tests/owned-test-home.test.mjs',
   'tests/renderer.test.mjs',
   'tests/runtime-host.test.mjs',
+  'tests/runtime-guardian.test.mjs',
   'tests/runtime-integration.test.mjs',
+  'tests/guardian-integration.test.mjs',
   'tests/fixtures/delayed-startup/index.mjs',
   'tests/fixtures/delayed-startup/package.json',
   'tests/support/owned-test-home.mjs',
@@ -378,6 +389,7 @@ export function verifyContract(root) {
 
   const launcher = read(root, 'packages/runtime-host/official-launcher.mjs')
   for (const token of [
+    'prepareProductProfile',
     "require.resolve('@deepseek-ai/dsh/package.json')",
     "'--profile', 'dsh-work'",
     'shell: false',
@@ -385,6 +397,37 @@ export function verifyContract(root) {
   ]) {
     requireText(errors, launcher, token, 'packages/runtime-host/official-launcher.mjs')
   }
+
+  const generationStore = read(root, 'packages/runtime-guardian/generation-store.mjs')
+  for (const token of ["fs.openSync(file, 'wx'", 'dsh-work-terminal.json',
+    "return { status: 'blocked', code: 'recovery-required' }", 'quarantine']) {
+    requireText(errors, generationStore, token, 'packages/runtime-guardian/generation-store.mjs')
+  }
+
+  const guardianProcess = read(root, 'packages/runtime-guardian/process.mjs')
+  for (const token of ["process.once('disconnect'", 'await service.dispose()',
+    'createOfficialLauncher', 'prepareProductProfile']) {
+    requireText(errors, guardianProcess, token, 'packages/runtime-guardian/process.mjs')
+  }
+  for (const forbidden of ['process.kill(', '.kill(']) {
+    if (guardianProcess.includes(forbidden)) {
+      errors.push(`packages/runtime-guardian/process.mjs: guardian must not contain ${JSON.stringify(forbidden)}`)
+    }
+  }
+
+  const guardianProtocol = read(root, 'packages/runtime-guardian/protocol.mjs')
+  for (const token of ["'dsh-work.guardian.v1'", "['start', 'stop', 'recover', 'snapshot']",
+    "'recovery-required'", 'canRecover']) {
+    requireText(errors, guardianProtocol, token, 'packages/runtime-guardian/protocol.mjs')
+  }
+
+  const desktopMain = read(root, 'apps/desktop/main.mjs')
+  for (const token of ['createGuardianClient', 'app.requestSingleInstanceLock()', 'await host.dispose()']) {
+    requireText(errors, desktopMain, token, 'apps/desktop/main.mjs')
+  }
+
+  const localVerifier = read(root, 'scripts/verify-local.mjs')
+  requireText(errors, localVerifier, "'host-death'", 'scripts/verify-local.mjs')
 
   const desktopWorkflow = read(root, '.github/workflows/desktop-lifecycle.yml')
   for (const token of [

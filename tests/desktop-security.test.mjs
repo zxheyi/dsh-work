@@ -9,11 +9,12 @@ test('status bridge admits only the exact local main frame and zero-argument met
   const window = { webContents: contents, isDestroyed: () => false }
   const ipcMain = { handle: (name, fn) => handlers.set(name, fn), removeHandler: name => handlers.delete(name) }
   const value = { state: 'stopped', code: null, canStart: true, canStop: false }
-  const host = Object.fromEntries(['start', 'stop', 'snapshot'].map(method => [method, () => { calls.push(method); return value }]))
+  const host = Object.fromEntries(['start', 'stop', 'recover', 'snapshot'].map(method => [method, () => { calls.push(method); return value }]))
   host.subscribe = () => () => {}
   const dispose = bindStatusBridge({ ipcMain, window, host })
   const event = { sender: contents, senderFrame: mainFrame }
   assert.deepEqual(await handlers.get('dsh-work:start')(event), value)
+  assert.deepEqual(await handlers.get('dsh-work:recover')(event), value)
   for (const invalid of [
     { ...event, sender: {} }, { ...event, senderFrame: { url: STATUS_URL } },
     { ...event, senderFrame: null },
@@ -21,8 +22,8 @@ test('status bridge admits only the exact local main frame and zero-argument met
   await assert.rejects(async () => handlers.get('dsh-work:start')(event, 'secret'), /denied/)
   mainFrame.url = 'https://example.com/'
   await assert.rejects(async () => handlers.get('dsh-work:start')(event), /denied/)
-  assert.deepEqual(calls, ['start'])
-  assert.deepEqual([...handlers.keys()].sort(), ['dsh-work:snapshot', 'dsh-work:start', 'dsh-work:stop'])
+  assert.deepEqual(calls, ['start', 'recover'])
+  assert.deepEqual([...handlers.keys()].sort(), ['dsh-work:recover', 'dsh-work:snapshot', 'dsh-work:start', 'dsh-work:stop'])
   dispose(); assert.equal(handlers.size, 0)
 })
 

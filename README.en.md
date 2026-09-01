@@ -17,7 +17,7 @@
 
 DSH Work does not aim to reimplement [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It aims to build a desktop product layer for real work on top of the upstream Agent runtime and plugin architecture. The desktop shell should own only operating-system integration and process lifecycle; project, file, research, artifact, and other work capabilities should be composed through Harness-native plugins.
 
-> **Current status:** Electron, the official Harness alpha.2 runtime boundary, frozen dependencies, and native verification path are on main. A minimum desktop lifecycle development slice is now runnable and verifiable, but there is no packaged release ready for daily use.
+> **Current status:** Electron, the official Harness alpha.2 runtime boundary, frozen dependencies, and native verification path are on main. The external guardian and persistent Profile-generation recovery are undergoing native verification; there is no packaged release ready for daily use.
 
 ## Why DSH Work
 

@@ -11,7 +11,7 @@ export function bindStatusBridge({ ipcMain, window, host, accepting = () => true
   const trusted = event => !window.isDestroyed() && !contents.isDestroyed() &&
     event.sender === contents && event.senderFrame === contents.mainFrame &&
     event.senderFrame?.url === STATUS_URL && contents.getURL() === STATUS_URL
-  const channels = ['start', 'stop', 'snapshot']
+  const channels = ['start', 'stop', 'recover', 'snapshot']
   for (const command of channels) {
     ipcMain.handle(`dsh-work:${command}`, (event, ...args) => {
       if (!trusted(event) || args.length || !accepting()) throw new Error('Request denied')

@@ -22,7 +22,7 @@ The verifier checks the exact upstream remote, tag, commit and byte-clean source
 
 ## Current boundary
 
-This baseline makes `main` installable and independently verifiable. The repository also contains a separately reviewable development-only [Electron lifecycle slice](../docs/acceptance/electron-lifecycle-slice.md). It does not provide packaging, signing, persistent user Profiles, or a runnable release.
+This baseline makes `main` installable and independently verifiable. The repository also contains a separately reviewable development-only [Electron lifecycle slice](../docs/acceptance/electron-lifecycle-slice.md) with a persistent product-owned Profile generation and external runtime guardian. It does not provide packaging, signing, user workspace migration, or a runnable release.
 
 Only Electron's install script is allowed by the root manifest when scripts are enabled. No Harness source build or patch step is introduced. The known upstream React/React DOM peer mismatch remains a browser-rendering gate, not a reason for an unreviewed override.
 

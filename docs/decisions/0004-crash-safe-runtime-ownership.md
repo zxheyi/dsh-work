@@ -38,12 +38,16 @@ runtime/
   active.json
   last-clean.json
   generations/<generation>/
+    dsh-work-terminal.json
   quarantine/<timestamp>-<generation>.json
+  history/<timestamp>-<generation>.json
 ```
 
 Each generation contains one isolated Harness Home and DSH Work Profile. `active.json` is claimed with exclusive creation before the CLI is launched. It records a schema version, opaque generation ID, guardian PID for diagnostics only, accepted runtime version, and bounded state/timestamps. It contains no credential, token, authenticated URL, arbitrary error, or termination authority. Updates use a same-directory temporary file and atomic rename with owner-only file permissions where the platform supports them.
 
-Only a guardian holding the matching generation may update or release `active.json`. After confirmed normal disposal and direct-child `close`, it atomically records `last-clean.json` and releases the active lease. A later launch may reuse only that recorded clean generation. Failed or unconfirmed cleanup leaves the active lease in place and never marks the generation reusable.
+Only a guardian holding the matching generation may publish a clean terminal receipt. After confirmed normal disposal and direct-child `close`, it atomically writes `dsh-work-terminal.json` inside that generation and exits without deleting or replacing `active.json`. This avoids pretending that portable filesystem APIs provide an atomic compare-and-delete operation.
+
+A later guardian may reconcile only an exact `active.json` generation plus its matching clean terminal receipt. It archives that active record into `history/`, removes the consumed receipt, atomically records `last-clean.json`, and exclusively reclaims the same generation before launching the CLI. Failed or unconfirmed cleanup leaves the active lease without a matching receipt and never marks the generation reusable. A late old receipt cannot release a newer lease because reconciliation compares both generation records.
 
 ### Recovery
 
@@ -61,11 +65,11 @@ A future Windows Job Object, macOS native service, or other stronger containment
 
 ## Acceptance and verification
 
-- [ ] Unit tests prove exclusive lease claim, clean reuse, collision refusal, explicit quarantine, and that a stale guardian cannot release a newer generation.
-- [ ] Protocol tests prove one guardian owner, strict versioned zero-argument commands, bounded snapshots, safe disconnect, and no paths or secrets in diagnostics.
-- [ ] Integration tests prove the official CLI/Profile reaches Ready, stops, and reuses one clean generation across guardian launches.
-- [ ] Host-death tests terminate the exact test-owned Electron host before and after Ready, then independently observe bounded guardian cleanup without treating a safety timeout as success.
-- [ ] Recovery tests leave an uncertain generation untouched, start a distinct generation only after explicit action, and prove unrelated test-owned processes remain alive.
+- [x] Unit tests prove exclusive lease claim, clean reuse, collision refusal, explicit quarantine, and that a stale guardian cannot release a newer generation.
+- [x] Protocol tests prove one guardian owner, strict versioned zero-argument commands, bounded snapshots, safe disconnect, and no paths or secrets in diagnostics.
+- [x] Integration tests prove the official CLI/Profile reaches Ready, stops, and reuses one clean generation across guardian launches.
+- [x] Host-death tests terminate the exact test-owned Electron host before and after Ready, then independently observe bounded guardian cleanup without treating a safety timeout as success.
+- [x] Recovery tests leave an uncertain generation untouched, start a distinct generation only after explicit action, and prove an unrelated test-owned process remains alive.
 - [ ] macOS arm64 and Windows x64 run the same revision-bound lifecycle and recovery matrix with runtime provenance before and after.
 - [ ] Repository checks prove the pinned upstream source, runtime package family, Harness-native Bundle, narrow renderer bridge, and absence of research-path dependencies remain unchanged.
 

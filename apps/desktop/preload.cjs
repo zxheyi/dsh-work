@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('dshWork', Object.freeze({
   start: () => ipcRenderer.invoke('dsh-work:start'),
   stop: () => ipcRenderer.invoke('dsh-work:stop'),
+  recover: () => ipcRenderer.invoke('dsh-work:recover'),
   snapshot: () => ipcRenderer.invoke('dsh-work:snapshot'),
   subscribe: listener => {
     if (typeof listener !== 'function') throw new TypeError('listener required')

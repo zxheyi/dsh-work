@@ -17,10 +17,10 @@
       <div class="status-row"><span id="indicator" class="indicator"></span><h2 id="state" aria-live="polite">正在读取状态</h2><span class="version">alpha.2</span></div>
       <p id="detail">正在连接桌面主进程。</p>
       <p id="diagnostic" class="diagnostic" hidden></p>
-      <div class="actions"><button id="start" disabled>启动 Harness</button><button id="stop" class="secondary" disabled>停止运行</button></div>
+      <div class="actions"><button id="start" disabled>启动 Harness</button><button id="recover" hidden disabled>隔离恢复</button><button id="stop" class="secondary" disabled>停止运行</button></div>
     </section>
     <div class="facts"><div><span>桌面宿主</span><strong>Electron 44</strong></div><div><span>运行方式</span><strong>官方 CLI · 独立进程</strong></div><div><span>工作环境</span><strong>隔离开发 Profile</strong></div></div>
-    <aside><strong>当前验收范围</strong><p>启动 → Ready → 停止 → 重试。本页不提供会话或工具操作；完整进程树回收、Windows 产品验证和安装包尚未完成。</p></aside>
+    <aside><strong>当前验收范围</strong><p>启动 → Ready → 停止 → 宿主中断恢复。不确定的旧 Profile generation 只会被隔离，不会按 PID 杀进程或自动删除。</p></aside>
   </main>
   <footer><span>Compose Harness. Keep its source untouched.</span><span>生命周期预览</span></footer>
 </body>

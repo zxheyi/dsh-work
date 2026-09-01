@@ -8,17 +8,30 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const require = createRequire(path.join(root, 'package.json'))
 const baseline = JSON.parse(fs.readFileSync(path.join(root, 'runtime/baseline.json')))
 
-export function prepareDevelopmentProfile(home) {
-  // Refuse existing user content. Only a caller-owned, empty temporary home is
-  // supported until persistent product Profile migration has its own contract.
-  if (!path.isAbsolute(home) || fs.readdirSync(home).length) throw new Error('empty owned home required')
+function ensureOwnedDirectory(directory) {
+  try {
+    const value = fs.lstatSync(directory)
+    if (!value.isDirectory() || value.isSymbolicLink()) throw new Error('owned Profile path must be a directory')
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+    fs.mkdirSync(directory, { mode: 0o700 })
+  }
+}
+
+export function prepareProductProfile(home) {
+  if (!path.isAbsolute(home)) throw new Error('absolute owned home required')
+  if (!fs.existsSync(home)) fs.mkdirSync(home, { recursive: true, mode: 0o700 })
   const profile = path.join(home, 'profiles/dsh-work')
+  for (const directory of [home, path.dirname(profile), profile, path.join(profile, 'node_modules'),
+    path.join(profile, 'node_modules/@dsh-work'), path.join(profile, 'node_modules/@deepseek-ai')]) {
+    ensureOwnedDirectory(directory)
+  }
   const bundle = path.join(profile, 'node_modules/@dsh-work/lifecycle')
-  fs.mkdirSync(path.dirname(bundle), { recursive: true })
+  fs.rmSync(bundle, { recursive: true, force: true })
   fs.cpSync(path.join(root, 'packages/lifecycle-bundle'), bundle, { recursive: true })
   const cmdline = path.dirname(require.resolve('@deepseek-ai/dsh-cmdline/package.json'))
   const link = path.join(profile, 'node_modules/@deepseek-ai/dsh-cmdline')
-  fs.mkdirSync(path.dirname(link), { recursive: true })
+  fs.rmSync(link, { recursive: true, force: true })
   fs.symlinkSync(cmdline, link, 'junction')
   fs.writeFileSync(path.join(profile, 'package.json'), JSON.stringify({
     private: true, type: 'module', dsh: { profile: {
@@ -30,6 +43,10 @@ export function prepareDevelopmentProfile(home) {
     { id: 'web-runtime', config: { openBrowser: false, printUrl: false, surfaceContext: true, trustedHosts: [] } },
   ]))
 }
+
+// Compatibility alias for focused callers while persistent generation
+// ownership lands. It retains the stricter absolute-path requirement.
+export const prepareDevelopmentProfile = prepareProductProfile
 
 export function createOfficialLauncher({ node, home }, { spawnProcess = spawn, probe = execFileSync } = {}) {
   return () => {

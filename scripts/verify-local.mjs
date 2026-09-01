@@ -10,7 +10,7 @@ const output = path.join(root, 'artifacts/verification')
 fs.mkdirSync(output, { recursive: true })
 const report = { status: 'fail', phase: 'read-context', platform: process.platform, arch: process.arch,
   startedAt: new Date().toISOString(), checks: [], provenance: [],
-  limitations: ['development direct-child scope only', 'no complete process-tree or host-crash recovery proof',
+  limitations: ['development direct-child scope only', 'no complete process-tree or guardian-crash recovery proof',
     'no installer, signing, complete dependency byte/license audit, or full Harness browser UI',
     'screenshots are not product-approved visual acceptance', 'one native report does not prove another OS'],
 }
@@ -56,14 +56,15 @@ try {
   const scriptTests = fs.readdirSync(path.join(root, 'scripts')).filter(file => file.endsWith('.test.mjs')).map(file => `scripts/${file}`)
   run('unit', ['--test', '--test-reporter=tap', ...scriptTests,
     'tests/runtime-host.test.mjs', 'tests/official-launcher.test.mjs', 'tests/desktop-security.test.mjs',
-    'tests/renderer.test.mjs', 'tests/owned-test-home.test.mjs'])
+    'tests/renderer.test.mjs', 'tests/owned-test-home.test.mjs', 'tests/generation-store.test.mjs',
+    'tests/runtime-guardian.test.mjs', 'tests/guardian-client.test.mjs'])
   provenance('after-unit')
   run('contract', ['scripts/verify-contract.mjs'])
   provenance('after-contract')
-  run('runtime', ['--test', '--test-reporter=tap', 'tests/runtime-integration.test.mjs'])
+  run('runtime', ['--test', '--test-reporter=tap', 'tests/runtime-integration.test.mjs', 'tests/guardian-integration.test.mjs'])
   provenance('after-runtime')
   if (process.argv.includes('--desktop')) {
-    const modes = ['normal', 'missing', 'renderer-crash', 'runtime-recovery']
+    const modes = ['normal', 'missing', 'renderer-crash', 'runtime-recovery', 'host-death']
     for (const mode of modes) {
       run(`desktop-${mode}`, ['scripts/run-desktop-test.mjs', '--mode', mode])
       provenance(`after-desktop-${mode}`)
