@@ -24,11 +24,16 @@ export interface WorkSnapshot {
   readonly title: string
   readonly goal: string
   readonly workspace: WorkWorkspace
+  readonly primarySession: WorkPrimarySession
 }
 
 export interface WorkWorkspace {
   readonly workspaceId: string
   readonly path: string
+}
+
+export interface WorkPrimarySession {
+  readonly sessionId: string
 }
 
 export interface WorkController {
@@ -38,6 +43,7 @@ export interface WorkController {
 
 export interface WorkControllerOptions {
   readonly createId?: () => string
+  readonly createSessionId?: () => string
   readonly workspaceRoot: string
   readonly harness: HarnessWorkPort
 }
@@ -49,11 +55,25 @@ export interface EnsureWorkspaceRequest {
 
 export interface HarnessWorkPort {
   ensureWorkspace(request: EnsureWorkspaceRequest): Promise<WorkWorkspace>
+  ensurePrimarySession(request: EnsurePrimarySessionRequest): Promise<WorkPrimarySession>
+}
+
+export interface EnsurePrimarySessionRequest {
+  readonly sessionId: string
+  readonly workspaceId: string
+  readonly cwd: string
 }
 
 export interface HarnessWorkContext {
   readonly workspaceRegistry: {
     create(path: string, title?: string): Promise<{ readonly id: string; readonly path: string }>
+  }
+  readonly sessionController: {
+    create(request: {
+      readonly sessionId: string
+      readonly workspaceId: string
+      readonly cwd: string
+    }): Promise<{ readonly sessionId: string }>
   }
 }
 
@@ -67,11 +87,16 @@ export function createHarnessWorkPort(context: HarnessWorkContext): HarnessWorkP
         path: workspace.path,
       })
     },
+    async ensurePrimarySession(request) {
+      const session = await context.sessionController.create(request)
+      return Object.freeze({ sessionId: session.sessionId })
+    },
   }
 }
 
 export function createWorkController(options: WorkControllerOptions): WorkController {
   const createId = options.createId ?? randomUUID
+  const createSessionId = options.createSessionId ?? randomUUID
   let work: WorkSnapshot | null = null
 
   return {
@@ -82,11 +107,17 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         path: path.join(options.workspaceRoot, workId),
         title: spec.title,
       })
+      const primarySession = await options.harness.ensurePrimarySession({
+        sessionId: createSessionId(),
+        workspaceId: workspace.workspaceId,
+        cwd: workspace.path,
+      })
       work = Object.freeze({
         workId,
         title: spec.title,
         goal: spec.goal,
         workspace,
+        primarySession,
       })
       return work
     },

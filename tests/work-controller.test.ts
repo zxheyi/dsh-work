@@ -16,12 +16,16 @@ function testHarness(): HarnessWorkPort {
     async ensureWorkspace(request) {
       return { workspaceId: 'workspace-1', path: request.path }
     },
+    async ensurePrimarySession(request) {
+      return { sessionId: request.sessionId }
+    },
   }
 }
 
 test('creates the only Work and returns it through the public controller', async () => {
   const controller = createWorkController({
     createId: () => 'work-1',
+    createSessionId: () => 'session-1',
     workspaceRoot: '/managed',
     harness: testHarness(),
   })
@@ -39,6 +43,9 @@ test('creates the only Work and returns it through the public controller', async
       workspaceId: 'workspace-1',
       path: '/managed/work-1',
     },
+    primarySession: {
+      sessionId: 'session-1',
+    },
   })
   assert.deepEqual(await controller.get(), created)
 })
@@ -46,6 +53,7 @@ test('creates the only Work and returns it through the public controller', async
 test('rejects a second Work instead of silently replacing the first one', async () => {
   const controller = createWorkController({
     createId: () => 'work-1',
+    createSessionId: () => 'session-1',
     workspaceRoot: '/managed',
     harness: testHarness(),
   })
@@ -69,9 +77,15 @@ test('creates and registers a DSH Work managed Workspace', async () => {
         return { id: 'workspace-registered', path: workspacePath }
       },
     },
+    sessionController: {
+      async create(request) {
+        return { sessionId: request.sessionId }
+      },
+    },
   })
   const controller = createWorkController({
     createId: () => 'work-managed',
+    createSessionId: () => 'session-managed',
     workspaceRoot,
     harness,
   })
@@ -85,4 +99,36 @@ test('creates and registers a DSH Work managed Workspace', async () => {
     path: managedPath,
   })
   await fs.rm(workspaceRoot, { recursive: true, force: true })
+})
+
+test('creates one Primary Session bound to the managed Workspace', async () => {
+  const sessionRequests: Array<{
+    sessionId: string
+    workspaceId: string
+    cwd: string
+  }> = []
+  const harness: HarnessWorkPort = {
+    async ensureWorkspace(request) {
+      return { workspaceId: 'workspace-primary', path: request.path }
+    },
+    async ensurePrimarySession(request) {
+      sessionRequests.push(request)
+      return { sessionId: request.sessionId }
+    },
+  }
+  const controller = createWorkController({
+    createId: () => 'work-primary',
+    createSessionId: () => 'session-primary',
+    workspaceRoot: '/managed',
+    harness,
+  })
+
+  const created = await controller.create({ title: 'Primary', goal: 'Use one execution context.' })
+
+  assert.deepEqual(sessionRequests, [{
+    sessionId: 'session-primary',
+    workspaceId: 'workspace-primary',
+    cwd: '/managed/work-primary',
+  }])
+  assert.deepEqual(created.primarySession, { sessionId: 'session-primary' })
 })
