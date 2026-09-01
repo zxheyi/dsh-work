@@ -17,7 +17,7 @@
 
 DSH Work does not aim to reimplement [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It aims to build a desktop product layer for real work on top of the upstream Agent runtime and plugin architecture. The desktop shell should own only operating-system integration and process lifecycle; project, file, research, artifact, and other work capabilities should be composed through Harness-native plugins.
 
-> **Current status:** Electron and the official Harness alpha.2 runtime boundary are selected. The machine-readable runtime baseline, frozen dependencies, and native verification path are now on main. The minimum desktop lifecycle remains a separate change; there is no release ready for daily use.
+> **Current status:** Electron, the official Harness alpha.2 runtime boundary, frozen dependencies, and native verification path are on main. A minimum desktop lifecycle development slice is now runnable and verifiable, but there is no packaged release ready for daily use.
 
 ## Why DSH Work
 
@@ -82,7 +82,7 @@ pnpm test
 pnpm check
 ```
 
-See [`runtime/README.md`](runtime/README.md) for the complete official source, npm package, and native Node byte verification. The minimum desktop lifecycle remains a separate change.
+See [`runtime/README.md`](runtime/README.md) for the complete official source, npm package, and native Node byte verification, and [`docs/acceptance/electron-lifecycle-slice.md`](docs/acceptance/electron-lifecycle-slice.md) for the minimum Electron lifecycle boundary and acceptance contract.
 
 Before proposing a large implementation, use GitHub Issues to discuss product scope, architecture decisions, or plugin boundaries.
 

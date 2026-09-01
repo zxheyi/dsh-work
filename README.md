@@ -17,7 +17,7 @@
 
 DSH Work 的目标不是重新实现 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)，而是在其 Agent 运行时和插件架构之上构建面向真实工作的桌面产品层。桌面壳只负责操作系统集成和进程生命周期；项目、文件、研究、产物与其他工作能力应通过 Harness 原生插件进行组合。
 
-> **当前状态：** Electron 与官方 Harness alpha.2 运行时边界已经确定，机器可读的运行时基线、固定依赖和原生验证流程已进入主线。最小桌面生命周期仍将通过独立变更交付；暂时没有可供日常使用的版本。
+> **当前状态：** Electron 与官方 Harness alpha.2 运行时边界、固定依赖和原生验证流程已进入主线。最小桌面生命周期开发切片现已可运行和验证，但暂时没有可供日常使用的打包版本。
 
 ## 为什么做 DSH Work
 
@@ -82,7 +82,7 @@ pnpm test
 pnpm check
 ```
 
-完整的官方源码、npm 包与原生 Node 字节验证见 [`runtime/README.md`](runtime/README.md)。最小桌面生命周期仍作为独立变更交付。
+完整的官方源码、npm 包与原生 Node 字节验证见 [`runtime/README.md`](runtime/README.md)，最小 Electron 生命周期的边界与验收见 [`docs/acceptance/electron-lifecycle-slice.md`](docs/acceptance/electron-lifecycle-slice.md)。
 
 在提交大规模实现前，请先通过 GitHub Issues 讨论产品范围、架构决策或插件边界。
 

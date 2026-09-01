@@ -117,3 +117,26 @@ test('every active runtime baseline field is locked to the accepted decision', (
     fs.rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('removing the Harness-native lifecycle boundary fails verification', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-lifecycle-'))
+  try {
+    for (const relativePath of requiredFiles) {
+      const target = path.join(root, relativePath)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.copyFileSync(path.join(repositoryRoot, relativePath), target)
+    }
+
+    const target = path.join(root, 'packages/lifecycle-bundle/index.mjs')
+    const original = fs.readFileSync(target, 'utf8')
+    fs.writeFileSync(target, original.replace('ctx.appReady.onReady', 'ctx.internalReady.onReady'))
+
+    assert.ok(
+      verifyContract(root).includes(
+        'packages/lifecycle-bundle/index.mjs: missing required contract text "ctx.appReady.onReady"',
+      ),
+    )
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})

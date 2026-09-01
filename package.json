@@ -6,10 +6,14 @@
   "description": "Electron desktop composition of the official DeepSeek Harness CLI",
   "packageManager": "pnpm@10.34.4",
   "scripts": {
-    "test": "node --test scripts/*.test.mjs",
+    "test": "node --test scripts/*.test.mjs tests/runtime-host.test.mjs tests/official-launcher.test.mjs tests/desktop-security.test.mjs tests/renderer.test.mjs tests/owned-test-home.test.mjs",
     "check": "node scripts/verify-contract.mjs",
     "runtime:prepare": "node scripts/prepare-product-runtime.mjs",
-    "runtime:verify": "node scripts/verify-product-runtime.mjs artifacts/runtime/context.json"
+    "runtime:verify": "node scripts/verify-product-runtime.mjs artifacts/runtime/context.json",
+    "test:runtime": "node --test tests/runtime-integration.test.mjs",
+    "test:desktop": "node scripts/run-desktop-test.mjs",
+    "desktop": "electron apps/desktop/main.mjs",
+    "verify:local": "node scripts/verify-local.mjs artifacts/runtime/context.json --desktop"
   },
   "dependencies": {
     "@deepseek-ai/dsh": "0.1.2-alpha.2",

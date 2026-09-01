@@ -1,0 +1,6 @@
+{
+  "name": "@dsh-work/delayed-startup",
+  "private": true,
+  "type": "module",
+  "exports": "./index.mjs"
+}
