@@ -22,7 +22,9 @@ The repository needs one durable source and build convention before more work su
 
 Use strict TypeScript for DSH Work-owned product source, boundary types, and product tests. Compile product source to native ESM JavaScript under ignored `dist/` output before Electron or the official Harness Profile loads it. Production execution must not require `tsx`, `ts-node`, a custom Node loader, or TypeScript source inside generated `node_modules`.
 
-Use TypeScript's Node ESM resolution rules and explicit `.js` import specifiers in source so emitted imports are valid without rewriting. Use `.cts` only where Electron requires a CommonJS preload artifact. Type checking and emission are separate required commands so a no-emit check cannot be mistaken for a runnable build.
+Use TypeScript source extensions for relative imports: `.ts` in ESM product and test modules, and `.cts` only where Electron requires a CommonJS preload artifact. Configure TypeScript to allow those source extensions and rewrite them to `.js` or `.cjs` during emission. This keeps source imports directly traceable to checked TypeScript modules while ensuring every production consumer loads ordinary JavaScript. Type checking and emission remain separate required commands so a no-emit check cannot be mistaken for a runnable build.
+
+Minimize third-party dependencies and direct third-party imports. For DSH Work-owned logic, prefer the TypeScript type system, ECMAScript and Web APIs, and the Node.js standard library. Use Electron and official DeepSeek Harness packages only at their accepted platform and composition seams. Add another package only when repository evidence shows that it removes material implementation complexity or risk; record its necessity, license, packaging impact, security and maintenance cost, verification, and rollback. Convenience alone is not sufficient justification.
 
 Keep repository bootstrap, provenance, build orchestration, and contract-verification scripts as directly executable `.mjs` unless a later decision proves that compiling them strengthens rather than weakens clean-checkout verification. This is a bounded exception, not permission to add new product behavior in untyped JavaScript.
 
@@ -33,9 +35,12 @@ The migration changes DSH Work implementation language and build inputs only. De
 - [x] A clean install exposes pinned TypeScript build and test tooling as development-only dependencies.
 - [x] `pnpm typecheck` checks all migrated product source and product tests with strict settings and no emitted files.
 - [x] `pnpm build` emits native JavaScript and required static/package assets beneath ignored `dist/`.
+- [x] Relative TypeScript source imports use `.ts` or the bounded `.cts` preload exception, and build output rewrites them to runnable JavaScript extensions.
 - [x] Electron starts the emitted desktop entry, and the generated Harness Profile contains an emitted JavaScript lifecycle Bundle rather than TypeScript source.
-- [x] Existing unit, contract, official CLI/Profile integration, guardian recovery, and Electron E2E checks pass against the migrated implementation.
+- [x] Existing unit, contract, official CLI/Profile integration, guardian recovery, and Electron E2E checks pass against the migrated implementation on native macOS arm64.
+- [ ] The same affected gates pass against the migrated implementation on native Windows x64.
 - [x] Bootstrap contract and provenance scripts remain directly runnable from a clean checkout before product output exists.
+- [x] DSH Work-owned product logic introduces no general-purpose third-party utility or framework dependency.
 - [x] No production dependency or parallel Harness extension boundary is introduced.
 
 Implementation evidence comes from `pnpm typecheck`, `pnpm build`, `pnpm test`, `pnpm check`, the runtime integration suite, and the desktop lifecycle verifier on native macOS and Windows. Change this decision to `implemented` only after the complete migrated source and those affected gates pass.
@@ -56,12 +61,18 @@ Node can erase a subset of TypeScript syntax, and developer loaders can execute 
 
 A bundler could reduce runtime files and rewrite resolution. M0 still needs independently testable host, guardian, desktop, and Harness Bundle boundaries. TypeScript emission preserves those boundaries with less packaging policy; a later packaging ADR may add bundling when distribution measurements require it.
 
+### Adopt utility libraries or an additional application framework
+
+Utility packages can shorten individual implementations, and another framework could provide its own state, IPC, or process abstractions. M0 already has the TypeScript, Web, Node.js, Electron, and Harness public capabilities needed by the accepted product boundary. Adding another abstraction layer would enlarge the dependency, packaging, security, and maintenance surface before measured complexity justifies it.
+
 ## Consequences
 
 - Product changes gain a mandatory install, type-check, and build step.
 - Runtime entry points and tests must distinguish source paths from emitted paths.
 - Static Electron assets and the lifecycle package manifest/patch must be copied deterministically into `dist/`.
 - TypeScript and the development test executor are build-time dependencies only; emitted product code remains ordinary JavaScript.
+- Relative imports name their TypeScript source files; build emission is responsible for producing runtime-safe JavaScript extensions.
+- New third-party packages are exceptional and require repository evidence for necessity, lifecycle cost, and rollback.
 - Migration commits must preserve behavior and keep the existing executable tests green after each boundary moves.
 - New DSH Work product modules default to TypeScript; new bootstrap scripts require an explicit reason to remain JavaScript.
 

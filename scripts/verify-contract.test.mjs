@@ -107,6 +107,35 @@ test('weakening the accepted TypeScript runtime boundary fails verification', ()
   }
 })
 
+test('weakening the accepted TypeScript source and dependency defaults fails verification', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-typescript-defaults-'))
+  try {
+    for (const relativePath of requiredFiles) {
+      const target = path.join(root, relativePath)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.copyFileSync(path.join(repositoryRoot, relativePath), target)
+    }
+
+    const target = path.join(root, 'docs/decisions/0005-typescript-product-source.md')
+    const original = fs.readFileSync(target, 'utf8')
+    fs.writeFileSync(target, original
+      .replace('Use TypeScript source extensions for relative imports', 'Use JavaScript source extensions for relative imports')
+      .replace('Minimize third-party dependencies and direct third-party imports', 'Allow third-party dependencies and direct third-party imports'))
+
+    const result = verifyContract(root)
+    for (const token of [
+      'Use TypeScript source extensions for relative imports',
+      'Minimize third-party dependencies and direct third-party imports',
+    ]) {
+      assert.ok(result.includes(
+        `docs/decisions/0005-typescript-product-source.md: missing required contract text "${token}"`,
+      ))
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('removing the TypeScript typecheck command fails verification', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-typescript-command-'))
   try {

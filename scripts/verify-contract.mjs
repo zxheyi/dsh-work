@@ -235,6 +235,8 @@ export function verifyContract(root) {
     'Status: accepted',
     'Use strict TypeScript for DSH Work-owned product source',
     'Compile product source to native ESM JavaScript under ignored `dist/`',
+    'Use TypeScript source extensions for relative imports',
+    'Minimize third-party dependencies and direct third-party imports',
     'Keep repository bootstrap, provenance, build orchestration, and contract-verification scripts as directly executable `.mjs`',
   ]) {
     requireText(errors, typescriptDecision, token, 'docs/decisions/0005-typescript-product-source.md')
