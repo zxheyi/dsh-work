@@ -49,6 +49,7 @@ test('creates the only Work and returns it through the public controller', async
       turnCount: 0,
     },
     deliverable: null,
+    status: 'working',
   })
   assert.deepEqual(await controller.get(), created)
 })
@@ -234,4 +235,51 @@ test('rejects a second file deliverable', async () => {
     (error: unknown) => error instanceof WorkError && error.code === 'work/deliverable-exists',
   )
   await fs.rm(workspaceRoot, { recursive: true, force: true })
+})
+
+test('moves a file deliverable through review, completion, and delivery', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-status-'))
+  const controller = createWorkController({
+    createId: () => 'work-status',
+    createSessionId: () => 'session-status',
+    workspaceRoot,
+    harness: testHarness(),
+  })
+  const created = await controller.create({ title: 'Status', goal: 'Make progress understandable.' })
+  await fs.mkdir(created.workspace.path, { recursive: true })
+  await fs.writeFile(path.join(created.workspace.path, 'result.md'), 'ready')
+
+  const awaitingReview = await controller.dispatch({
+    workId: created.workId,
+    command: { type: 'record-file', path: 'result.md' },
+  })
+  const completed = await controller.dispatch({
+    workId: created.workId,
+    command: { type: 'complete' },
+  })
+  const delivered = await controller.dispatch({
+    workId: created.workId,
+    command: { type: 'deliver' },
+  })
+
+  assert.equal(created.status, 'working')
+  assert.equal(awaitingReview.status, 'awaiting-review')
+  assert.equal(completed.status, 'completed')
+  assert.equal(delivered.status, 'delivered')
+  await fs.rm(workspaceRoot, { recursive: true, force: true })
+})
+
+test('does not deliver a Work before review completion', async () => {
+  const controller = createWorkController({
+    createId: () => 'work-order',
+    createSessionId: () => 'session-order',
+    workspaceRoot: '/managed',
+    harness: testHarness(),
+  })
+  const created = await controller.create({ title: 'Order', goal: 'Preserve the review gate.' })
+
+  await assert.rejects(
+    controller.dispatch({ workId: created.workId, command: { type: 'deliver' } }),
+    (error: unknown) => error instanceof WorkError && error.code === 'work/invalid-transition',
+  )
 })

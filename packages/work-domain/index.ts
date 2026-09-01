@@ -7,6 +7,7 @@ export type WorkErrorCode =
   | 'work/not-found'
   | 'work/deliverable-exists'
   | 'work/deliverable-invalid'
+  | 'work/invalid-transition'
 
 export class WorkError extends Error {
   readonly code: WorkErrorCode
@@ -30,7 +31,10 @@ export interface WorkSnapshot {
   readonly workspace: WorkWorkspace
   readonly primarySession: WorkPrimarySession
   readonly deliverable: WorkFileDeliverable | null
+  readonly status: WorkStatus
 }
+
+export type WorkStatus = 'working' | 'awaiting-review' | 'completed' | 'delivered'
 
 export interface WorkWorkspace {
   readonly workspaceId: string
@@ -58,7 +62,7 @@ export interface DispatchWorkRequest {
   readonly command: WorkCommand
 }
 
-export type WorkCommand = SubmitTurnCommand | RecordFileCommand
+export type WorkCommand = SubmitTurnCommand | RecordFileCommand | CompleteWorkCommand | DeliverWorkCommand
 
 export interface SubmitTurnCommand {
   readonly type: 'submit-turn'
@@ -68,6 +72,14 @@ export interface SubmitTurnCommand {
 export interface RecordFileCommand {
   readonly type: 'record-file'
   readonly path: string
+}
+
+export interface CompleteWorkCommand {
+  readonly type: 'complete'
+}
+
+export interface DeliverWorkCommand {
+  readonly type: 'deliver'
 }
 
 export interface WorkControllerOptions {
@@ -175,6 +187,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         workspace,
         primarySession,
         deliverable: null,
+        status: 'working',
       })
       return work
     },
@@ -188,6 +201,9 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         throw new WorkError('work/not-found', `Work not found: ${request.workId}`)
       }
       if (request.command.type === 'submit-turn') {
+        if (work.status === 'completed' || work.status === 'delivered') {
+          throw new WorkError('work/invalid-transition', `Cannot submit a Turn while Work is ${work.status}.`)
+        }
         await options.harness.submitTurn({
           requestId: createRequestId(),
           sessionId: work.primarySession.sessionId,
@@ -200,7 +216,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
             turnCount: work.primarySession.turnCount + 1,
           }),
         })
-      } else {
+      } else if (request.command.type === 'record-file') {
         if (work.deliverable) {
           throw new WorkError('work/deliverable-exists', 'The first-phase product supports one file deliverable.')
         }
@@ -237,7 +253,18 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
             kind: 'file',
             path: resolvedRelativePath.split(path.sep).join(path.posix.sep),
           }),
+          status: 'awaiting-review',
         })
+      } else if (request.command.type === 'complete') {
+        if (work.status !== 'awaiting-review') {
+          throw new WorkError('work/invalid-transition', 'Work must be awaiting review before completion.')
+        }
+        work = Object.freeze({ ...work, status: 'completed' })
+      } else {
+        if (work.status !== 'completed') {
+          throw new WorkError('work/invalid-transition', 'Work must be completed before delivery.')
+        }
+        work = Object.freeze({ ...work, status: 'delivered' })
       }
       return work
     },
