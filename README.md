@@ -17,7 +17,7 @@
 
 DSH Work 的目标不是重新实现 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)，而是在其 Agent 运行时和插件架构之上构建面向真实工作的桌面产品层。桌面壳只负责操作系统集成和进程生命周期；项目、文件、研究、产物与其他工作能力应通过 Harness 原生插件进行组合。
 
-> **当前状态：** 项目正在定义架构与首个产品范围，暂时没有可供日常使用的版本。本文中的功能均为目标方向，不代表已经实现或发布。
+> **当前状态：** 已选定 Electron 与官方 Harness alpha.2 运行时边界，生产实现将通过独立、可验证的后续变更进入主线。暂时没有可供日常使用的版本；本文中的产品功能仍为目标方向。
 
 ## 为什么做 DSH Work
 
@@ -72,7 +72,7 @@ DSH Work 是基于 DeepSeek Harness 构建的独立社区项目，与深度求�
 
 ## 开发与参与
 
-仓库目前处于架构设计阶段，尚无可运行的产品开发流程。Phase 0 已建立仓库契约；开始工作前请阅读 [`AGENTS.md`](AGENTS.md) 与 [`docs/workflow.md`](docs/workflow.md)。AI Native 交付工作流的中文 v1 冻结记录见 [`docs/workflow-v1.zh-CN.md`](docs/workflow-v1.zh-CN.md)。当前产品范围、首个里程碑和架构决策流程分别见 [`docs/product-scope.md`](docs/product-scope.md)、[`docs/acceptance/m0.md`](docs/acceptance/m0.md) 和 [`docs/decisions/README.md`](docs/decisions/README.md)。
+仓库已完成首轮桌面技术栈与上游集成决策，生产实现尚未进入主线。Phase 0 已建立仓库契约；开始工作前请阅读 [`AGENTS.md`](AGENTS.md) 与 [`docs/workflow.md`](docs/workflow.md)。AI Native 交付工作流的中文 v1 冻结记录见 [`docs/workflow-v1.zh-CN.md`](docs/workflow-v1.zh-CN.md)。当前产品范围、首个里程碑和架构决策流程分别见 [`docs/product-scope.md`](docs/product-scope.md)、[`docs/acceptance/m0.md`](docs/acceptance/m0.md) 和 [`docs/decisions/README.md`](docs/decisions/README.md)。
 
 当前契约门禁不依赖产品技术栈：
 
@@ -81,7 +81,7 @@ node --test scripts/verify-contract.test.mjs
 node scripts/verify-contract.mjs
 ```
 
-首个产品里程碑将确定技术栈、上游集成方式、插件边界和最小可运行桌面宿主。
+技术栈与上游运行时边界已经通过 ADR 接受；运行时基线和最小桌面生命周期将作为独立变更交付。
 
 在提交大规模实现前，请先通过 GitHub Issues 讨论产品范围、架构决策或插件边界。
 

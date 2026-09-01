@@ -60,3 +60,26 @@ test('removing the no-reimplementation boundary fails verification', () => {
     fs.rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('changing an accepted architecture decision fails verification', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-decisions-'))
+  try {
+    for (const relativePath of requiredFiles) {
+      const target = path.join(root, relativePath)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.copyFileSync(path.join(repositoryRoot, relativePath), target)
+    }
+
+    const target = path.join(root, 'docs/decisions/0001-electron-desktop-host.md')
+    const original = fs.readFileSync(target, 'utf8')
+    fs.writeFileSync(target, original.replace('Status: accepted', 'Status: proposed'))
+
+    assert.ok(
+      verifyContract(root).includes(
+        'docs/decisions/0001-electron-desktop-host.md: missing required contract text "Status: accepted"',
+      ),
+    )
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
