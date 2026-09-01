@@ -2,8 +2,8 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { createGuardianClient } from '../packages/runtime-guardian/client.mjs'
-import { removeOwnedTestHome } from '../tests/support/owned-test-home.mjs'
+import { createGuardianClient } from '../packages/runtime-guardian/client.ts'
+import { removeOwnedTestHome } from '../tests/support/owned-test-home.ts'
 
 const output = path.resolve('artifacts/desktop/host-death')
 const resultPath = path.join(output, 'result.json')
@@ -35,7 +35,7 @@ async function exercise(phase) {
   let desktop, client, clean = false
   try {
     fs.writeFileSync(armedPath, JSON.stringify({ status: 'launching', runId }))
-    desktop = spawn(electron, [`--user-data-dir=${productRoot}`, 'tests/desktop-host-death-e2e.mjs'], {
+    desktop = spawn(electron, [`--user-data-dir=${productRoot}`, 'tests/desktop-host-death-e2e.ts'], {
       shell: false,
       env: { ...process.env, DSH_WORK_HOST_DEATH_ROOT: productRoot,
         DSH_WORK_HOST_DEATH_REPORT: armedPath, DSH_WORK_HOST_DEATH_PHASE: phase,

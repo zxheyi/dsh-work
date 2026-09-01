@@ -33,6 +33,8 @@ Rollback the bounded runtime-baseline change before dependent behavior is adopte
 After preparing the verified runtime and installing Electron's accepted artifact, launch or test the status window with the explicit standalone Node path from `artifacts/runtime/context.json`:
 
 ```sh
+pnpm typecheck
+pnpm build
 node node_modules/electron/install.js
 DSH_WORK_NODE=/absolute/path/to/verified/node pnpm desktop
 DSH_WORK_NODE=/absolute/path/to/verified/node pnpm test:runtime

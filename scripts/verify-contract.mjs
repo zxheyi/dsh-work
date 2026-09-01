@@ -17,6 +17,7 @@ export const requiredFiles = [
   'docs/decisions/0002-official-dsh-cli-runtime.md',
   'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md',
   'docs/decisions/0004-crash-safe-runtime-ownership.md',
+  'docs/decisions/0005-typescript-product-source.md',
   'docs/upstream-compatibility.md',
   '.github/ISSUE_TEMPLATE/config.yml',
   '.github/ISSUE_TEMPLATE/feature_request.yml',
@@ -32,53 +33,57 @@ export const requiredFiles = [
   'runtime/README.md',
   'package.json',
   'pnpm-lock.yaml',
+  'tsconfig.json',
+  'tsconfig.build.json',
   '.github/workflows/runtime-baseline.yml',
   'scripts/runtime-provenance.mjs',
+  'scripts/build-product.mjs',
   'scripts/prepare-product-runtime.mjs',
   'scripts/verify-product-runtime.mjs',
   'scripts/product-dependencies.test.mjs',
   'scripts/product-runtime-diagnostics.test.mjs',
   'docs/acceptance/electron-lifecycle-slice.md',
   '.github/workflows/desktop-lifecycle.yml',
-  'apps/desktop/contracts.d.ts',
+  'apps/desktop/contracts.ts',
   'apps/desktop/index.html',
-  'apps/desktop/main.mjs',
-  'apps/desktop/preload.cjs',
-  'apps/desktop/renderer.js',
-  'apps/desktop/security.mjs',
+  'apps/desktop/main.ts',
+  'apps/desktop/preload.cts',
+  'apps/desktop/renderer.ts',
+  'apps/desktop/security.ts',
   'apps/desktop/style.css',
-  'apps/desktop/window.mjs',
+  'apps/desktop/window.ts',
   'packages/lifecycle-bundle/cordis.patch.yml',
-  'packages/lifecycle-bundle/index.mjs',
+  'packages/lifecycle-bundle/index.ts',
   'packages/lifecycle-bundle/package.json',
-  'packages/runtime-host/index.mjs',
-  'packages/runtime-host/official-launcher.mjs',
-  'packages/runtime-guardian/client.mjs',
-  'packages/runtime-guardian/generation-store.mjs',
-  'packages/runtime-guardian/process.mjs',
-  'packages/runtime-guardian/protocol.mjs',
-  'packages/runtime-guardian/service.mjs',
+  'packages/runtime-host/index.ts',
+  'packages/runtime-host/official-launcher.ts',
+  'packages/runtime-guardian/client.ts',
+  'packages/runtime-guardian/generation-store.ts',
+  'packages/runtime-guardian/process.ts',
+  'packages/runtime-guardian/protocol.ts',
+  'packages/runtime-guardian/service.ts',
   'scripts/local-evidence.test.mjs',
   'scripts/run-host-death-test.mjs',
   'scripts/run-desktop-test.mjs',
   'scripts/verify-local.mjs',
-  'tests/desktop-e2e.mjs',
-  'tests/desktop-host-death-e2e.mjs',
-  'tests/desktop-recovery-e2e.mjs',
-  'tests/desktop-security.test.mjs',
-  'tests/official-launcher.test.mjs',
-  'tests/generation-store.test.mjs',
-  'tests/guardian-client.test.mjs',
-  'tests/owned-test-home.test.mjs',
-  'tests/renderer.test.mjs',
-  'tests/runtime-host.test.mjs',
-  'tests/runtime-guardian.test.mjs',
-  'tests/runtime-integration.test.mjs',
-  'tests/guardian-integration.test.mjs',
+  'tests/desktop-e2e.ts',
+  'tests/desktop-host-death-e2e.ts',
+  'tests/desktop-recovery-e2e.ts',
+  'tests/desktop-security.test.ts',
+  'tests/official-launcher.test.ts',
+  'tests/generation-store.test.ts',
+  'tests/guardian-client.test.ts',
+  'tests/owned-test-home.test.ts',
+  'tests/renderer.test.ts',
+  'tests/runtime-host.test.ts',
+  'tests/runtime-guardian.test.ts',
+  'tests/runtime-integration.test.ts',
+  'tests/guardian-integration.test.ts',
   'tests/fixtures/delayed-startup/index.mjs',
   'tests/fixtures/delayed-startup/package.json',
-  'tests/support/owned-test-home.mjs',
-  'tests/support/runtime-output-guard.mjs',
+  'tests/typescript-toolchain.test.ts',
+  'tests/support/owned-test-home.ts',
+  'tests/support/runtime-output-guard.ts',
 ]
 
 const linkedMarkdownFiles = [
@@ -97,6 +102,7 @@ const linkedMarkdownFiles = [
   'docs/decisions/0002-official-dsh-cli-runtime.md',
   'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md',
   'docs/decisions/0004-crash-safe-runtime-ownership.md',
+  'docs/decisions/0005-typescript-product-source.md',
   'docs/upstream-compatibility.md',
   '.github/BRANCH_PROTECTION.md',
 ]
@@ -224,6 +230,18 @@ export function verifyContract(root) {
     requireText(errors, ownershipDecision, token, 'docs/decisions/0004-crash-safe-runtime-ownership.md')
   }
 
+  const typescriptDecision = read(root, 'docs/decisions/0005-typescript-product-source.md')
+  for (const token of [
+    'Status: accepted',
+    'Use strict TypeScript for DSH Work-owned product source',
+    'Compile product source to native ESM JavaScript under ignored `dist/`',
+    'Use TypeScript source extensions for relative imports',
+    'Minimize third-party dependencies and direct third-party imports',
+    'Keep repository bootstrap, provenance, build orchestration, and contract-verification scripts as directly executable `.mjs`',
+  ]) {
+    requireText(errors, typescriptDecision, token, 'docs/decisions/0005-typescript-product-source.md')
+  }
+
   const expectedNodeArtifacts = {
     'darwin-x64': {
       filename: 'node-v24.11.1-darwin-x64.tar.gz',
@@ -237,6 +255,40 @@ export function verifyContract(root) {
       filename: 'node-v24.11.1-win-x64.zip',
       sha256: '5355ae6d7c49eddcfde7d34ac3486820600a831bf81dc3bdca5c8db6a9bb0e76',
     },
+  }
+
+  try {
+    const manifest = JSON.parse(read(root, 'package.json'))
+    const expectedScripts = {
+      build: 'node scripts/build-product.mjs',
+      typecheck: 'tsc -p tsconfig.json',
+      check: 'pnpm typecheck && node scripts/verify-contract.mjs',
+    }
+    for (const [name, command] of Object.entries(expectedScripts)) {
+      if (manifest.scripts?.[name] !== command) {
+        errors.push(`package.json: ${name} must remain ${JSON.stringify(command)}`)
+      }
+    }
+    if (!manifest.scripts?.test?.includes('tests/typescript-toolchain.test.ts')) {
+      errors.push('package.json: test must execute the native TypeScript smoke')
+    }
+  } catch {
+    errors.push('package.json: invalid product manifest')
+  }
+
+  try {
+    const typecheck = JSON.parse(read(root, 'tsconfig.json'))
+    const build = JSON.parse(read(root, 'tsconfig.build.json'))
+    const options = typecheck.compilerOptions || {}
+    if (options.strict !== true || options.noEmit !== true || options.module !== 'NodeNext' ||
+        options.allowImportingTsExtensions !== true || options.rewriteRelativeImportExtensions !== true) {
+      errors.push('tsconfig.json: strict Node ESM typecheck contract is incomplete')
+    }
+    if (build.compilerOptions?.noEmit !== false || build.compilerOptions?.outDir !== 'dist') {
+      errors.push('tsconfig.build.json: emitted runtime output must remain under dist')
+    }
+  } catch {
+    errors.push('TypeScript configuration is invalid')
   }
   try {
     const baseline = JSON.parse(read(root, 'runtime/baseline.json'))
@@ -377,17 +429,17 @@ export function verifyContract(root) {
     requireText(errors, lifecycleAcceptance, heading, 'docs/acceptance/electron-lifecycle-slice.md')
   }
 
-  const lifecycleBundle = read(root, 'packages/lifecycle-bundle/index.mjs')
+  const lifecycleBundle = read(root, 'packages/lifecycle-bundle/index.ts')
   for (const token of [
     "import { exitOnStdinEnd } from '@deepseek-ai/dsh-cmdline'",
-    'ctx.appReady.onReady',
+    'appReady.onReady',
     'ctx.effect',
     "protocol: 'dsh-work.lifecycle.v1'",
   ]) {
-    requireText(errors, lifecycleBundle, token, 'packages/lifecycle-bundle/index.mjs')
+    requireText(errors, lifecycleBundle, token, 'packages/lifecycle-bundle/index.ts')
   }
 
-  const launcher = read(root, 'packages/runtime-host/official-launcher.mjs')
+  const launcher = read(root, 'packages/runtime-host/official-launcher.ts')
   for (const token of [
     'prepareProductProfile',
     "require.resolve('@deepseek-ai/dsh/package.json')",
@@ -395,35 +447,35 @@ export function verifyContract(root) {
     'shell: false',
     'DSH_TELEMETRY_DISABLED',
   ]) {
-    requireText(errors, launcher, token, 'packages/runtime-host/official-launcher.mjs')
+    requireText(errors, launcher, token, 'packages/runtime-host/official-launcher.ts')
   }
 
-  const generationStore = read(root, 'packages/runtime-guardian/generation-store.mjs')
+  const generationStore = read(root, 'packages/runtime-guardian/generation-store.ts')
   for (const token of ["fs.openSync(file, 'wx'", 'dsh-work-terminal.json',
     "return { status: 'blocked', code: 'recovery-required' }", 'quarantine']) {
-    requireText(errors, generationStore, token, 'packages/runtime-guardian/generation-store.mjs')
+    requireText(errors, generationStore, token, 'packages/runtime-guardian/generation-store.ts')
   }
 
-  const guardianProcess = read(root, 'packages/runtime-guardian/process.mjs')
+  const guardianProcess = read(root, 'packages/runtime-guardian/process.ts')
   for (const token of ["process.once('disconnect'", 'await service.dispose()',
     'createOfficialLauncher', 'prepareProductProfile']) {
-    requireText(errors, guardianProcess, token, 'packages/runtime-guardian/process.mjs')
+    requireText(errors, guardianProcess, token, 'packages/runtime-guardian/process.ts')
   }
   for (const forbidden of ['process.kill(', '.kill(']) {
     if (guardianProcess.includes(forbidden)) {
-      errors.push(`packages/runtime-guardian/process.mjs: guardian must not contain ${JSON.stringify(forbidden)}`)
+      errors.push(`packages/runtime-guardian/process.ts: guardian must not contain ${JSON.stringify(forbidden)}`)
     }
   }
 
-  const guardianProtocol = read(root, 'packages/runtime-guardian/protocol.mjs')
+  const guardianProtocol = read(root, 'packages/runtime-guardian/protocol.ts')
   for (const token of ["'dsh-work.guardian.v1'", "['start', 'stop', 'recover', 'snapshot']",
     "'recovery-required'", 'canRecover']) {
-    requireText(errors, guardianProtocol, token, 'packages/runtime-guardian/protocol.mjs')
+    requireText(errors, guardianProtocol, token, 'packages/runtime-guardian/protocol.ts')
   }
 
-  const desktopMain = read(root, 'apps/desktop/main.mjs')
+  const desktopMain = read(root, 'apps/desktop/main.ts')
   for (const token of ['createGuardianClient', 'app.requestSingleInstanceLock()', 'await host.dispose()']) {
-    requireText(errors, desktopMain, token, 'apps/desktop/main.mjs')
+    requireText(errors, desktopMain, token, 'apps/desktop/main.ts')
   }
 
   const localVerifier = read(root, 'scripts/verify-local.mjs')

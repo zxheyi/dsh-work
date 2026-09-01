@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": ".",
+    "outDir": "dist",
+    "sourceMap": true,
+    "inlineSources": true
+  },
+  "include": [
+    "apps/**/*.ts",
+    "apps/**/*.cts",
+    "packages/**/*.ts"
+  ]
+}

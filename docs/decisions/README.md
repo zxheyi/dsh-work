@@ -19,5 +19,6 @@ Use a decision record when a change affects the desktop stack, upstream integrat
 | [0002: Official `dsh` CLI and matched runtime pair](0002-official-dsh-cli-runtime.md) | superseded | Historical rc.2 selection; replaced by ADR 0003 without rewriting its evidence. |
 | [0003: Official dsh alpha.2 runtime pair](0003-dsh-alpha2-runtime-upgrade.md) | accepted | Selects the matched alpha.2 pair after macOS/Windows native verification; product lifecycle and packaging remain open. |
 | [0004: Crash-safe runtime ownership and Profile generations](0004-crash-safe-runtime-ownership.md) | implemented | Selects an external Node guardian, atomic generation leases, clean reuse, and explicit isolated recovery without PID-based termination. |
+| [0005: TypeScript product source and emitted JavaScript runtime](0005-typescript-product-source.md) | accepted | Selects strict TypeScript for product source and tests while keeping bootstrap verification directly executable. |
 
-ADR 0001 and ADR 0003 are accepted; ADR 0004 is implemented against the locked alpha.2 pair with revision-bound macOS arm64 and Windows x64 evidence. Every unchecked M0 criterion remains a delivery gate rather than an implemented claim. Frozen research is evidence, not the product controller.
+ADR 0001, ADR 0003, and ADR 0005 are accepted; ADR 0004 is implemented against the locked alpha.2 pair with revision-bound macOS arm64 and Windows x64 evidence. Every unchecked M0 criterion remains a delivery gate rather than an implemented claim. Frozen research is evidence, not the product controller.

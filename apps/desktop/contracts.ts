@@ -2,8 +2,8 @@ export type RuntimeState = 'stopped' | 'starting' | 'ready' | 'stopping' | 'fail
 export type RuntimeCode = 'runtime-unavailable' | 'process-error' | 'control-pipe-error' |
   'lifecycle-disconnected' | 'invalid-lifecycle-message' | 'startup-timeout' |
   'output-limit' | 'unexpected-exit' | 'runtime-exit-failed' | 'disposal-unconfirmed' |
-  'forced-stop' | 'cleanup-unconfirmed'
-  | 'recovery-required' | 'guardian-unavailable'
+  'forced-stop' | 'cleanup-unconfirmed' | 'recovery-required' | 'guardian-unavailable'
+
 export interface RuntimeStatus {
   readonly state: RuntimeState
   readonly code: RuntimeCode | null
@@ -11,6 +11,7 @@ export interface RuntimeStatus {
   readonly canStop: boolean
   readonly canRecover: boolean
 }
+
 export interface DesktopBridge {
   start(): Promise<RuntimeStatus>
   stop(): Promise<RuntimeStatus>
@@ -18,4 +19,13 @@ export interface DesktopBridge {
   snapshot(): Promise<RuntimeStatus>
   subscribe(listener: (status: RuntimeStatus) => void): () => void
 }
-declare global { interface Window { readonly dshWork: DesktopBridge } }
+
+declare global {
+  type DshWorkRuntimeState = RuntimeState
+  type DshWorkRuntimeCode = RuntimeCode
+  type DshWorkRuntimeStatus = RuntimeStatus
+
+  interface Window {
+    readonly dshWork: DesktopBridge
+  }
+}

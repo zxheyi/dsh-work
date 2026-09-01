@@ -12,6 +12,7 @@ on:
       - 'scripts/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
+      - 'tsconfig*.json'
       - '.github/workflows/desktop-lifecycle.yml'
   workflow_dispatch:
 
@@ -46,6 +47,8 @@ jobs:
         run: node node_modules/electron/install.js
       - name: Prepare immutable upstream artifact receipts
         run: node scripts/prepare-product-runtime.mjs
+      - name: Build typed product source
+        run: pnpm build
       - name: Verify product source, runtime, desktop and shutdown
         run: node scripts/verify-local.mjs artifacts/runtime/context.json --desktop
       - name: Retain sanitized revision-bound development evidence

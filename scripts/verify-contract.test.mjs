@@ -84,6 +84,80 @@ test('changing an accepted architecture decision fails verification', () => {
   }
 })
 
+test('weakening the accepted TypeScript runtime boundary fails verification', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-typescript-decision-'))
+  try {
+    for (const relativePath of requiredFiles) {
+      const target = path.join(root, relativePath)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.copyFileSync(path.join(repositoryRoot, relativePath), target)
+    }
+
+    const target = path.join(root, 'docs/decisions/0005-typescript-product-source.md')
+    const original = fs.readFileSync(target, 'utf8')
+    fs.writeFileSync(target, original.replace('Status: accepted', 'Status: proposed'))
+
+    assert.ok(
+      verifyContract(root).includes(
+        'docs/decisions/0005-typescript-product-source.md: missing required contract text "Status: accepted"',
+      ),
+    )
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('weakening the accepted TypeScript source and dependency defaults fails verification', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-typescript-defaults-'))
+  try {
+    for (const relativePath of requiredFiles) {
+      const target = path.join(root, relativePath)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.copyFileSync(path.join(repositoryRoot, relativePath), target)
+    }
+
+    const target = path.join(root, 'docs/decisions/0005-typescript-product-source.md')
+    const original = fs.readFileSync(target, 'utf8')
+    fs.writeFileSync(target, original
+      .replace('Use TypeScript source extensions for relative imports', 'Use JavaScript source extensions for relative imports')
+      .replace('Minimize third-party dependencies and direct third-party imports', 'Allow third-party dependencies and direct third-party imports'))
+
+    const result = verifyContract(root)
+    for (const token of [
+      'Use TypeScript source extensions for relative imports',
+      'Minimize third-party dependencies and direct third-party imports',
+    ]) {
+      assert.ok(result.includes(
+        `docs/decisions/0005-typescript-product-source.md: missing required contract text "${token}"`,
+      ))
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('removing the TypeScript typecheck command fails verification', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-typescript-command-'))
+  try {
+    for (const relativePath of requiredFiles) {
+      const target = path.join(root, relativePath)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.copyFileSync(path.join(repositoryRoot, relativePath), target)
+    }
+
+    const target = path.join(root, 'package.json')
+    const manifest = JSON.parse(fs.readFileSync(target, 'utf8'))
+    manifest.scripts.typecheck = 'true'
+    fs.writeFileSync(target, JSON.stringify(manifest))
+
+    assert.ok(
+      verifyContract(root).includes('package.json: typecheck must remain "tsc -p tsconfig.json"'),
+    )
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('every active runtime baseline field is locked to the accepted decision', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-baseline-'))
   try {
@@ -127,13 +201,13 @@ test('removing the Harness-native lifecycle boundary fails verification', () => 
       fs.copyFileSync(path.join(repositoryRoot, relativePath), target)
     }
 
-    const target = path.join(root, 'packages/lifecycle-bundle/index.mjs')
+    const target = path.join(root, 'packages/lifecycle-bundle/index.ts')
     const original = fs.readFileSync(target, 'utf8')
-    fs.writeFileSync(target, original.replace('ctx.appReady.onReady', 'ctx.internalReady.onReady'))
+    fs.writeFileSync(target, original.replace('appReady.onReady', 'ctx.internalReady.onReady'))
 
     assert.ok(
       verifyContract(root).includes(
-        'packages/lifecycle-bundle/index.mjs: missing required contract text "ctx.appReady.onReady"',
+        'packages/lifecycle-bundle/index.ts: missing required contract text "appReady.onReady"',
       ),
     )
   } finally {
@@ -176,13 +250,13 @@ test('removing guardian disconnect ownership fails verification', () => {
       fs.copyFileSync(path.join(repositoryRoot, relativePath), target)
     }
 
-    const target = path.join(root, 'packages/runtime-guardian/process.mjs')
+    const target = path.join(root, 'packages/runtime-guardian/process.ts')
     const original = fs.readFileSync(target, 'utf8')
     fs.writeFileSync(target, original.replace("process.once('disconnect'", "process.once('unrelated'"))
 
     assert.ok(
       verifyContract(root).includes(
-        'packages/runtime-guardian/process.mjs: missing required contract text "process.once(\'disconnect\'"',
+        'packages/runtime-guardian/process.ts: missing required contract text "process.once(\'disconnect\'"',
       ),
     )
   } finally {

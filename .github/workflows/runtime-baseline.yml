@@ -44,6 +44,7 @@ jobs:
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Run repository tests and contract checks
         run: |
+          pnpm build
           pnpm test
           pnpm check
       - name: Materialize official runtime inputs

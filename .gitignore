@@ -1,2 +1,4 @@
-/node_modules/
-/artifacts/
+node_modules/
+artifacts/
+target/
+dist/

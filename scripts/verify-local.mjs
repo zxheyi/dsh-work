@@ -54,14 +54,16 @@ try {
     console.log(`${name}: pass`)
   }
   const scriptTests = fs.readdirSync(path.join(root, 'scripts')).filter(file => file.endsWith('.test.mjs')).map(file => `scripts/${file}`)
+  run('build', ['scripts/build-product.mjs'])
   run('unit', ['--test', '--test-reporter=tap', ...scriptTests,
-    'tests/runtime-host.test.mjs', 'tests/official-launcher.test.mjs', 'tests/desktop-security.test.mjs',
-    'tests/renderer.test.mjs', 'tests/owned-test-home.test.mjs', 'tests/generation-store.test.mjs',
-    'tests/runtime-guardian.test.mjs', 'tests/guardian-client.test.mjs'])
+    'tests/typescript-toolchain.test.ts',
+    'tests/runtime-host.test.ts', 'tests/official-launcher.test.ts', 'tests/desktop-security.test.ts',
+    'tests/renderer.test.ts', 'tests/owned-test-home.test.ts', 'tests/generation-store.test.ts',
+    'tests/runtime-guardian.test.ts', 'tests/guardian-client.test.ts'])
   provenance('after-unit')
   run('contract', ['scripts/verify-contract.mjs'])
   provenance('after-contract')
-  run('runtime', ['--test', '--test-reporter=tap', 'tests/runtime-integration.test.mjs', 'tests/guardian-integration.test.mjs'])
+  run('runtime', ['--test', '--test-reporter=tap', 'tests/runtime-integration.test.ts', 'tests/guardian-integration.test.ts'])
   provenance('after-runtime')
   if (process.argv.includes('--desktop')) {
     const modes = ['normal', 'missing', 'renderer-crash', 'runtime-recovery', 'host-death']
