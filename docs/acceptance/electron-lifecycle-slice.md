@@ -52,6 +52,6 @@ The implementation was distilled from the frozen [research branch at `4fd63dd`](
 
 ## Remaining M0 gates
 
-This slice proves direct-child behavior while the Electron host survives. It does not prove full descendant containment, main-process crash recovery, persistent workspace migration, Harness browser UI rendering, product-approved visual design, packaging, signing, update delivery, or complete transitive byte/license inventory. Those require separate decisions and clean PRs.
+This slice proves direct-child behavior while the Electron host survives. [ADR 0004](../decisions/0004-crash-safe-runtime-ownership.md) now accepts the guardian and Profile-generation recovery contract, but its implementation and native host-death evidence remain separate. Full descendant containment, persistent workspace migration, Harness browser UI rendering, product-approved visual design, packaging, signing, update delivery, and complete transitive byte/license inventory remain open.
 
 Rollback by reverting this lifecycle slice while retaining the accepted runtime baseline. Do not modify global tools or remove a user Harness home.

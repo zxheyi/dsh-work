@@ -140,3 +140,29 @@ test('removing the Harness-native lifecycle boundary fails verification', () => 
     fs.rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('weakening the accepted crash-recovery ownership boundary fails verification', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-ownership-'))
+  try {
+    for (const relativePath of requiredFiles) {
+      const target = path.join(root, relativePath)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.copyFileSync(path.join(repositoryRoot, relativePath), target)
+    }
+
+    const target = path.join(root, 'docs/decisions/0004-crash-safe-runtime-ownership.md')
+    const original = fs.readFileSync(target, 'utf8')
+    fs.writeFileSync(target, original.replace(
+      'the recorded PID is never signaled or probed as authority',
+      'the recorded PID may be killed after a probe',
+    ))
+
+    assert.ok(
+      verifyContract(root).includes(
+        'docs/decisions/0004-crash-safe-runtime-ownership.md: missing required contract text "the recorded PID is never signaled or probed as authority"',
+      ),
+    )
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
