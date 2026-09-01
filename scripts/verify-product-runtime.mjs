@@ -30,7 +30,7 @@ export function verifyProductRuntime({ source, tarball, node, nodeArchive }) {
     return value
   })
   const sourceCommit = checked('source-provenance-failed', () => verifySource(source, baseline.source))
-  const packageCodes = new Set(['package-archive-failed', 'package-metadata-failed',
+  const packageCodes = new Set(['package-archive-failed', 'package-metadata-unavailable', 'package-metadata-mismatch',
     'package-inventory-failed', 'package-bytes-failed'])
   const packageFiles = checked('package-provenance-failed', () => verifyPublishedPackage(
     tarball, fs.realpathSync(path.join(root, 'node_modules/@deepseek-ai/dsh')), baseline.runtime), packageCodes)

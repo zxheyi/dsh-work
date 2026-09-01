@@ -46,7 +46,11 @@ test('runtime gate rejects corrupt tarballs and modified installed package bytes
     assert.throws(() => verifyPublishedPackage(tarball, installed, { ...pin, integrity: 'sha512-wrong' }),
       error => error?.code === 'package-archive-failed' && /integrity mismatch/.test(error.message))
     assert.throws(() => verifyPublishedPackage(tarball, installed, { ...pin, version: '2.0.0' }),
-      error => error?.code === 'package-metadata-failed' && /version mismatch/.test(error.message))
+      error => error?.code === 'package-metadata-mismatch' && /version mismatch/.test(error.message))
+    fs.rmSync(path.join(installed, 'package.json'))
+    assert.throws(() => verifyPublishedPackage(tarball, installed, pin),
+      error => error?.code === 'package-metadata-unavailable' && !String(error).includes(installed))
+    fs.writeFileSync(path.join(installed, 'package.json'), JSON.stringify({ name: '@test/runtime', version: '1.0.0', bin: { dsh: 'lib/bin.js' } }))
     fs.appendFileSync(path.join(installed, 'lib/bin.js'), 'product patch\n')
     assert.throws(() => verifyPublishedPackage(tarball, installed, pin),
       error => error?.code === 'package-bytes-failed' && /installed package differs/.test(error.message))

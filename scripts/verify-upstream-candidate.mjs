@@ -35,9 +35,9 @@ export function verifyPublishedPackage(tarball, installed, pin) {
   if (`sha512-${digest(packageOperation('package-archive-failed', () => fs.readFileSync(tarball)), 'sha512', 'base64')}` !== pin.integrity) {
     packageFailure('package-archive-failed', 'published package integrity mismatch')
   }
-  const manifest = packageOperation('package-metadata-failed', () => readJSON(path.join(installed, 'package.json')))
+  const manifest = packageOperation('package-metadata-unavailable', () => readJSON(path.join(installed, 'package.json')))
   if (manifest.name !== pin.package || manifest.version !== pin.version || manifest.bin?.dsh !== 'lib/bin.js') {
-    packageFailure('package-metadata-failed', 'installed runtime name/version mismatch')
+    packageFailure('package-metadata-mismatch', 'installed runtime name/version mismatch')
   }
   const entries = packageOperation('package-archive-failed', () =>
     tar('-tf', tarball).toString('utf8').trim().split(/\r?\n/).filter(entry => !entry.endsWith('/')))
