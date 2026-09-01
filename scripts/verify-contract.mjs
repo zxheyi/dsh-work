@@ -54,8 +54,8 @@ export const requiredFiles = [
   'packages/lifecycle-bundle/cordis.patch.yml',
   'packages/lifecycle-bundle/index.mjs',
   'packages/lifecycle-bundle/package.json',
-  'packages/runtime-host/index.mjs',
-  'packages/runtime-host/official-launcher.mjs',
+  'packages/runtime-host/index.ts',
+  'packages/runtime-host/official-launcher.ts',
   'packages/runtime-guardian/client.mjs',
   'packages/runtime-guardian/generation-store.mjs',
   'packages/runtime-guardian/process.mjs',
@@ -436,7 +436,7 @@ export function verifyContract(root) {
     requireText(errors, lifecycleBundle, token, 'packages/lifecycle-bundle/index.mjs')
   }
 
-  const launcher = read(root, 'packages/runtime-host/official-launcher.mjs')
+  const launcher = read(root, 'packages/runtime-host/official-launcher.ts')
   for (const token of [
     'prepareProductProfile',
     "require.resolve('@deepseek-ai/dsh/package.json')",
@@ -444,7 +444,7 @@ export function verifyContract(root) {
     'shell: false',
     'DSH_TELEMETRY_DISABLED',
   ]) {
-    requireText(errors, launcher, token, 'packages/runtime-host/official-launcher.mjs')
+    requireText(errors, launcher, token, 'packages/runtime-host/official-launcher.ts')
   }
 
   const generationStore = read(root, 'packages/runtime-guardian/generation-store.mjs')

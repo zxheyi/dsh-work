@@ -2,7 +2,7 @@ import path from 'node:path'
 import { createGenerationStore } from './generation-store.mjs'
 import { createGuardianService } from './service.mjs'
 import { GUARDIAN_PROTOCOL, validGuardianCommand } from './protocol.mjs'
-import { createOfficialLauncher, prepareProductProfile } from '../runtime-host/official-launcher.mjs'
+import { createOfficialLauncher, prepareProductProfile } from '../runtime-host/official-launcher.ts'
 
 const productRoot = process.argv[2]
 if (!path.isAbsolute(productRoot || '') || !process.send) process.exit(2)

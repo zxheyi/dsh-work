@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import test from 'node:test'
-import { createRuntimeHost } from '../packages/runtime-host/index.mjs'
+import { createRuntimeHost } from '../packages/runtime-host/index.ts'
 
 function fixture(options = {}) {
   const children = []

@@ -12,7 +12,7 @@ DSH Work needs cross-launch recovery before it stores durable workspace state. R
 
 ## Evidence
 
-- The current [runtime host](../../packages/runtime-host/index.mjs) holds the official CLI child object, deadlines, and generation checks only in Electron memory. Its `close` observation proves the directly owned child and stdio are closed, not that every possible descendant is gone.
+- The current [runtime host](../../packages/runtime-host/index.ts) holds the official CLI child object, deadlines, and generation checks only in Electron memory. Its `close` observation proves the directly owned child and stdio are closed, not that every possible descendant is gone.
 - The current [desktop entry](../../apps/desktop/main.mjs) creates a temporary Home per launch. That avoids reusing old state but cannot reconcile or preserve a clean Profile across launches.
 - Node documents that child processes are independent of their parent except for configured IPC, that a Node child can observe IPC disconnection, and that `close` follows process exit plus stdio closure. This supports a separate Node guardian retaining deadlines after Electron dies; it does not prove arbitrary process-tree containment. [Node child-process API](https://nodejs.org/download/release/v24.11.1/docs/api/child_process.html)
 - Electron's `app.requestSingleInstanceLock()` provides the supported same-user application-instance gate, including command-line launches on macOS. It is an application-instance control, not stale-runtime termination authority. [Electron app API](https://www.electronjs.org/docs/latest/api/app#apprequestsingleinstancelockadditionaldata)

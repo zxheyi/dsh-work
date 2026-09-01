@@ -1,4 +1,4 @@
-import { createRuntimeHost } from '../runtime-host/index.mjs'
+import { createRuntimeHost } from '../runtime-host/index.ts'
 
 const safeRetry = new Set(['runtime-unavailable'])
 const bounded = (value, changes = {}) => Object.freeze({

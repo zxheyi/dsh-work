@@ -5,8 +5,8 @@ import path from 'node:path'
 import test from 'node:test'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { createRuntimeHost } from '../packages/runtime-host/index.mjs'
-import { prepareDevelopmentProfile, createOfficialLauncher } from '../packages/runtime-host/official-launcher.mjs'
+import { createRuntimeHost } from '../packages/runtime-host/index.ts'
+import { prepareDevelopmentProfile, createOfficialLauncher } from '../packages/runtime-host/official-launcher.ts'
 import { createOutputGuard } from './support/runtime-output-guard.mjs'
 
 test('product Bundle runs through the official CLI for three ready/EOF/restart cycles', { timeout: 90_000 }, async () => {

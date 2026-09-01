@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { createOfficialLauncher, prepareDevelopmentProfile } from '../packages/runtime-host/official-launcher.mjs'
+import { createOfficialLauncher, prepareDevelopmentProfile } from '../packages/runtime-host/official-launcher.ts'
 import { removeOwnedTestHome } from './support/owned-test-home.mjs'
 
 test('launcher uses explicit CLI, loopback, empty control pipe and an environment allowlist', () => {
