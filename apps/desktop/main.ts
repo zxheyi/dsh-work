@@ -1,7 +1,7 @@
 import { app, type BrowserWindow } from 'electron'
 
+import type { RuntimeSnapshot } from '../../packages/runtime-contract/index.ts'
 import { createGuardianClient, type GuardianClient } from '../../packages/runtime-guardian/client.ts'
-import type { GuardianSnapshot } from '../../packages/runtime-guardian/protocol.ts'
 import { createStatusWindow, registerDesktopScheme } from './window.ts'
 
 registerDesktopScheme()
@@ -14,15 +14,15 @@ let quitting = false
 let allowQuit = false
 
 const unavailableHost = (): GuardianClient => {
-  let status: GuardianSnapshot = Object.freeze({
+  let status: RuntimeSnapshot = Object.freeze({
     state: 'stopped',
     code: null,
     canStart: true,
     canStop: false,
     canRecover: false,
   })
-  const listeners = new Set<(snapshot: GuardianSnapshot) => void>()
-  const publishUnavailable = async (): Promise<GuardianSnapshot> => {
+  const listeners = new Set<(snapshot: RuntimeSnapshot) => void>()
+  const publishUnavailable = async (): Promise<RuntimeSnapshot> => {
     status = Object.freeze({
       state: 'failed',
       code: 'runtime-unavailable',
@@ -40,7 +40,7 @@ const unavailableHost = (): GuardianClient => {
     stop: async () => status,
     recover: async () => status,
     snapshot: () => status,
-    subscribe(listener: (snapshot: GuardianSnapshot) => void): () => void {
+    subscribe(listener: (snapshot: RuntimeSnapshot) => void): () => void {
       listeners.add(listener)
       return () => listeners.delete(listener)
     },

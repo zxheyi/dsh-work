@@ -3,8 +3,8 @@ import { app, BrowserWindow } from 'electron'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
+import type { RuntimeSnapshot } from '../packages/runtime-contract/index.ts'
 import type { GuardianClient } from '../packages/runtime-guardian/client.ts'
-import type { GuardianSnapshot } from '../packages/runtime-guardian/protocol.ts'
 
 const emittedDesktopEntry: string = '../dist/apps/desktop/main.js'
 const { desktop } = await import(emittedDesktopEntry) as {
@@ -85,7 +85,7 @@ try {
     for (const state of ['starting', 'ready', 'stopping', 'stopped']) assert.ok(states.includes(state))
     phase = 'early-stop-through-renderer'
     await js('window.observedStates = []; window.earlyStart = window.dshWork.start(); window.earlyStop = window.dshWork.stop(); undefined')
-    const early = await js<GuardianSnapshot[]>('Promise.all([window.earlyStart, window.earlyStop])')
+    const early = await js<RuntimeSnapshot[]>('Promise.all([window.earlyStart, window.earlyStop])')
     assert.ok(early.every(value => value.state === 'stopped' && value.code === null && value.canStart))
     await waitState('stopped')
     assert.deepEqual(await js('window.observedStates'), ['starting', 'stopping', 'stopped'])

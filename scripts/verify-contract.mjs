@@ -55,6 +55,7 @@ export const requiredFiles = [
   'packages/lifecycle-bundle/cordis.patch.yml',
   'packages/lifecycle-bundle/index.ts',
   'packages/lifecycle-bundle/package.json',
+  'packages/runtime-contract/index.ts',
   'packages/runtime-host/index.ts',
   'packages/runtime-host/official-launcher.ts',
   'packages/runtime-guardian/client.ts',
@@ -75,6 +76,7 @@ export const requiredFiles = [
   'tests/guardian-client.test.ts',
   'tests/owned-test-home.test.ts',
   'tests/renderer.test.ts',
+  'tests/runtime-contract.test.ts',
   'tests/runtime-host.test.ts',
   'tests/runtime-guardian.test.ts',
   'tests/runtime-integration.test.ts',
@@ -467,9 +469,14 @@ export function verifyContract(root) {
     }
   }
 
+  const runtimeContract = read(root, 'packages/runtime-contract/index.ts')
+  for (const token of ['RUNTIME_STATES', 'RUNTIME_HOST_CODES', 'RUNTIME_CODES', 'RUNTIME_COMMANDS',
+    "'start'", "'stop'", "'recover'", "'snapshot'", "'recovery-required'", 'canRecover']) {
+    requireText(errors, runtimeContract, token, 'packages/runtime-contract/index.ts')
+  }
+
   const guardianProtocol = read(root, 'packages/runtime-guardian/protocol.ts')
-  for (const token of ["'dsh-work.guardian.v1'", "['start', 'stop', 'recover', 'snapshot']",
-    "'recovery-required'", 'canRecover']) {
+  for (const token of ["'dsh-work.guardian.v1'", 'RUNTIME_COMMANDS', 'boundedGuardianSnapshot']) {
     requireText(errors, guardianProtocol, token, 'packages/runtime-guardian/protocol.ts')
   }
 

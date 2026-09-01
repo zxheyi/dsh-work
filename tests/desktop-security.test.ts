@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import { bindStatusBridge, resourceForRequest, STATUS_URL, type StatusHost } from '../apps/desktop/security.ts'
-import type { GuardianSnapshot } from '../packages/runtime-guardian/protocol.ts'
+import type { RuntimeSnapshot } from '../packages/runtime-contract/index.ts'
 
 test('status bridge admits only the exact local main frame and zero-argument methods', async () => {
   type Handler = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
@@ -15,15 +15,15 @@ test('status bridge admits only the exact local main frame and zero-argument met
     handle: (name: string, handler: Handler): void => { handlers.set(name, handler) },
     removeHandler: (name: string): void => { handlers.delete(name) },
   }
-  const value: GuardianSnapshot = {
+  const value: RuntimeSnapshot = {
     state: 'stopped', code: null, canStart: true, canStop: false, canRecover: false,
   }
-  const command = (name: string): GuardianSnapshot => { calls.push(name); return value }
+  const command = async (name: string): Promise<RuntimeSnapshot> => { calls.push(name); return value }
   const host: StatusHost = {
     start: () => command('start'),
     stop: () => command('stop'),
     recover: () => command('recover'),
-    snapshot: () => command('snapshot'),
+    snapshot: () => value,
     subscribe: () => () => {},
   }
   const dispose = bindStatusBridge({

@@ -8,11 +8,14 @@ import {
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import type {
+  RuntimeCommandName,
+  RuntimeControl,
+  RuntimeSnapshot,
+} from '../runtime-contract/index.ts'
 import {
   boundedGuardianSnapshot,
   GUARDIAN_PROTOCOL,
-  type GuardianCommandName,
-  type GuardianSnapshot,
 } from './protocol.ts'
 
 interface GuardianClientPaths {
@@ -35,16 +38,11 @@ interface GuardianClientDependencies {
 }
 
 interface PendingRequest {
-  readonly resolve: (value: GuardianSnapshot) => void
+  readonly resolve: (value: RuntimeSnapshot) => void
   readonly reject: (error: Error) => void
 }
 
-export interface GuardianClient {
-  start(): Promise<GuardianSnapshot>
-  stop(): Promise<GuardianSnapshot>
-  recover(): Promise<GuardianSnapshot>
-  snapshot(): GuardianSnapshot
-  subscribe(listener: (snapshot: GuardianSnapshot) => void): () => void
+export interface GuardianClient extends RuntimeControl {
   dispose(waitMs?: number): Promise<boolean>
 }
 
@@ -54,7 +52,7 @@ const spawnGuardian: NonNullable<GuardianClientDependencies['spawnProcess']> = (
   spawn(executable, [...args], options)
 const probeGuardian: NonNullable<GuardianClientDependencies['probe']> = (executable, args, options) =>
   execFileSync(executable, args, options)
-const unavailable: GuardianSnapshot = Object.freeze({
+const unavailable: RuntimeSnapshot = Object.freeze({
   state: 'failed',
   code: 'guardian-unavailable',
   canStart: false,
@@ -94,10 +92,10 @@ export async function createGuardianClient(
   let settled = false
   let terminated = false
   let disposing = false
-  const listeners = new Set<(snapshot: GuardianSnapshot) => void>()
+  const listeners = new Set<(snapshot: RuntimeSnapshot) => void>()
   const pending = new Map<number, PendingRequest>()
 
-  const publish = (value: GuardianSnapshot): void => {
+  const publish = (value: RuntimeSnapshot): void => {
     status = value
     for (const listener of [...listeners]) {
       try { listener(value) } catch {}
@@ -147,8 +145,8 @@ export async function createGuardianClient(
   })
   await ready
 
-  const request = (command: GuardianCommandName): Promise<GuardianSnapshot> =>
-    new Promise<GuardianSnapshot>((resolve, reject) => {
+  const request = (command: RuntimeCommandName): Promise<RuntimeSnapshot> =>
+    new Promise<RuntimeSnapshot>((resolve, reject) => {
       if (!child.connected) {
         reject(new Error('guardian unavailable'))
         return
@@ -170,7 +168,7 @@ export async function createGuardianClient(
     stop: () => request('stop'),
     recover: () => request('recover'),
     snapshot: () => status,
-    subscribe(listener: (snapshot: GuardianSnapshot) => void): () => void {
+    subscribe(listener: (snapshot: RuntimeSnapshot) => void): () => void {
       listeners.add(listener)
       return () => listeners.delete(listener)
     },

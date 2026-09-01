@@ -2,8 +2,8 @@ import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { BrowserWindow } from 'electron'
+import type { RuntimeSnapshot } from '../packages/runtime-contract/index.ts'
 import type { GuardianClient } from '../packages/runtime-guardian/client.ts'
-import type { GuardianSnapshot } from '../packages/runtime-guardian/protocol.ts'
 
 const emittedDesktopEntry: string = '../dist/apps/desktop/main.js'
 const { desktop } = await import(emittedDesktopEntry) as {
@@ -51,8 +51,8 @@ async function run(): Promise<void> {
     if (!host) throw new Error('desktop host unavailable')
     failureStep = 'start-guardian'
     let startingTimer: NodeJS.Timeout
-    const resolver: { current: ((value: GuardianSnapshot) => void) | null } = { current: null }
-    const observedStarting = new Promise<GuardianSnapshot>((resolve, reject) => {
+    const resolver: { current: ((value: RuntimeSnapshot) => void) | null } = { current: null }
+    const observedStarting = new Promise<RuntimeSnapshot>((resolve, reject) => {
       resolver.current = value => { clearTimeout(startingTimer); resolve(value) }
       startingTimer = setTimeout(() => reject(new Error('starting status timeout')), 35_000)
     })

@@ -1,10 +1,10 @@
 import { createRuntimeHost } from '../runtime-host/index.ts'
 
+import type { RuntimeCode, RuntimeControl, RuntimeSnapshot } from '../runtime-contract/index.ts'
 import type { RuntimeChild, RuntimeHost, RuntimeHostSnapshot } from '../runtime-host/index.ts'
 import type { ClaimedGeneration, GenerationStore } from './generation-store.ts'
-import type { GuardianCode, GuardianSnapshot } from './protocol.ts'
 
-const safeRetry = new Set<GuardianCode>(['runtime-unavailable'])
+const safeRetry = new Set<RuntimeCode>(['runtime-unavailable'])
 
 interface GuardianServiceOptions {
   readonly store: GenerationStore
@@ -12,21 +12,16 @@ interface GuardianServiceOptions {
   readonly launcher: (home: string) => () => RuntimeChild
 }
 
-export interface GuardianService {
-  snapshot(): GuardianSnapshot
-  subscribe(listener: (snapshot: GuardianSnapshot) => void): () => void
-  start(): Promise<GuardianSnapshot>
-  stop(): Promise<GuardianSnapshot>
-  recover(): Promise<GuardianSnapshot>
+export interface GuardianService extends RuntimeControl {
   dispose(): Promise<boolean>
 }
 
-type BaseSnapshot = Pick<GuardianSnapshot, 'state' | 'code' | 'canStart' | 'canStop'>
+type BaseSnapshot = Pick<RuntimeSnapshot, 'state' | 'code' | 'canStart' | 'canStop'>
 
 const bounded = (
   value: BaseSnapshot,
-  changes: Partial<Pick<GuardianSnapshot, 'canStart' | 'canStop' | 'canRecover'>> = {},
-): GuardianSnapshot => Object.freeze({
+  changes: Partial<Pick<RuntimeSnapshot, 'canStart' | 'canStop' | 'canRecover'>> = {},
+): RuntimeSnapshot => Object.freeze({
   state: value.state,
   code: value.code,
   canStart: value.canStart,
@@ -40,7 +35,7 @@ export function createGuardianService({ store, prepare, launcher }: GuardianServ
   let runtime: RuntimeHost | null = null
   let unsubscribe: (() => void) | null = null
   let status = bounded({ state: 'stopped', code: null, canStart: true, canStop: false })
-  const listeners = new Set<(snapshot: GuardianSnapshot) => void>()
+  const listeners = new Set<(snapshot: RuntimeSnapshot) => void>()
   let disposing = false
   let disposePromise: Promise<boolean> | null = null
   let resolveDispose: ((value: boolean) => void) | null = null
@@ -58,7 +53,7 @@ export function createGuardianService({ store, prepare, launcher }: GuardianServ
     resolveDispose = null
   }
 
-  const publish = (value: GuardianSnapshot): GuardianSnapshot => {
+  const publish = (value: RuntimeSnapshot): RuntimeSnapshot => {
     status = value
     for (const listener of [...listeners]) {
       try { listener(value) } catch {}
@@ -67,7 +62,7 @@ export function createGuardianService({ store, prepare, launcher }: GuardianServ
     return value
   }
 
-  const translate = (value: RuntimeHostSnapshot): GuardianSnapshot => {
+  const translate = (value: RuntimeHostSnapshot): RuntimeSnapshot => {
     if (value.state !== 'failed') return bounded(value)
     if (!value.canStart) return bounded(value, { canStart: false, canRecover: false })
     if (value.code && safeRetry.has(value.code)) return bounded(value, { canStart: true, canRecover: false })
@@ -104,21 +99,21 @@ export function createGuardianService({ store, prepare, launcher }: GuardianServ
   }
 
   return Object.freeze({
-    snapshot: (): GuardianSnapshot => status,
-    subscribe(listener: (snapshot: GuardianSnapshot) => void): () => void {
+    snapshot: (): RuntimeSnapshot => status,
+    subscribe(listener: (snapshot: RuntimeSnapshot) => void): () => void {
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
-    async start(): Promise<GuardianSnapshot> {
+    async start(): Promise<RuntimeSnapshot> {
       if (!runtime && !acquire(false)) return status
       if (status.canRecover) return status
       return translate(await runtime!.start())
     },
-    async stop(): Promise<GuardianSnapshot> {
+    async stop(): Promise<RuntimeSnapshot> {
       if (!runtime) return status
       return translate(await runtime.stop())
     },
-    async recover(): Promise<GuardianSnapshot> {
+    async recover(): Promise<RuntimeSnapshot> {
       if (runtime && !runtime.snapshot().canStart) return status
       if (!status.canRecover) return status
       if (!acquire(true)) return status
