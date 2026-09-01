@@ -35,7 +35,7 @@ async function exercise(phase) {
   let desktop, client, clean = false
   try {
     fs.writeFileSync(armedPath, JSON.stringify({ status: 'launching', runId }))
-    desktop = spawn(electron, ['tests/desktop-host-death-e2e.mjs'], {
+    desktop = spawn(electron, [`--user-data-dir=${productRoot}`, 'tests/desktop-host-death-e2e.mjs'], {
       shell: false,
       env: { ...process.env, DSH_WORK_HOST_DEATH_ROOT: productRoot,
         DSH_WORK_HOST_DEATH_REPORT: armedPath, DSH_WORK_HOST_DEATH_PHASE: phase,

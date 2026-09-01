@@ -32,23 +32,38 @@ const waitForActive = async () => {
 }
 
 async function run() {
+  let failureStep = 'await-desktop'
   try {
     const { host } = await desktop
     if (!host) throw new Error('desktop host unavailable')
+    failureStep = 'start-guardian'
+    let resolveStarting, startingTimer
+    const observedStarting = new Promise((resolve, reject) => {
+      resolveStarting = value => { clearTimeout(startingTimer); resolve(value) }
+      startingTimer = setTimeout(() => reject(new Error('starting status timeout')), 35_000)
+    })
+    const unsubscribe = host.subscribe(value => {
+      if (value.state === 'starting') resolveStarting(value)
+    })
     const starting = host.start()
-    const generation = await waitForActive()
+    let generation, terminal
     if (phase === 'after-ready') {
-      const ready = await starting
-      if (ready.state !== 'ready') throw new Error('Harness did not become Ready')
-    } else if (host.snapshot().state !== 'starting') {
-      throw new Error('Harness escaped the pre-Ready fault window')
+      failureStep = 'await-harness-ready'
+      terminal = await starting
+      if (terminal.state !== 'ready') throw new Error('Harness did not become Ready')
+      generation = await waitForActive()
+    } else {
+      terminal = await observedStarting
+      generation = await waitForActive()
     }
-    write('armed', { generation, terminal: host.snapshot() })
+    unsubscribe()
+    failureStep = 'armed'
+    write('armed', { generation, terminal })
     // The parent test kills this exact Electron main process. Keep the event loop
     // alive without adding another shutdown authority.
     setInterval(() => {}, 60_000)
   } catch {
-    write('fail')
+    write('fail', { failureStep })
     app.exit(1)
   }
 }

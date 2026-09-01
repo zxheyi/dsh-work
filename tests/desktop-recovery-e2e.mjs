@@ -2,14 +2,13 @@
 import { app } from 'electron'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { createGenerationStore } from '../packages/runtime-guardian/generation-store.mjs'
 import { desktop } from '../apps/desktop/main.mjs'
 import { removeOwnedTestHome } from './support/owned-test-home.mjs'
 
 const output = path.resolve('artifacts/desktop/runtime-recovery')
-const productRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-recovery-test-'))
+const productRoot = process.env.DSH_WORK_E2E_USER_DATA
 app.setPath('userData', productRoot)
 app.commandLine.appendSwitch('disable-background-networking')
 fs.mkdirSync(output, { recursive: true })
