@@ -19,6 +19,7 @@ function testHarness(): HarnessWorkPort {
     async ensurePrimarySession(request) {
       return { sessionId: request.sessionId }
     },
+    async submitTurn() {},
   }
 }
 
@@ -45,6 +46,7 @@ test('creates the only Work and returns it through the public controller', async
     },
     primarySession: {
       sessionId: 'session-1',
+      turnCount: 0,
     },
   })
   assert.deepEqual(await controller.get(), created)
@@ -81,6 +83,9 @@ test('creates and registers a DSH Work managed Workspace', async () => {
       async create(request) {
         return { sessionId: request.sessionId }
       },
+      async prompt() {
+        return { accepted: true as const }
+      },
     },
   })
   const controller = createWorkController({
@@ -115,6 +120,7 @@ test('creates one Primary Session bound to the managed Workspace', async () => {
       sessionRequests.push(request)
       return { sessionId: request.sessionId }
     },
+    async submitTurn() {},
   }
   const controller = createWorkController({
     createId: () => 'work-primary',
@@ -130,5 +136,48 @@ test('creates one Primary Session bound to the managed Workspace', async () => {
     workspaceId: 'workspace-primary',
     cwd: '/managed/work-primary',
   }])
-  assert.deepEqual(created.primarySession, { sessionId: 'session-primary' })
+  assert.deepEqual(created.primarySession, { sessionId: 'session-primary', turnCount: 0 })
+})
+
+test('dispatches multiple Turns through the same Primary Session', async () => {
+  const turns: Array<{
+    requestId: string
+    sessionId: string
+    instruction: string
+  }> = []
+  const requestIds = ['request-1', 'request-2']
+  const harness: HarnessWorkPort = {
+    async ensureWorkspace(request) {
+      return { workspaceId: 'workspace-turns', path: request.path }
+    },
+    async ensurePrimarySession(request) {
+      return { sessionId: request.sessionId }
+    },
+    async submitTurn(request) {
+      turns.push(request)
+    },
+  }
+  const controller = createWorkController({
+    createId: () => 'work-turns',
+    createSessionId: () => 'session-turns',
+    createRequestId: () => requestIds.shift()!,
+    workspaceRoot: '/managed',
+    harness,
+  })
+  const created = await controller.create({ title: 'Turns', goal: 'Keep context across steps.' })
+
+  await controller.dispatch({
+    workId: created.workId,
+    command: { type: 'submit-turn', instruction: 'Draft the outline.' },
+  })
+  const updated = await controller.dispatch({
+    workId: created.workId,
+    command: { type: 'submit-turn', instruction: 'Revise the introduction.' },
+  })
+
+  assert.deepEqual(turns, [
+    { requestId: 'request-1', sessionId: 'session-turns', instruction: 'Draft the outline.' },
+    { requestId: 'request-2', sessionId: 'session-turns', instruction: 'Revise the introduction.' },
+  ])
+  assert.deepEqual(updated.primarySession, { sessionId: 'session-turns', turnCount: 2 })
 })
