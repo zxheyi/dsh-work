@@ -11,13 +11,17 @@ test('product dependencies match the accepted baseline with a frozen DSH family'
     '@deepseek-ai/cordis': '4.0.2',
     '@deepseek-ai/dsh': baseline.runtime.version,
     '@deepseek-ai/dsh-api-gateway': baseline.runtime.version,
+    '@deepseek-ai/dsh-client-ui-layout': baseline.runtime.version,
+    '@deepseek-ai/dsh-client-ui-renderer': baseline.runtime.version,
     '@deepseek-ai/dsh-cmdline': baseline.runtime.version,
     '@deepseek-ai/dsh-storage-domain': baseline.runtime.version,
     '@deepseek-ai/dsh-typert-protocol': baseline.runtime.version,
+    react: '18.3.1',
     zod: '4.5.4',
   })
   assert.deepEqual(manifest.devDependencies, {
     '@types/node': '24.13.3',
+    '@types/react': '18.3.28',
     electron: baseline.electron,
     tsdown: '0.22.2',
     typescript: '7.0.2',

@@ -8,6 +8,20 @@ export type DesktopAsset = typeof DESKTOP_ASSETS[number]
 
 export type StatusHost = RuntimeControl
 
+export function isAllowedDesktopNavigation(url: string, surfaceOrigin: string | null): boolean {
+  if (url === STATUS_URL) return true
+  if (!surfaceOrigin) return false
+  try {
+    const target = new URL(url)
+    const allowed = new URL(surfaceOrigin)
+    return allowed.href === allowed.origin + '/' && allowed.protocol === 'http:' &&
+      allowed.hostname === '127.0.0.1' && allowed.port !== '' &&
+      target.origin === allowed.origin && target.username === '' && target.password === ''
+  } catch {
+    return false
+  }
+}
+
 interface StatusBridgeOptions {
   readonly ipcMain: IpcMain
   readonly window: BrowserWindow

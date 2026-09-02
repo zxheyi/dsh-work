@@ -13,6 +13,7 @@ interface GuardianServiceOptions {
 }
 
 export interface GuardianService extends RuntimeControl {
+  subscribeSurface(listener: (url: string) => void): () => void
   dispose(): Promise<boolean>
 }
 
@@ -34,8 +35,10 @@ export function createGuardianService({ store, prepare, launcher }: GuardianServ
   let claim: ClaimedGeneration | null = null
   let runtime: RuntimeHost | null = null
   let unsubscribe: (() => void) | null = null
+  let unsubscribeSurface: (() => void) | null = null
   let status = bounded({ state: 'stopped', code: null, canStart: true, canStop: false })
   const listeners = new Set<(snapshot: RuntimeSnapshot) => void>()
+  const surfaceListeners = new Set<(url: string) => void>()
   let disposing = false
   let disposePromise: Promise<boolean> | null = null
   let resolveDispose: ((value: boolean) => void) | null = null
@@ -49,6 +52,8 @@ export function createGuardianService({ store, prepare, launcher }: GuardianServ
     }
     unsubscribe?.()
     unsubscribe = null
+    unsubscribeSurface?.()
+    unsubscribeSurface = null
     resolveDispose?.(true)
     resolveDispose = null
   }
@@ -71,10 +76,16 @@ export function createGuardianService({ store, prepare, launcher }: GuardianServ
 
   const attach = (selected: ClaimedGeneration): void => {
     unsubscribe?.()
+    unsubscribeSurface?.()
     claim = selected
     prepare(selected.home)
     runtime = createRuntimeHost({ launch: launcher(selected.home) })
     unsubscribe = runtime.subscribe(value => publish(translate(value)))
+    unsubscribeSurface = runtime.subscribeSurface(url => {
+      for (const listener of [...surfaceListeners]) {
+        try { listener(url) } catch {}
+      }
+    })
     publish(translate(runtime.snapshot()))
   }
 
@@ -103,6 +114,10 @@ export function createGuardianService({ store, prepare, launcher }: GuardianServ
     subscribe(listener: (snapshot: RuntimeSnapshot) => void): () => void {
       listeners.add(listener)
       return () => listeners.delete(listener)
+    },
+    subscribeSurface(listener: (url: string) => void): () => void {
+      surfaceListeners.add(listener)
+      return () => surfaceListeners.delete(listener)
     },
     async start(): Promise<RuntimeSnapshot> {
       if (!runtime && !acquire(false)) return status

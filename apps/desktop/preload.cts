@@ -5,7 +5,7 @@ type RuntimeStatus = import('./contracts.ts').RuntimeStatus
 const { contextBridge, ipcRenderer } = electron
 
 // Deliberately no invoke(channel), event object, path, URL, shell or file API.
-contextBridge.exposeInMainWorld('dshWork', Object.freeze({
+if (globalThis.location.href === 'dsh-work://status/index.html') contextBridge.exposeInMainWorld('dshWork', Object.freeze({
   start: (): Promise<RuntimeStatus> => ipcRenderer.invoke('dsh-work:start'),
   stop: (): Promise<RuntimeStatus> => ipcRenderer.invoke('dsh-work:stop'),
   recover: (): Promise<RuntimeStatus> => ipcRenderer.invoke('dsh-work:recover'),

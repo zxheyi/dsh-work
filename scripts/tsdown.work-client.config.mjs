@@ -1,6 +1,7 @@
 const external = new Set([
   '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-api-gateway/client',
+  'react',
 ])
 
 export default {

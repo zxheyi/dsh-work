@@ -71,6 +71,48 @@ test('one child reaches committed Ready, observes disposal and EOF close, and re
   assert.deepEqual(states, ['starting', 'ready', 'stopping', 'stopped', 'starting', 'ready', 'stopping', 'stopped'])
 })
 
+test('a validated loopback surface is handed off without entering lifecycle snapshots', async () => {
+  const { host, children, message } = fixture()
+  const surfaces: string[] = []
+  const surfaceHost = host as typeof host & {
+    subscribeSurface(listener: (url: string) => void): () => void
+  }
+  const unsubscribe = surfaceHost.subscribeSurface(url => surfaces.push(url))
+  const starting = host.start()
+  children[0].emit('message', {
+    protocol: 'dsh-work.lifecycle.v1',
+    event: 'surface',
+    url: 'http://127.0.0.1:43127/?token=launch-token',
+  })
+  message('ready')
+  assert.equal((await starting).state, 'ready')
+  assert.deepEqual(surfaces, ['http://127.0.0.1:43127/?token=launch-token'])
+  assert.deepEqual(Object.keys(host.snapshot()).sort(), ['canStart', 'canStop', 'code', 'state'])
+  unsubscribe()
+  const stopping = host.stop(); message('disposed'); children[0].emit('close', 0, null); await stopping
+})
+
+test('early stop accepts a late surface without navigating or turning clean disposal into failure', async () => {
+  const { host, children, message } = fixture()
+  const surfaces: string[] = []
+  host.subscribeSurface(url => surfaces.push(url))
+  const starting = host.start()
+  const stopping = host.stop()
+
+  children[0].emit('message', {
+    protocol: 'dsh-work.lifecycle.v1',
+    event: 'surface',
+    url: 'http://127.0.0.1:43127/?token=launch-token',
+  })
+  message('ready')
+  message('disposed')
+  children[0].emit('close', 0, null)
+
+  assert.equal((await stopping).state, 'stopped')
+  assert.equal((await starting).state, 'stopped')
+  assert.deepEqual(surfaces, [])
+})
+
 test('early stop ignores late Ready but cannot hide startup rejection', async () => {
   const { host, children, message } = fixture()
   const starting = host.start()

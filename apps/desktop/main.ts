@@ -2,7 +2,7 @@ import { app, type BrowserWindow } from 'electron'
 
 import { createGuardianClient, type GuardianClient } from '../../packages/runtime-guardian/client.ts'
 import { createUnavailableGuardianClient } from '../../packages/runtime-guardian/unavailable-client.ts'
-import { createStatusWindow, registerDesktopScheme } from './window.ts'
+import { createDesktopWindow, registerDesktopScheme } from './window.ts'
 
 registerDesktopScheme()
 app.enableSandbox()
@@ -57,7 +57,7 @@ const createDesktopSession = async (): Promise<DesktopSession> => {
     host = createUnavailableGuardianClient()
   }
   try {
-    const window = await createStatusWindow(host, { accepting: () => !quitting })
+    const window = await createDesktopWindow(host, { accepting: () => !quitting })
     const active = Object.freeze({ host, window })
     session = active
     window.on('close', event => {
@@ -67,6 +67,9 @@ const createDesktopSession = async (): Promise<DesktopSession> => {
       }
     })
     window.webContents.on('render-process-gone', () => { void shutdown() })
+    setImmediate(() => {
+      if (!quitting) void host.start().catch(() => {})
+    })
     return active
   } catch (error: unknown) {
     try { await host.stop() } catch {}

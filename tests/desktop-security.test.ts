@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
-import { bindStatusBridge, resourceForRequest, STATUS_URL, type StatusHost } from '../apps/desktop/security.ts'
+import {
+  bindStatusBridge,
+  isAllowedDesktopNavigation,
+  resourceForRequest,
+  STATUS_URL,
+  type StatusHost,
+} from '../apps/desktop/security.ts'
 import type { RuntimeSnapshot } from '../packages/runtime-contract/index.ts'
 
 test('status bridge admits only the exact local main frame and zero-argument methods', async () => {
@@ -60,4 +66,20 @@ test('custom protocol exposes only three fixed local assets, never arbitrary pat
     assert.equal(resourceForRequest(url, 'GET'), null)
   }
   assert.equal(resourceForRequest(STATUS_URL, 'POST'), null)
+})
+
+test('desktop navigation admits only the private shell and one exact loopback surface origin', () => {
+  const surfaceOrigin = 'http://127.0.0.1:43127'
+  assert.equal(isAllowedDesktopNavigation(STATUS_URL, surfaceOrigin), true)
+  assert.equal(isAllowedDesktopNavigation(`${surfaceOrigin}/`, surfaceOrigin), true)
+  assert.equal(isAllowedDesktopNavigation(`${surfaceOrigin}/work/current`, surfaceOrigin), true)
+  for (const url of [
+    'http://127.0.0.1:43128/',
+    'http://localhost:43127/',
+    'https://127.0.0.1:43127/',
+    'https://example.com/',
+    'file:///tmp/work.html',
+    'dsh-work://status/index.html?surface=private',
+  ]) assert.equal(isAllowedDesktopNavigation(url, surfaceOrigin), false, url)
+  assert.equal(isAllowedDesktopNavigation(`${surfaceOrigin}/`, null), false)
 })

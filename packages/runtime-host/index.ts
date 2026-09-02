@@ -32,6 +32,7 @@ export interface RuntimeHost {
   stop(): Promise<RuntimeHostSnapshot>
   snapshot(): RuntimeHostSnapshot
   subscribe(listener: (snapshot: RuntimeHostSnapshot) => void): () => void
+  subscribeSurface(listener: (url: string) => void): () => void
 }
 
 interface Deferred<T> {
@@ -50,15 +51,24 @@ interface Owner {
   exited: boolean
   bytes: number
   messages: number
+  surface: boolean
   startTimer?: NodeJS.Timeout
   stopTimer?: NodeJS.Timeout
   reapTimer?: NodeJS.Timeout
 }
 
-interface LifecycleMessage {
+interface LifecycleStateMessage {
   readonly protocol: 'dsh-work.lifecycle.v1'
   readonly event: 'ready' | 'disposed'
 }
+
+interface LifecycleSurfaceMessage {
+  readonly protocol: 'dsh-work.lifecycle.v1'
+  readonly event: 'surface'
+  readonly url: string
+}
+
+type LifecycleMessage = LifecycleStateMessage | LifecycleSurfaceMessage
 
 const deferred = <T>(): Deferred<T> => {
   let resolve!: Deferred<T>['resolve']
@@ -66,11 +76,29 @@ const deferred = <T>(): Deferred<T> => {
   return { promise, resolve }
 }
 
+export const validDesktopSurfaceUrl = (value: unknown): value is string => {
+  if (typeof value !== 'string' || value.length > 1_024) return false
+  try {
+    const url = new URL(value)
+    const port = Number(url.port)
+    return url.protocol === 'http:' && url.hostname === '127.0.0.1' &&
+      url.username === '' && url.password === '' && url.pathname === '/' && url.hash === '' &&
+      Number.isSafeInteger(port) && port > 0 && port <= 65_535 &&
+      [...url.searchParams.keys()].length === 1 && url.searchParams.has('token') &&
+      /^[A-Za-z0-9_-]+$/u.test(url.searchParams.get('token') ?? '')
+  } catch {
+    return false
+  }
+}
+
 const isLifecycleMessage = (value: unknown): value is LifecycleMessage => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const message = value as Record<string, unknown>
-  return Object.keys(message).length === 2 && message.protocol === 'dsh-work.lifecycle.v1' &&
-    (message.event === 'ready' || message.event === 'disposed')
+  if (message.protocol !== 'dsh-work.lifecycle.v1') return false
+  if (message.event === 'surface') {
+    return Object.keys(message).length === 3 && validDesktopSurfaceUrl(message.url)
+  }
+  return Object.keys(message).length === 2 && (message.event === 'ready' || message.event === 'disposed')
 }
 
 // DSH Work owns supervision only. Harness owns startup and plugin disposal.
@@ -85,6 +113,7 @@ export function createRuntimeHost({
   let state: RuntimeHostState = 'stopped'
   let code: RuntimeHostCode | null = null
   const listeners = new Set<(snapshot: RuntimeHostSnapshot) => void>()
+  const surfaceListeners = new Set<(url: string) => void>()
   const notifications: RuntimeHostSnapshot[] = []
   let notifying = false
 
@@ -170,6 +199,7 @@ export function createRuntimeHost({
       exited: false,
       bytes: 0,
       messages: 0,
+      surface: false,
     }
     current = owner
     state = 'starting'
@@ -185,8 +215,21 @@ export function createRuntimeHost({
     owner.startTimer = setTimeout(() => stopOwned(owner, 'startup-timeout'), startupMs)
     child.on('message', (message: unknown) => {
       if (current !== owner) return
-      if (!isLifecycleMessage(message) || ++owner.messages > 2) {
+      if (!isLifecycleMessage(message) || ++owner.messages > 3) {
         stopOwned(owner, 'invalid-lifecycle-message')
+        return
+      }
+      if (message.event === 'surface') {
+        if (owner.surface || owner.ready || owner.disposed || owner.exited) {
+          stopOwned(owner, 'invalid-lifecycle-message')
+          return
+        }
+        owner.surface = true
+        if (!owner.stopping) {
+          for (const listener of [...surfaceListeners]) {
+            try { listener(message.url) } catch {}
+          }
+        }
         return
       }
       if (message.event === 'disposed') {
@@ -264,6 +307,10 @@ export function createRuntimeHost({
     subscribe(listener: (snapshot: RuntimeHostSnapshot) => void): () => void {
       listeners.add(listener)
       return () => listeners.delete(listener)
+    },
+    subscribeSurface(listener: (url: string) => void): () => void {
+      surfaceListeners.add(listener)
+      return () => surfaceListeners.delete(listener)
     },
   })
 }

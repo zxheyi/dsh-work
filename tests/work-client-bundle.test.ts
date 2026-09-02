@@ -3,15 +3,20 @@ import fs from 'node:fs'
 import vm from 'node:vm'
 import test from 'node:test'
 
-test('builds Work Client API as a Harness ModuleLoader bundle', () => {
+test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   const manifest = JSON.parse(fs.readFileSync(
     new URL('../packages/work-api/package.json', import.meta.url),
     'utf8',
   ))
   assert.equal(manifest.exports['./client'], './client.js')
   assert.deepEqual(manifest.dsh.client, {
-    external: ['@deepseek-ai/dsh-api-gateway/client'],
-    inject: ['@deepseek-ai/dsh-api-gateway', '@deepseek-ai/dsh-client-connection'],
+    external: ['@deepseek-ai/dsh-api-gateway/client', 'react'],
+    inject: [
+      '@deepseek-ai/dsh-api-gateway',
+      '@deepseek-ai/dsh-client-connection',
+      '@deepseek-ai/dsh-client-ui-layout',
+      '@deepseek-ai/dsh-client-ui-renderer',
+    ],
     platform: 'web',
   })
 
@@ -31,17 +36,83 @@ test('builds Work Client API as a Harness ModuleLoader bundle', () => {
   assert.equal(registration?.id, '@dsh-work/work-api')
   assert.equal(typeof registration?.factory, 'function')
   class Service {}
-  class RemoteSnapshotStream {}
+  class RemoteSnapshotStream {
+    start(): void {}
+    async dispose(): Promise<void> {}
+  }
   class RemoteStreamCarrierError extends Error {}
   const exports = registration!.factory(specifier => {
     if (specifier === '@deepseek-ai/cordis') return { Service }
     if (specifier === '@deepseek-ai/dsh-api-gateway/client') {
       return { RemoteSnapshotStream, RemoteStreamCarrierError }
     }
+    if (specifier === 'react') return {
+      createElement() {},
+      useCallback(value: unknown) { return value },
+      useMemo(value: () => unknown) { return value() },
+      useState(value: unknown) { return [value, () => {}] },
+      useSyncExternalStore(_subscribe: unknown, getSnapshot: () => unknown) { return getSnapshot() },
+    }
     throw new Error(`unexpected Work Client external: ${specifier}`)
-  }) as { apply?: unknown; inject?: unknown }
+  }) as {
+    apply?: (ctx: unknown) => Promise<() => Promise<void>>
+    inject?: unknown
+  }
   assert.equal(typeof exports.apply, 'function')
-  assert.deepEqual(Array.from(exports.inject as string[]), ['remote'])
+  assert.deepEqual(Array.from(exports.inject as string[]), ['remote', 'slots'])
+
+  const injectedSlots: string[] = []
+  const injectedServices: string[][] = []
+  const registeredSlots: Array<{ name: string; priority?: number }> = []
+  const remote = {
+    async $mount() { return async () => {} },
+    $stream() { return {} },
+    work: {
+      async create() { throw new Error('not called') },
+      async dispatch() { throw new Error('not called') },
+      async list() { return { ok: true, value: { items: [] } } },
+      async *follow() {},
+    },
+  }
+  let scopedDispose: (() => Promise<void> | void) | undefined
+  const clientContext = {
+    remote,
+    inject(deps: string[], apply: (ctx: unknown) => (() => Promise<void> | void)) {
+      injectedServices.push(deps)
+      scopedDispose = apply(clientContext)
+      return {
+        then(resolve: () => void) { resolve() },
+        async dispose() { await scopedDispose?.() },
+      }
+    },
+    slots: {
+      inject(name: string, register: () => void) {
+        injectedSlots.push(name)
+        register()
+      },
+      register(options: { name: string; priority?: number }) {
+        registeredSlots.push({
+          name: options.name,
+          ...(options.priority === undefined ? {} : { priority: options.priority }),
+        })
+        return () => {}
+      },
+    },
+  }
+  const dispose = await exports.apply!(clientContext)
+  assert.deepEqual(injectedServices.map(value => Array.from(value)), [['remote.work']])
+  assert.deepEqual(injectedSlots, ['sidebar', 'conversation'])
+  assert.deepEqual(registeredSlots, [
+    { name: 'sidebar', priority: -100 },
+    { name: 'conversation', priority: -100 },
+  ])
+  assert.match(source, /你想完成什么？/)
+  assert.match(source, /添加资料/)
+  assert.match(source, /添加文件夹/)
+  assert.match(source, /文件和文件夹即将支持/)
+  assert.equal(source.includes('选择 Work 目录'), false)
+  assert.equal(source.includes('选择工作目录'), false)
+  await dispose()
   assert.equal(source.includes('node:crypto'), false)
   assert.equal(source.includes('/Users/'), false)
 })

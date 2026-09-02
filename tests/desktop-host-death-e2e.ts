@@ -43,33 +43,41 @@ const waitForActive = async (): Promise<string> => {
   throw new Error('guardian did not claim a generation')
 }
 
+const waitForState = async (
+  host: DesktopSession['host'],
+  state: RuntimeSnapshot['state'],
+): Promise<RuntimeSnapshot> => {
+  const initial = host.snapshot()
+  if (initial.state === state) return initial
+  return new Promise<RuntimeSnapshot>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      unsubscribe()
+      reject(new Error(`${state} status timeout`))
+    }, 35_000)
+    const unsubscribe = host.subscribe(value => {
+      if (value.state !== state) return
+      clearTimeout(timer)
+      unsubscribe()
+      resolve(value)
+    })
+  })
+}
+
 async function run(): Promise<void> {
   let failureStep = 'await-desktop'
   try {
     const { host } = await desktop
     if (!host) throw new Error('desktop host unavailable')
-    failureStep = 'start-guardian'
-    let startingTimer: NodeJS.Timeout
-    const resolver: { current: ((value: RuntimeSnapshot) => void) | null } = { current: null }
-    const observedStarting = new Promise<RuntimeSnapshot>((resolve, reject) => {
-      resolver.current = value => { clearTimeout(startingTimer); resolve(value) }
-      startingTimer = setTimeout(() => reject(new Error('starting status timeout')), 35_000)
-    })
-    const unsubscribe = host.subscribe(value => {
-      if (value.state === 'starting') resolver.current?.(value)
-    })
-    const starting = host.start()
+    failureStep = 'observe-automatic-start'
     let generation, terminal
     if (phase === 'after-ready') {
       failureStep = 'await-harness-ready'
-      terminal = await starting
-      if (terminal.state !== 'ready') throw new Error('Harness did not become Ready')
+      terminal = await waitForState(host, 'ready')
       generation = await waitForActive()
     } else {
-      terminal = await observedStarting
+      terminal = await waitForState(host, 'starting')
       generation = await waitForActive()
     }
-    unsubscribe()
     failureStep = 'armed'
     write('armed', { generation, terminal })
     // The parent test kills this exact Electron main process. Keep the event loop

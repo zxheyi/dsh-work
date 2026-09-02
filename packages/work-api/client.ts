@@ -7,6 +7,7 @@ import {
 import type { WorkRemoteFollowFrame } from './index.ts'
 import { ClientWorkModel, WorksController } from './client-model.ts'
 import { TYPERT_REMOTE } from './remote.ts'
+import { registerWorkSurface } from './surface.ts'
 
 export * from './client-model.ts'
 
@@ -43,16 +44,29 @@ export function createWorkStateStream(
   })
 }
 
-export const inject = ['remote']
+export const inject = ['remote', 'slots']
 
 export async function apply(ctx: Context): Promise<() => Promise<void>> {
   const disposeRemote = await ctx.remote.$mount(TYPERT_REMOTE)
-  const model = new ClientWorkModel(ctx.remote.work)
-  new WorksController(ctx, model)
-  const control = createWorkStateStream(ctx.remote, model)
-  control.start()
+  const workScope = ctx.inject(['remote.work'], workCtx => {
+    const model = new ClientWorkModel(workCtx.remote.work)
+    const works = new WorksController(workCtx, model)
+    const disposeSurface = registerWorkSurface(workCtx, works)
+    const control = createWorkStateStream(workCtx.remote, model)
+    control.start()
+    return async () => {
+      await control.dispose()
+      disposeSurface()
+    }
+  })
+  try {
+    await workScope
+  } catch (error) {
+    await disposeRemote()
+    throw error
+  }
   return async () => {
-    await control.dispose()
+    await workScope.dispose()
     await disposeRemote()
   }
 }

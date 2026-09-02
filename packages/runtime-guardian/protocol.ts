@@ -7,6 +7,7 @@ import {
   type RuntimeSnapshot,
   type RuntimeState,
 } from '../runtime-contract/index.ts'
+import { validDesktopSurfaceUrl } from '../runtime-host/index.ts'
 
 export const GUARDIAN_PROTOCOL = 'dsh-work.guardian.v1' as const
 
@@ -40,4 +41,11 @@ export function boundedGuardianSnapshot(value: unknown): RuntimeSnapshot | null 
     canStop: value.canStop as boolean,
     canRecover: value.canRecover as boolean,
   })
+}
+
+export function boundedGuardianSurface(value: unknown): string | null {
+  if (!exactKeys(value, ['protocol', 'event', 'url'])) return null
+  if (value.protocol !== GUARDIAN_PROTOCOL || value.event !== 'surface' ||
+      !validDesktopSurfaceUrl(value.url)) return null
+  return value.url
 }

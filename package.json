@@ -17,6 +17,12 @@
     "test:runtime": "node --test tests/runtime-integration.test.ts tests/guardian-integration.test.ts tests/work-client-loader.integration.test.ts",
     "pretest:desktop": "pnpm build",
     "test:desktop": "node scripts/run-desktop-test.mjs",
+    "pretest:work-ui": "pnpm build",
+    "test:work-ui": "node scripts/run-work-home-test.mjs",
+    "pretest:work-shell": "pnpm build",
+    "test:work-shell": "node scripts/run-desktop-work-shell-test.mjs",
+    "pretest:work-persistence": "pnpm build",
+    "test:work-persistence": "node scripts/run-desktop-work-persistence-test.mjs",
     "predesktop": "pnpm build",
     "desktop": "electron dist/apps/desktop/main.js",
     "verify:local": "node scripts/verify-local.mjs artifacts/runtime/context.json --desktop"
@@ -25,13 +31,17 @@
     "@deepseek-ai/cordis": "4.0.2",
     "@deepseek-ai/dsh": "0.1.2-alpha.2",
     "@deepseek-ai/dsh-api-gateway": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-client-ui-layout": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.1.2-alpha.2",
     "@deepseek-ai/dsh-cmdline": "0.1.2-alpha.2",
     "@deepseek-ai/dsh-storage-domain": "0.1.2-alpha.2",
     "@deepseek-ai/dsh-typert-protocol": "0.1.2-alpha.2",
+    "react": "18.3.1",
     "zod": "4.5.4"
   },
   "devDependencies": {
     "@types/node": "24.13.3",
+    "@types/react": "18.3.28",
     "electron": "44.0.0",
     "tsdown": "0.22.2",
     "typescript": "7.0.2"

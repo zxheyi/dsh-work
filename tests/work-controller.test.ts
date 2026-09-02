@@ -170,11 +170,46 @@ test('creates and registers a DSH Work managed Workspace', async () => {
   await fs.rm(workspaceRoot, { recursive: true, force: true })
 })
 
+test('binds the Primary Session by workspaceId without forwarding cwd', async () => {
+  const requests: unknown[] = []
+  const harness = createHarnessWorkPort({
+    workspaceRegistry: {
+      async create(workspacePath) {
+        return { id: 'workspace-adapter', path: workspacePath }
+      },
+    },
+    sessionController: {
+      async create(request) {
+        requests.push(request)
+        if ('cwd' in request) {
+          throw new Error('session.create accepts workspaceId or cwd, not both')
+        }
+        return { sessionId: request.sessionId }
+      },
+      async prompt() {
+        return { accepted: true as const }
+      },
+    },
+  })
+  const requestWithLegacyCwd = {
+    sessionId: 'session-adapter',
+    workspaceId: 'workspace-adapter',
+    cwd: '/managed/work-adapter',
+  }
+
+  const session = await harness.ensurePrimarySession(requestWithLegacyCwd)
+
+  assert.deepEqual(session, { sessionId: 'session-adapter' })
+  assert.deepEqual(requests, [{
+    sessionId: 'session-adapter',
+    workspaceId: 'workspace-adapter',
+  }])
+})
+
 test('creates one Primary Session bound to the managed Workspace', async () => {
   const sessionRequests: Array<{
     sessionId: string
     workspaceId: string
-    cwd: string
   }> = []
   const harness: HarnessWorkPort = {
     async ensureWorkspace(request) {
@@ -198,7 +233,6 @@ test('creates one Primary Session bound to the managed Workspace', async () => {
   assert.deepEqual(sessionRequests, [{
     sessionId: 'session-primary',
     workspaceId: 'workspace-primary',
-    cwd: '/managed/work-primary',
   }])
   assert.deepEqual(created.primarySession, { sessionId: 'session-primary', turnCount: 0 })
 })

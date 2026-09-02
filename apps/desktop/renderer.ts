@@ -2,23 +2,23 @@ type PresentationCode = DshWorkRuntimeCode | 'desktop-unavailable'
 type PresentationStatus = Omit<DshWorkRuntimeStatus, 'code'> & { readonly code: PresentationCode | null }
 
 const labels: Record<DshWorkRuntimeState, readonly [string, string]> = {
-  stopped: ['已停止', '运行时尚未启动。点击启动，在产品持有的 Profile generation 中运行 Harness。'],
-  starting: ['正在启动', '正在启动官方 CLI，等待 Harness 完成原生插件初始化。'],
-  ready: ['运行就绪', 'Harness 已确认 Ready。可以停止并再次启动，验证生命周期闭环。'],
-  stopping: ['正在停止', '已发送 EOF，等待 Harness 释放插件并退出；超时将报告清理异常。'],
-  failed: ['运行异常', '本次运行未能正常完成。请按当前可用操作重试或隔离恢复。'],
+  stopped: ['准备开始', '工作台尚未打开，你可以重新尝试。'],
+  starting: ['正在打开 DSH Work', '正在恢复最近的工作并准备你的工作台。'],
+  ready: ['工作台已就绪', '正在进入工作首页。'],
+  stopping: ['正在安全关闭', '正在保存当前状态，请稍候。'],
+  failed: ['暂时无法打开', '你的已有工作仍会保留，请按当前可用操作重试或安全恢复。'],
 }
 
 const recovery: Partial<Record<PresentationCode, string>> = {
-  'runtime-unavailable': '未找到匹配的独立运行时。请按开发说明配置 DSH_WORK_NODE 后重启桌面。',
-  'cleanup-unconfirmed': '无法确认子进程已回收，暂时禁止重启。请检查宿主进程状态。',
-  'forced-stop': '停止超时，已强制结束直接子进程；这不代表完整进程树已回收。',
-  'startup-timeout': '启动超时。请检查隔离 Profile 与已锁定运行时后重试。',
-  'unexpected-exit': 'Harness 意外退出。直接子进程及管道关闭后可显式隔离恢复；完整进程树清理尚未验证。',
-  'lifecycle-disconnected': '与 Harness 的生命周期通道断开。直接子进程关闭后可显式隔离恢复；完整进程树清理尚未验证。',
-  'runtime-exit-failed': 'Harness 启动或退出失败。直接子进程关闭后可显式隔离旧 Profile generation。',
-  'recovery-required': '上一个 Profile generation 的状态无法确认。你可以显式启动一个隔离 generation；旧数据不会被复用或删除。',
-  'guardian-unavailable': '运行时 guardian 不可用。未启动 Harness，也未尝试按 PID 恢复。',
+  'runtime-unavailable': '运行组件暂时不可用。请确认安装完整后重新打开 DSH Work。',
+  'cleanup-unconfirmed': '上一次关闭尚未确认完成。为保护已有工作，当前不会自动重试。',
+  'forced-stop': '上一次关闭超时。清理完成后可以使用安全恢复。',
+  'startup-timeout': '工作台准备超时。你可以重试，已有工作不会丢失。',
+  'unexpected-exit': '工作台意外停止。清理完成后可以使用安全恢复，已有工作会保留。',
+  'lifecycle-disconnected': '工作台连接已中断。清理完成后可以使用安全恢复，已有工作会保留。',
+  'runtime-exit-failed': '工作台未能正常启动或关闭。清理完成后可以使用安全恢复。',
+  'recovery-required': '上一次工作环境状态无法确认。可以安全启动一个隔离环境；原有数据不会被自动删除。',
+  'guardian-unavailable': '桌面运行组件暂时不可用，请重新打开 DSH Work。',
 }
 
 const element = <T extends HTMLElement>(id: string): T => {
@@ -44,7 +44,7 @@ const render = (value: PresentationStatus): void => {
   stop.disabled = !value.canStop
   recover.hidden = !value.canRecover
   recover.disabled = !value.canRecover
-  start.textContent = value.canRecover ? '启动已阻止' : value.state === 'failed' ? '重试启动' : '启动 Harness'
+  start.textContent = value.canRecover ? '等待安全恢复' : value.state === 'failed' ? '重试打开' : '打开工作台'
 }
 
 const disconnected = (): void => render({

@@ -21,6 +21,7 @@ const send = (message: object): void => {
 }
 
 service.subscribe(value => send({ protocol: GUARDIAN_PROTOCOL, event: 'status', value }))
+service.subscribeSurface(url => send({ protocol: GUARDIAN_PROTOCOL, event: 'surface', url }))
 process.on('message', async (message: unknown) => {
   if (!validGuardianCommand(message)) {
     process.disconnect()

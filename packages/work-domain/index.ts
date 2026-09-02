@@ -163,7 +163,6 @@ export interface HarnessWorkPort {
 export interface EnsurePrimarySessionRequest {
   readonly sessionId: string
   readonly workspaceId: string
-  readonly cwd: string
 }
 
 export interface SubmitTurnRequest {
@@ -180,7 +179,6 @@ export interface HarnessWorkContext {
     create(request: {
       readonly sessionId: string
       readonly workspaceId: string
-      readonly cwd: string
     }): Promise<{ readonly sessionId: string }>
     prompt(request: {
       readonly requestId: string
@@ -202,7 +200,10 @@ export function createHarnessWorkPort(context: HarnessWorkContext): HarnessWorkP
       })
     },
     async ensurePrimarySession(request) {
-      const session = await context.sessionController.create(request)
+      const session = await context.sessionController.create({
+        sessionId: request.sessionId,
+        workspaceId: request.workspaceId,
+      })
       return Object.freeze({ sessionId: session.sessionId })
     },
     async submitTurn(request, signal = new AbortController().signal) {
@@ -248,7 +249,6 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
     const session = await options.harness.ensurePrimarySession({
       sessionId: restored.primarySession.sessionId,
       workspaceId: restored.workspace.workspaceId,
-      cwd: restored.workspace.path,
     })
     if (session.sessionId !== restored.primarySession.sessionId) {
       throw new WorkError('work/recovery-conflict', 'Harness resolved a different Primary Session during Work recovery.')
@@ -288,7 +288,6 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
       const ensuredSession = await options.harness.ensurePrimarySession({
         sessionId: createSessionId(),
         workspaceId: workspace.workspaceId,
-        cwd: workspace.path,
       })
       const primarySession = Object.freeze({
         sessionId: ensuredSession.sessionId,
