@@ -26,6 +26,13 @@ const failureSchema = z.object({
   requestId: z.string().min(1),
   message: z.string().min(1),
 })
+const importSourceSchema = z.object({
+  sourceSystem: z.enum(['dsh', 'dsh-desktop', 'other']),
+  sourceSessionId: z.string().min(1).nullable(),
+  sourceVersion: z.string().min(1).nullable(),
+  importedAt: z.iso.datetime(),
+  contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+})
 const workSnapshotSchema = z.object({
   workId: z.string().min(1),
   revision: z.number().int().positive(),
@@ -39,6 +46,7 @@ const workSnapshotSchema = z.object({
   lastFailure: failureSchema.nullable(),
   lastMutationId: z.string().min(1).nullable().default(null),
   lastMutationDigest: z.string().regex(/^[a-f0-9]{64}$/u).nullable().default(null),
+  importSource: importSourceSchema.nullable().default(null),
 })
 
 export const workDomainSpec = defineDomain({

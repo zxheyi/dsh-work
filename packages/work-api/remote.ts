@@ -4,6 +4,7 @@ import z from 'zod'
 import type {
   WorkCreateSpec,
   WorkDispatchRequest,
+  WorkImportConversationSpec,
   WorkListValue,
   WorkRemoteFollowFrame,
   WorkView,
@@ -28,6 +29,16 @@ const workViewSchema: z.ZodType<WorkView> = z.object({
 const createSchema: z.ZodType<WorkCreateSpec> = z.object({
   title: z.string(),
   goal: z.string(),
+}).strict()
+const importConversationSchema = z.object({
+  title: z.string().min(1).max(200),
+  goal: z.string().min(1).max(10_000),
+  source: z.object({
+    sourceSystem: z.enum(['dsh', 'dsh-desktop', 'other']),
+    sourceSessionId: z.string().min(1).max(256).optional(),
+    sourceVersion: z.string().min(1).max(128).optional(),
+    content: z.string().min(1).max(100_000),
+  }).strict(),
 }).strict()
 const commandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('submit-turn'), instruction: z.string() }).strict(),
@@ -73,6 +84,24 @@ export const TYPERT_REMOTE: TypertRemoteContribution = Object.freeze({
       result: strict('@dsh-work/work-api#WorkView', workViewSchema),
     }),
     Object.freeze({
+      id: '@dsh-work/work-api#work/importConversation',
+      service: 'workApi',
+      namespace: 'work',
+      method: 'importConversation',
+      invocation: Object.freeze({ kind: 'direct' as const }),
+      parameters: Object.freeze([Object.freeze({
+        name: 'spec',
+        wire: 'spec',
+        source: 'json' as const,
+        codec: strict(
+          '@dsh-work/work-api#WorkImportConversationSpec',
+          importConversationSchema,
+        ),
+      })]),
+      cancellation: Object.freeze({ parameter: 'signal' as const }),
+      result: strict('@dsh-work/work-api#WorkView', workViewSchema),
+    }),
+    Object.freeze({
       id: '@dsh-work/work-api#work/dispatch',
       service: 'workApi',
       namespace: 'work',
@@ -113,6 +142,10 @@ export const TYPERT_REMOTE: TypertRemoteContribution = Object.freeze({
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteMap {
     'work/create': (spec: WorkCreateSpec) => Promise<RemoteResult<WorkView>>
+    'work/importConversation': (
+      spec: WorkImportConversationSpec,
+      signal?: AbortSignal,
+    ) => Promise<RemoteResult<WorkView>>
     'work/dispatch': (
       request: WorkDispatchRequest,
       signal?: AbortSignal,
@@ -124,6 +157,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespaceMap {
     work: {
       create: TypertRemoteMap['work/create']
+      importConversation: TypertRemoteMap['work/importConversation']
       dispatch: TypertRemoteMap['work/dispatch']
       list: TypertRemoteMap['work/list']
       follow: TypertRemoteMap['work/follow']

@@ -10,12 +10,17 @@ import type {
   WorkClientDispatchRequest,
   WorkDispatchRequest,
   WorkListValue,
+  WorkImportConversationSpec,
   WorkRemoteFollowFrame,
   WorkView,
 } from './index.ts'
 
 export interface WorkClientRemote {
   create(spec: WorkCreateSpec): Promise<RemoteResult<WorkView>>
+  importConversation(
+    spec: WorkImportConversationSpec,
+    signal?: AbortSignal,
+  ): Promise<RemoteResult<WorkView>>
   dispatch(request: WorkDispatchRequest, signal?: AbortSignal): Promise<RemoteResult<WorkView>>
   list(): Promise<RemoteResult<WorkListValue>>
   follow(signal?: AbortSignal): AsyncIterable<WorkRemoteFollowFrame>
@@ -36,6 +41,7 @@ export interface WorkSource {
 export interface IWorks {
   readonly list: WorkSource
   create(spec: WorkCreateSpec): Promise<WorkView>
+  importConversation(spec: WorkImportConversationSpec, signal?: AbortSignal): Promise<WorkView>
   dispatch(request: WorkClientDispatchRequest, signal?: AbortSignal): Promise<WorkView>
 }
 
@@ -60,6 +66,15 @@ export class ClientWorkModel implements WorkSource {
 
   async create(spec: WorkCreateSpec): Promise<RemoteResult<WorkView>> {
     const result = await this.remote.create(spec)
+    if (result.ok) this.upsertView(result.value)
+    return result
+  }
+
+  async importConversation(
+    spec: WorkImportConversationSpec,
+    signal?: AbortSignal,
+  ): Promise<RemoteResult<WorkView>> {
+    const result = await this.remote.importConversation(spec, signal)
     if (result.ok) this.upsertView(result.value)
     return result
   }
@@ -150,6 +165,15 @@ export class WorksController extends Service implements IWorks {
 
   async create(spec: WorkCreateSpec): Promise<WorkView> {
     const result = await this.model.create(spec)
+    if (!result.ok) throw result.error
+    return result.value
+  }
+
+  async importConversation(
+    spec: WorkImportConversationSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkView> {
+    const result = await this.model.importConversation(spec, signal)
     if (!result.ok) throw result.error
     return result.value
   }

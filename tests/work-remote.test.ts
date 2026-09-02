@@ -46,6 +46,7 @@ test('exports the narrow Work surface through public Typert markers', () => {
     mode: marker.mode ?? 'unary',
   })), [
     { method: 'create', mode: 'unary' },
+    { method: 'importConversation', mode: 'unary' },
     { method: 'dispatch', mode: 'unary' },
     { method: 'list', mode: 'unary' },
     { method: 'follow', mode: 'stream' },
@@ -56,6 +57,7 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
   assert.deepEqual(TYPERT_REMOTE.descriptors.map(descriptor =>
     `${descriptor.namespace}/${descriptor.method}`), [
     'work/create',
+    'work/importConversation',
     'work/dispatch',
     'work/list',
     'work/follow',
@@ -89,6 +91,40 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
     expectedRevision: 2,
     command: { type: 'deliver', unexpected: true },
   }))
+
+  const importConversation = TYPERT_REMOTE.descriptors.find(
+    descriptor => descriptor.method === 'importConversation',
+  )
+  assert.ok(importConversation)
+  const importCodec = importConversation.parameters[0]?.codec
+  assert.equal(importCodec?.mode, 'strict')
+  if (!importCodec || importCodec.mode !== 'strict') {
+    throw new Error('Conversation import must publish a strict request codec')
+  }
+  assert.throws(() => importCodec.schema.parse({
+    title: 'Too large',
+    goal: 'Reject oversized context.',
+    source: { sourceSystem: 'other', content: 'x'.repeat(100_001) },
+  }))
+})
+
+test('imports conversation content through the product Remote without exposing provenance internals', async () => {
+  const remote = remoteController()
+
+  const imported = await remote.importConversation({
+    title: 'Imported Work',
+    goal: 'Continue safely.',
+    source: {
+      sourceSystem: 'dsh-desktop',
+      sourceSessionId: 'external-session',
+      content: 'A readable exported conversation.',
+    },
+  })
+
+  assert.equal(imported.turnCount, 1)
+  assert.equal('importSource' in imported, false)
+  assert.equal('workspace' in imported, false)
+  assert.equal('primarySession' in imported, false)
 })
 
 test('projects Work state without exposing Harness Workspace or Session internals', async () => {

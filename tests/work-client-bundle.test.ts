@@ -69,6 +69,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
     $stream() { return {} },
     work: {
       async create() { throw new Error('not called') },
+      async importConversation() { throw new Error('not called') },
       async dispatch() { throw new Error('not called') },
       async list() { return { ok: true, value: { items: [] } } },
       async *follow() {},
@@ -110,6 +111,8 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   assert.match(source, /添加资料/)
   assert.match(source, /添加文件夹/)
   assert.match(source, /文件和文件夹即将支持/)
+  assert.match(source, /继续已有对话/)
+  assert.match(source, /原对话不会改变/)
   assert.equal(source.includes('选择 Work 目录'), false)
   assert.equal(source.includes('选择工作目录'), false)
   await dispose()

@@ -56,6 +56,7 @@ test('creates the only Work and returns it through the public controller', async
     lastFailure: null,
     lastMutationId: null,
     lastMutationDigest: null,
+    importSource: null,
   })
   assert.deepEqual(await controller.get(), created)
 })
@@ -76,6 +77,81 @@ test('lists the singleton Work through the public controller', async () => {
   })
 
   assert.deepEqual(await controller.list(), [created])
+})
+
+test('imports readable conversation content into a new managed Work without persisting a second transcript', async () => {
+  const turns: Array<{ requestId: string; sessionId: string; instruction: string }> = []
+  const store = createMemoryWorkStore()
+  const controller = createWorkController({
+    createId: () => 'work-imported',
+    createSessionId: () => 'session-imported',
+    createRequestId: () => 'request-imported',
+    now: () => '2026-09-02T08:00:00.000Z',
+    workspaceRoot: '/managed',
+    store,
+    harness: {
+      ...testHarness(),
+      async submitTurn(request) { turns.push(request) },
+    },
+  })
+  const source = Object.freeze({
+    sourceSystem: 'dsh-desktop' as const,
+    sourceSessionId: 'external-session-1',
+    sourceVersion: '0.1.2-alpha.2',
+    content: 'User: Prepare a launch brief.\nAssistant: I drafted an outline.',
+  })
+
+  const imported = await controller.importConversation({
+    title: 'Continue launch brief',
+    goal: 'Finish the launch brief and produce a reviewable file.',
+    source,
+  })
+
+  assert.equal(imported.workId, 'work-imported')
+  assert.equal(imported.revision, 2)
+  assert.deepEqual(imported.primarySession, { sessionId: 'session-imported', turnCount: 1 })
+  assert.deepEqual(imported.importSource, {
+    sourceSystem: 'dsh-desktop',
+    sourceSessionId: 'external-session-1',
+    sourceVersion: '0.1.2-alpha.2',
+    importedAt: '2026-09-02T08:00:00.000Z',
+    contentDigest: '357967653b4cf3ab9871362d9520e03ca1f0fe164c4b10b93af37156ebac1180',
+  })
+  assert.deepEqual(source, {
+    sourceSystem: 'dsh-desktop',
+    sourceSessionId: 'external-session-1',
+    sourceVersion: '0.1.2-alpha.2',
+    content: 'User: Prepare a launch brief.\nAssistant: I drafted an outline.',
+  })
+  assert.equal(turns.length, 1)
+  assert.equal(turns[0]?.sessionId, 'session-imported')
+  assert.match(turns[0]?.instruction ?? '', /仅作为参考上下文/u)
+  assert.match(turns[0]?.instruction ?? '', /Prepare a launch brief/u)
+  const persisted = await store.load()
+  assert.equal(JSON.stringify(persisted).includes('I drafted an outline'), false)
+})
+
+test('rejects empty or oversized conversation imports before provisioning a Work', async () => {
+  let workspaceCalls = 0
+  const controller = createWorkController({
+    workspaceRoot: '/managed',
+    harness: {
+      ...testHarness(),
+      async ensureWorkspace(request) {
+        workspaceCalls++
+        return { workspaceId: 'workspace-import-validation', path: request.path }
+      },
+    },
+  })
+
+  for (const content of ['', 'x'.repeat(100_001)]) {
+    await assert.rejects(controller.importConversation({
+      title: 'Invalid import',
+      goal: 'Do not provision.',
+      source: { sourceSystem: 'other', content },
+    }), (error: unknown) => error instanceof WorkError && error.code === 'work/import-invalid')
+  }
+  assert.equal(workspaceCalls, 0)
 })
 
 test('follows a complete baseline and committed Work upserts', async () => {
@@ -132,6 +208,43 @@ test('rejects a second Work instead of silently replacing the first one', async 
     (error: unknown) => error instanceof WorkError && error.code === 'work/already-exists',
   )
   assert.equal((await controller.get())?.title, 'First')
+})
+
+test('serializes new Work creation against conversation import provisioning', async () => {
+  let releaseWorkspace!: () => void
+  const workspaceBlocked = new Promise<void>(resolve => { releaseWorkspace = resolve })
+  let enteredWorkspace!: () => void
+  const workspaceEntered = new Promise<void>(resolve => { enteredWorkspace = resolve })
+  let workspaceCalls = 0
+  const controller = createWorkController({
+    createId: () => 'work-provisioned-once',
+    createSessionId: () => 'session-provisioned-once',
+    workspaceRoot: '/managed',
+    harness: {
+      ...testHarness(),
+      async ensureWorkspace(request) {
+        workspaceCalls++
+        enteredWorkspace()
+        await workspaceBlocked
+        return { workspaceId: 'workspace-provisioned-once', path: request.path }
+      },
+    },
+  })
+
+  const create = controller.create({ title: 'First command', goal: 'Win the creation lease.' })
+  await workspaceEntered
+  const imported = controller.importConversation({
+    title: 'Concurrent import',
+    goal: 'Must not provision a second aggregate.',
+    source: { sourceSystem: 'other', content: 'Existing conversation.' },
+  })
+  releaseWorkspace()
+
+  await create
+  await assert.rejects(imported, (error: unknown) =>
+    error instanceof WorkError && error.code === 'work/already-exists')
+  assert.equal(workspaceCalls, 1)
+  assert.equal((await controller.get())?.title, 'First command')
 })
 
 test('creates and registers a DSH Work managed Workspace', async () => {

@@ -155,17 +155,17 @@ DSH Work Desktop ─┘
 
 入口使用产品语言“继续已有对话”，不使用“导入 Session”。只有用户点击入口后才查找来源。
 
+当前安全实现先支持“粘贴可读内容”：用户从 DSH Desktop、DSH Web 或 CLI 复制／导出可读对话，选择来源后创建新 Work。自动列出另一产品的本机会话，需要来源产品提供明确授权的只读适配器或可移植导出契约；在此之前不得扫描 `~/.dsh`、打开外部 Profile 数据库或解析私有持久化格式。
+
 ```text
 继续已有对话
     ↓
 选择来源
-├─ 这台 Mac 上的 DSH 对话
-├─ DSH Desktop 对话
-└─ 其他设备／服务（后续）
+├─ DSH Desktop
+├─ DSH Web／CLI
+└─ 其他来源
     ↓
-选择一条对话
-    ↓
-预览：标题、更新时间、来源、是否包含文件
+粘贴用户主动复制／导出的可读内容
     ↓
 确认工作名称；按需补充资料
     ↓
@@ -183,6 +183,7 @@ DSH Work Desktop ─┘
 - 不把外部绝对路径直接当作 DSH Work Workspace；
 - 导入文件前展示范围并获得用户确认；
 - Work 保存 `sourceSystem`、`sourceSessionId`、来源版本和导入时间，用于追溯；
+- 当前粘贴入口没有可靠 Session ID 或来源版本时保存为空，不伪造标识；
 - Canonical transcript 仍由原 Harness 保存；Work 聚合只保存来源引用、允许的快照和摘要；新的持续历史由 DSH Work Primary Session 保存。
 
 版本不兼容、来源缺失或远端不可达时，不尝试共同写入原 Session。可以提供“仅导入可读内容并开始新工作”，不能承诺原 Session 原位续写。

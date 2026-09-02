@@ -19,7 +19,7 @@ DSH Work 希望让普通用户从“我想完成什么”开始，而不是先�
 
 它不是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的重新实现，也不是 [DSH Desktop](https://github.com/anywhere-labs/dsh-desktop) 或 dsh-web 的桌面复刻。Harness 提供 Agent 运行时与原生插件体系；DSH Work 负责把这些能力组织成普通用户能够理解、审核和交付的完整工作体验。
 
-> **当前状态：** 桌面宿主、官方 Harness alpha.2 运行时边界、外部 guardian 与持久 Profile 代际恢复已经通过原生 macOS/Windows 验证。Work 聚合与工作界面属于已经接受的产品方向，尚未实现为可供日常使用的发行版本。
+> **当前状态：** 已实现单 Work、受管 Workspace、Primary Session、多 Turn、单文件成果状态、重启恢复、失败继续、Work Remote/Client API、桌面首页壳，以及“继续已有对话”的安全可读内容导入。它们仍是发行前实现；安装包签名、升级、自动发现外部对话、完整资料与成果编辑尚未完成。
 
 **产品资料：** [查看 PRD 源文件](docs/product-prd.html) · [在线预览交互式 PRD](https://htmlpreview.github.io/?https://github.com/zxheyi/dsh-work/blob/main/docs/product-prd.html) · [阅读 Work 聚合 ADR](docs/decisions/0006-work-as-product-owned-aggregate.md)
 
@@ -120,8 +120,11 @@ flowchart LR
 - 官方 DeepSeek Harness alpha.2 CLI、Profile 与 Bundle 组合；
 - crash-safe 外部 guardian、Profile 代际和显式恢复；
 - TypeScript 产品源码、构建、单元测试、契约测试和原生桌面验证。
+- 最小 Work 聚合、持久化与失败恢复；
+- Web／Desktop 共用的 Work Remote、Client API 与修订绑定命令；
+- 面向目标的桌面首页，以及把可读既有对话复制到新 Work 的安全导入入口。
 
-下一阶段将以 [ADR 0006](docs/decisions/0006-work-as-product-owned-aggregate.md) 为约束，验证最小 Work Host 插件、主 Session 编排、成果版本和 Work Client 界面。README 与 PRD 描述产品方向，不代表这些界面已经交付。
+下一阶段将继续补齐资料导入、文件型成果生产与审核界面，并在上游提供明确授权的来源契约后接入外部会话自动发现。README 与 PRD 中超出上述实现清单的内容仍是产品方向，不代表已经交付。
 
 ## 开发与参与
 

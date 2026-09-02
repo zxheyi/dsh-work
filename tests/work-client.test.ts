@@ -11,6 +11,7 @@ import {
 } from '../packages/work-api/client-model.ts'
 import type {
   WorkCreateSpec,
+  WorkImportConversationSpec,
   WorkDispatchRequest,
   WorkListValue,
   WorkView,
@@ -37,6 +38,9 @@ function successfulRemote(overrides: Partial<WorkClientRemote> = {}): WorkClient
       return { ok: true, value: view(1) }
     },
     async dispatch(_request: WorkDispatchRequest): Promise<RemoteResult<WorkView>> {
+      return { ok: true, value: view(2) }
+    },
+    async importConversation(_spec: WorkImportConversationSpec): Promise<RemoteResult<WorkView>> {
       return { ok: true, value: view(2) }
     },
     async list(): Promise<RemoteResult<WorkListValue>> {
@@ -146,4 +150,28 @@ test('adds a unique mutation id and current revision to every client dispatch', 
     expectedRevision: 1,
     command: { type: 'submit-turn', instruction: 'Continue once.' },
   }])
+})
+
+test('imports an existing conversation through ctx.works and installs the returned Work', async () => {
+  const imports: WorkImportConversationSpec[] = []
+  const model = new ClientWorkModel(successfulRemote({
+    async importConversation(spec) {
+      imports.push(spec)
+      return { ok: true, value: view(2) }
+    },
+  }))
+  model.replaceBaseline({ items: [] })
+  const ctx = new Context()
+  const works = new WorksController(ctx, model)
+  const spec: WorkImportConversationSpec = {
+    title: 'Continue an existing conversation',
+    goal: 'Produce a deliverable from the previous context.',
+    source: { sourceSystem: 'dsh', content: 'Readable prior conversation.' },
+  }
+
+  const imported = await works.importConversation(spec)
+
+  assert.deepEqual(imports, [spec])
+  assert.deepEqual(imported, view(2))
+  assert.deepEqual(model.getSnapshot().items, [view(2)])
 })

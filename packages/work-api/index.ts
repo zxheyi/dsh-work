@@ -5,12 +5,14 @@ import {
   WorkError,
   type CreateWorkSpec,
   type DispatchWorkRequest,
+  type ImportConversationSpec,
   type WorkController,
   type WorkFollowFrame,
   type WorkSnapshot,
 } from '../work-domain/index.ts'
 
 export type WorkCreateSpec = CreateWorkSpec
+export type WorkImportConversationSpec = ImportConversationSpec
 export type WorkDispatchRequest = DispatchWorkRequest & Required<Pick<
   DispatchWorkRequest,
   'mutationId' | 'expectedRevision'
@@ -52,6 +54,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'work/not-found': Record<string, never>
     'work/deliverable-exists': Record<string, never>
     'work/deliverable-invalid': Record<string, never>
+    'work/import-invalid': Record<string, never>
     'work/invalid-transition': Record<string, never>
     'work/mutation-conflict': Record<string, never>
     'work/recovery-conflict': Record<string, never>
@@ -114,6 +117,10 @@ export class WorkRemoteController extends TypertRemoteService {
     return workResult(async () => projectWork(await this.controller.create(spec)))
   }
 
+  importConversation(spec: WorkImportConversationSpec, signal?: AbortSignal): Promise<WorkView> {
+    return workResult(async () => projectWork(await this.controller.importConversation(spec, signal)))
+  }
+
   dispatch(request: WorkDispatchRequest, signal?: AbortSignal): Promise<WorkView> {
     return workResult(async () => projectWork(await this.controller.dispatch(request, signal)))
   }
@@ -129,7 +136,7 @@ export class WorkRemoteController extends TypertRemoteService {
   }
 }
 
-type RemoteMethodName = 'create' | 'dispatch' | 'list' | 'follow'
+type RemoteMethodName = 'create' | 'importConversation' | 'dispatch' | 'list' | 'follow'
 type RemoteMethod = (this: WorkRemoteController, ...args: unknown[]) => unknown
 type RemoteDecorator = (
   method: RemoteMethod,
@@ -155,6 +162,7 @@ function installRemoteMarker(name: RemoteMethodName, decorator: RemoteDecorator)
 }
 
 installRemoteMarker('create', Remote as RemoteDecorator)
+installRemoteMarker('importConversation', Remote as RemoteDecorator)
 installRemoteMarker('dispatch', Remote as RemoteDecorator)
 installRemoteMarker('list', Remote as RemoteDecorator)
 installRemoteMarker('follow', Remote({ mode: 'stream' }) as RemoteDecorator)

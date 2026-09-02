@@ -170,6 +170,30 @@ async function run(): Promise<void> {
       trigger: '+添加资料⌄',
       items: ['添加文件即将支持', '添加文件夹即将支持', '添加网页即将支持', '粘贴内容即将支持'],
     })
+    const importPanel = await window.webContents.executeJavaScript(`(async () => {
+      const menu = document.querySelector('.dsh-work-resource-menu')
+      if (menu instanceof HTMLDetailsElement) menu.open = false
+      const trigger = document.querySelector('.dsh-work-import-trigger')
+      if (!(trigger instanceof HTMLButtonElement)) return null
+      trigger.click()
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      const panel = document.querySelector('.dsh-work-import')
+      return {
+        title: panel?.querySelector('h3')?.textContent?.trim(),
+        text: panel?.textContent,
+        sourceCount: panel?.querySelectorAll('option').length,
+        hasContentInput: Boolean(panel?.querySelector('[data-work-import-content]')),
+      }
+    })()`) as {
+      title?: string
+      text?: string
+      sourceCount?: number
+      hasContentInput: boolean
+    } | null
+    assert.equal(importPanel?.title, '继续已有对话')
+    assert.match(importPanel?.text ?? '', /原对话不会改变/u)
+    assert.equal(importPanel?.sourceCount, 3)
+    assert.equal(importPanel?.hasContentInput, true)
     await window.webContents.executeJavaScript(`new Promise(resolve => {
       requestAnimationFrame(() => requestAnimationFrame(resolve))
     })`)

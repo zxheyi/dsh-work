@@ -180,8 +180,15 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
   const work = snapshot.items[0]
   const [goal, setGoal] = useState('')
   const [creating, setCreating] = useState(false)
+  const [showImport, setShowImport] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importTitle, setImportTitle] = useState('')
+  const [importContent, setImportContent] = useState('')
+  const [importSource, setImportSource] = useState<'dsh' | 'dsh-desktop' | 'other'>('dsh-desktop')
   const [actionError, setActionError] = useState<string | null>(null)
-  const canSubmit = goal.trim().length > 0 && !creating
+  const busy = creating || importing
+  const canSubmit = goal.trim().length > 0 && !busy
+  const canImport = importContent.trim().length > 0 && importContent.length <= 100_000 && !busy
   const composerTitle = work ? '接下来想推进什么？' : '你想完成什么？'
   const composerHint = work
     ? '补充要求，继续推进同一项工作。'
@@ -208,6 +215,28 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
       setCreating(false)
     }
   }, [creating, goal, work, works])
+
+  const importConversation = useCallback(async () => {
+    const content = importContent.trim()
+    if (!content || content.length > 100_000 || busy || work) return
+    const title = importTitle.trim() || titleFromGoal(content)
+    setImporting(true)
+    setActionError(null)
+    try {
+      await works.importConversation({
+        title,
+        goal: goal.trim() || `延续“${title}”中的对话，形成可以审核和交付的成果。`,
+        source: { sourceSystem: importSource, content },
+      })
+      setImportContent('')
+      setImportTitle('')
+      setShowImport(false)
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '已有对话暂时无法导入，请稍后重试。')
+    } finally {
+      setImporting(false)
+    }
+  }, [busy, goal, importContent, importSource, importTitle, work, works])
 
   const onSubmit = useCallback((event: FormEvent) => {
     event.preventDefault()
@@ -241,7 +270,7 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
             id: 'dsh-work-goal',
             'data-work-goal': true,
             value: goal,
-            disabled: creating,
+            disabled: busy,
             placeholder: work
               ? '例如：把结论压缩成一页管理层摘要，并补充下一步建议。'
               : '描述目标，或将文件和文件夹拖到这里（即将支持）',
@@ -253,8 +282,64 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
             : snapshot.state === 'error'
               ? h('p', { className: 'dsh-work-inline-error', role: 'status' }, '连接正在恢复，已有工作不会丢失。')
               : null,
+          showImport && !work
+            ? h('section', { className: 'dsh-work-import', 'aria-labelledby': 'dsh-work-import-title' },
+              h('div', { className: 'dsh-work-import-heading' },
+                h('div', null,
+                  h('h3', { id: 'dsh-work-import-title' }, '继续已有对话'),
+                  h('p', null, '粘贴导出的可读内容，系统会复制上下文并创建新工作；原对话不会改变。')),
+                h('button', {
+                  type: 'button',
+                  className: 'dsh-work-import-close',
+                  disabled: importing,
+                  'aria-label': '关闭继续已有对话',
+                  onClick: () => setShowImport(false),
+                }, '×')),
+              h('div', { className: 'dsh-work-import-fields' },
+                h('label', null, h('span', null, '来源'), h('select', {
+                  value: importSource,
+                  disabled: importing,
+                  onChange: (event: { currentTarget: { value: 'dsh' | 'dsh-desktop' | 'other' } }) =>
+                    setImportSource(event.currentTarget.value),
+                },
+                h('option', { value: 'dsh-desktop' }, 'DSH Desktop'),
+                h('option', { value: 'dsh' }, 'DSH Web / CLI'),
+                h('option', { value: 'other' }, '其他来源'))),
+                h('label', null, h('span', null, '新工作名称（可选）'), h('input', {
+                  value: importTitle,
+                  maxLength: 200,
+                  disabled: importing,
+                  placeholder: '未填写时根据内容生成',
+                  onChange: (event: { currentTarget: { value: string } }) => setImportTitle(event.currentTarget.value),
+                }))),
+              h('label', { className: 'dsh-work-import-content' },
+                h('span', null, '已有对话内容'),
+                h('textarea', {
+                  'data-work-import-content': true,
+                  value: importContent,
+                  maxLength: 100_000,
+                  disabled: importing,
+                  placeholder: '粘贴从 DSH Desktop、DSH Web 或 CLI 导出的可读对话内容',
+                  onChange: (event: { currentTarget: { value: string } }) => setImportContent(event.currentTarget.value),
+                })),
+              h('div', { className: 'dsh-work-import-actions' },
+                h('small', null, `${importContent.length.toLocaleString()} / 100,000`),
+                h('button', {
+                  type: 'button',
+                  className: 'dsh-work-import-submit',
+                  disabled: !canImport,
+                  onClick: () => { void importConversation() },
+                }, importing ? '正在导入' : '创建新工作并继续')))
+            : null,
           h('div', { className: 'dsh-work-composer-actions' },
-            h(ResourceEntry),
+            h('div', { className: 'dsh-work-secondary-actions' },
+              h(ResourceEntry),
+              !work ? h('button', {
+                className: 'dsh-work-import-trigger',
+                type: 'button',
+                disabled: busy,
+                onClick: () => setShowImport(value => !value),
+              }, '继续已有对话') : null),
             h('button', {
               className: 'dsh-work-primary',
               type: 'submit',
@@ -267,7 +352,7 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
               className: 'dsh-work-shortcut',
               type: 'button',
               key: shortcut.key,
-              disabled: creating,
+              disabled: busy,
               onClick: () => {
                 setGoal(shortcut.goal)
                 requestAnimationFrame(focusGoal)
@@ -362,7 +447,25 @@ body[data-ds-dark-theme] {
 .dsh-work-composer textarea:focus { border-color: var(--work-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--work-accent) 22%, transparent); }
 .dsh-work-composer textarea:disabled { opacity: .72; }
 .dsh-work-inline-error { margin: 8px 0 -4px; color: var(--work-danger); font-size: 12px; line-height: 18px; }
+.dsh-work-import { margin-top: 16px; padding: 16px; border: 1px solid var(--work-border); border-radius: 10px; background: var(--work-surface-subtle); }
+.dsh-work-import-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.dsh-work-import-heading h3 { margin: 0; font-size: 15px; line-height: 22px; font-weight: 650; }
+.dsh-work-import-heading p { margin: 3px 0 0; color: var(--work-muted); font-size: 12px; line-height: 18px; }
+.dsh-work-import-close { width: 28px; height: 28px; flex: none; border: 0; border-radius: 7px; color: var(--work-muted); background: transparent; cursor: pointer; font: 400 20px/24px var(--work-font); }
+.dsh-work-import-close:hover { color: var(--work-text); background: var(--work-border); }
+.dsh-work-import-fields { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 12px; margin-top: 14px; }
+.dsh-work-import label { display: grid; gap: 6px; color: var(--work-muted); font-size: 12px; line-height: 18px; }
+.dsh-work-import input, .dsh-work-import select { width: 100%; height: 38px; padding: 0 10px; border: 1px solid var(--work-border-strong); border-radius: 8px; outline: none; color: var(--work-text); background: var(--work-surface); font: 400 13px/18px var(--work-font); }
+.dsh-work-import input:focus, .dsh-work-import select:focus { border-color: var(--work-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--work-accent) 22%, transparent); }
+.dsh-work-import-content { margin-top: 12px; }
+.dsh-work-composer .dsh-work-import-content textarea { height: 104px; background: var(--work-surface); font-size: 13px; line-height: 20px; }
+.dsh-work-import-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+.dsh-work-import-actions small { color: var(--work-faint); font-size: 11px; line-height: 16px; }
+.dsh-work-import-submit { min-width: 150px; height: 36px; padding: 0 14px; border: 0; border-radius: 9px; color: white; background: var(--work-accent); cursor: pointer; font: 600 13px/18px var(--work-font); }
+.dsh-work-import-submit:hover:not(:disabled) { background: var(--work-accent-hover); }
+.dsh-work-import-submit:disabled { opacity: .42; cursor: default; }
 .dsh-work-composer-actions { min-height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; }
+.dsh-work-secondary-actions { min-width: 0; display: flex; align-items: center; gap: 12px; }
 .dsh-work-resource-entry { min-width: 0; display: flex; align-items: center; gap: 12px; }
 .dsh-work-resource-menu { position: relative; flex: none; }
 .dsh-work-resource-trigger { min-width: 104px; height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border: 1px solid var(--work-border); border-radius: 9px; color: var(--work-muted); background: var(--work-surface); cursor: pointer; list-style: none; user-select: none; font: 550 13px/18px var(--work-font); }
@@ -378,6 +481,9 @@ body[data-ds-dark-theme] {
 .dsh-work-resource-item:hover { background: var(--work-surface-subtle); }
 .dsh-work-resource-item span { color: var(--work-faint); font: 400 11px/16px var(--work-font); }
 .dsh-work-resource-help { min-width: 0; overflow: hidden; color: var(--work-faint); font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-work-import-trigger { height: 36px; padding: 0 12px; border: 0; border-left: 1px solid var(--work-border); color: var(--work-accent); background: transparent; cursor: pointer; white-space: nowrap; font: 550 13px/18px var(--work-font); }
+.dsh-work-import-trigger:hover:not(:disabled) { color: var(--work-accent-hover); }
+.dsh-work-import-trigger:disabled { opacity: .42; cursor: default; }
 .dsh-work-primary { min-width: 112px; height: 40px; padding: 0 18px; border: 0; border-radius: 10px; color: white; background: var(--work-accent); cursor: pointer; white-space: nowrap; font: 600 14px/20px var(--work-font); }
 .dsh-work-primary:hover:not(:disabled) { background: var(--work-accent-hover); }
 .dsh-work-primary:disabled { opacity: .42; cursor: default; }
@@ -431,6 +537,10 @@ body[data-ds-dark-theme] {
   .dsh-work-home-content, .dsh-work-home-loading { width: calc(100% - 48px); padding-top: 24px; }
   .dsh-work-composer { padding: 20px; }
   .dsh-work-composer-actions { align-items: stretch; flex-direction: column; }
+  .dsh-work-secondary-actions { align-items: flex-start; flex-direction: column; }
+  .dsh-work-import-fields { grid-template-columns: 1fr; }
+  .dsh-work-import-actions { align-items: stretch; flex-direction: column; }
+  .dsh-work-import-submit { width: 100%; }
   .dsh-work-resource-entry { flex-wrap: wrap; }
   .dsh-work-resource-popover { width: min(240px, calc(100vw - 48px)); }
   .dsh-work-primary { width: 100%; }
