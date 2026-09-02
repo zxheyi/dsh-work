@@ -57,6 +57,10 @@ test('mounts a storageDomain-backed WorkController as a Host service', async () 
   assert.deepEqual(inject, ['dshHomePath', 'storageDomain', 'workspaceRegistry', 'sessionController'])
   assert.equal(workDomainSpec.global.schema.safeParse(state).success, true)
   assert.equal(state.work?.workId, created.workId)
+  const legacyWork = structuredClone(state.work!) as unknown as Record<string, unknown>
+  delete legacyWork.resources
+  const restoredLegacy = workDomainSpec.global.schema.parse({ work: legacyWork })
+  assert.deepEqual(restoredLegacy.work?.resources, [])
   await dispose!()
   assert.equal(closed, true)
   await fs.rm(home, { recursive: true, force: true })

@@ -24,6 +24,7 @@ function view(revision: number, status: WorkView['status'] = 'working'): WorkVie
     title: 'Client Work',
     goal: 'Keep one product projection.',
     turnCount: revision - 1,
+    resources: [],
     deliverable: null,
     status,
     execution: 'idle',

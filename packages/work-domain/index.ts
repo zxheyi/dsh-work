@@ -11,6 +11,8 @@ export type WorkErrorCode =
   | 'work/invalid-transition'
   | 'work/mutation-conflict'
   | 'work/recovery-conflict'
+  | 'work/resource-invalid'
+  | 'work/resource-limit'
   | 'work/turn-failed'
 
 export class WorkError extends Error {
@@ -56,6 +58,7 @@ export interface WorkSnapshot {
   readonly goal: string
   readonly workspace: WorkWorkspace
   readonly primarySession: WorkPrimarySession
+  readonly resources: readonly WorkFileResource[]
   readonly deliverable: WorkFileDeliverable | null
   readonly status: WorkStatus
   readonly execution: WorkExecution
@@ -81,6 +84,16 @@ export interface WorkWorkspace {
 export interface WorkPrimarySession {
   readonly sessionId: string
   readonly turnCount: number
+}
+
+export interface WorkFileResource {
+  readonly resourceId: string
+  readonly kind: 'file'
+  readonly name: string
+  readonly path: string
+  readonly bytes: number
+  readonly mediaType: string | null
+  readonly contentDigest: string
 }
 
 export interface WorkFileDeliverable {
@@ -112,11 +125,23 @@ export interface DispatchWorkRequest {
   readonly command: WorkCommand
 }
 
-export type WorkCommand = SubmitTurnCommand | RecordFileCommand | CompleteWorkCommand | DeliverWorkCommand
+export type WorkCommand =
+  | SubmitTurnCommand
+  | AddFileResourceCommand
+  | RecordFileCommand
+  | CompleteWorkCommand
+  | DeliverWorkCommand
 
 export interface SubmitTurnCommand {
   readonly type: 'submit-turn'
   readonly instruction: string
+}
+
+export interface AddFileResourceCommand {
+  readonly type: 'add-file-resource'
+  readonly name: string
+  readonly mediaType?: string | undefined
+  readonly dataBase64: string
 }
 
 export interface RecordFileCommand {
@@ -201,6 +226,115 @@ export interface SubmitTurnRequest {
   readonly instruction: string
 }
 
+export const MAX_WORK_FILE_RESOURCES = 20
+export const MAX_WORK_FILE_RESOURCE_BYTES = 25 * 1024 * 1024
+
+const MAX_WORK_FILE_RESOURCE_BASE64_CHARS = Math.ceil(MAX_WORK_FILE_RESOURCE_BYTES / 3) * 4
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u
+
+function resourceError(message: string, options?: ErrorOptions): WorkError {
+  return new WorkError('work/resource-invalid', message, options)
+}
+
+function decodeResource(command: AddFileResourceCommand): {
+  readonly bytes: Buffer
+  readonly contentDigest: string
+  readonly mediaType: string | null
+  readonly name: string
+  readonly resourceId: string
+} {
+  const name = command.name
+  if (
+    name.length < 1
+    || name.length > 200
+    || name.trim() !== name
+    || name === '.'
+    || name === '..'
+    || path.basename(name) !== name
+    || name.includes('/')
+    || name.includes('\\')
+    || CONTROL_CHARACTER_PATTERN.test(name)
+  ) {
+    throw resourceError('The selected resource must have one safe file name.')
+  }
+  const mediaType = command.mediaType?.trim() || null
+  if (mediaType !== null && (mediaType.length > 128 || CONTROL_CHARACTER_PATTERN.test(mediaType))) {
+    throw resourceError('The selected resource has an invalid media type.')
+  }
+  if (
+    command.dataBase64.length < 1
+    || command.dataBase64.length > MAX_WORK_FILE_RESOURCE_BASE64_CHARS
+    || command.dataBase64.length % 4 !== 0
+  ) {
+    throw resourceError('The selected resource bytes are not canonical base64.')
+  }
+  const bytes = Buffer.from(command.dataBase64, 'base64')
+  if (bytes.length < 1 || bytes.length > MAX_WORK_FILE_RESOURCE_BYTES) {
+    throw resourceError('The selected resource must contain at most 25 MiB.')
+  }
+  if (bytes.toString('base64') !== command.dataBase64) {
+    throw resourceError('The selected resource bytes are not canonical base64.')
+  }
+  const contentDigest = createHash('sha256').update(bytes).digest('hex')
+  const resourceId = createHash('sha256')
+    .update(contentDigest)
+    .update('\0')
+    .update(name)
+    .digest('hex')
+  return Object.freeze({ bytes, contentDigest, mediaType, name, resourceId })
+}
+
+async function ensurePlainDirectory(directory: string): Promise<void> {
+  try {
+    await fs.mkdir(directory)
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) {
+      throw resourceError('The managed resource directory could not be created.', { cause: error })
+    }
+  }
+  const stat = await fs.lstat(directory)
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw resourceError('The managed resource directory is not a plain directory.')
+  }
+}
+
+async function persistResource(
+  workspace: WorkWorkspace,
+  decoded: ReturnType<typeof decodeResource>,
+): Promise<WorkFileResource> {
+  const workspacePath = await fs.realpath(workspace.path)
+  const resourcesPath = path.join(workspacePath, 'resources')
+  const resourceDirectory = path.join(resourcesPath, decoded.resourceId.slice(0, 32))
+  await ensurePlainDirectory(resourcesPath)
+  await ensurePlainDirectory(resourceDirectory)
+  const target = path.join(resourceDirectory, decoded.name)
+  try {
+    await fs.writeFile(target, decoded.bytes, { flag: 'wx', mode: 0o600 })
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) {
+      throw resourceError('The selected resource could not be written.', { cause: error })
+    }
+    const existing = await fs.readFile(target)
+    if (createHash('sha256').update(existing).digest('hex') !== decoded.contentDigest) {
+      throw resourceError('The managed resource path already contains different bytes.')
+    }
+  }
+  const resolved = await fs.realpath(target)
+  const relative = path.relative(workspacePath, resolved)
+  if (relative.startsWith(`..${path.sep}`) || relative === '..' || path.isAbsolute(relative)) {
+    throw resourceError('The selected resource resolved outside the managed Workspace.')
+  }
+  return Object.freeze({
+    resourceId: decoded.resourceId,
+    kind: 'file',
+    name: decoded.name,
+    path: relative.split(path.sep).join(path.posix.sep),
+    bytes: decoded.bytes.length,
+    mediaType: decoded.mediaType,
+    contentDigest: decoded.contentDigest,
+  })
+}
+
 export interface HarnessWorkContext {
   readonly workspaceRegistry: {
     create(path: string, title?: string): Promise<{ readonly id: string; readonly path: string }>
@@ -263,6 +397,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
     ...snapshot,
     workspace: Object.freeze({ ...snapshot.workspace }),
     primarySession: Object.freeze({ ...snapshot.primarySession }),
+    resources: Object.freeze(snapshot.resources.map(resource => Object.freeze({ ...resource }))),
     deliverable: snapshot.deliverable ? Object.freeze({ ...snapshot.deliverable }) : null,
     lastFailure: snapshot.lastFailure ? Object.freeze({ ...snapshot.lastFailure }) : null,
     importSource: snapshot.importSource ? Object.freeze({ ...snapshot.importSource }) : null,
@@ -336,6 +471,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
           goal,
           workspace,
           primarySession,
+          resources: Object.freeze([]),
           deliverable: null,
           status: 'working',
           execution: 'idle',
@@ -393,6 +529,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
             sessionId: ensuredSession.sessionId,
             turnCount: 0,
           }),
+          resources: Object.freeze([]),
           deliverable: null,
           status: 'working',
           execution: 'idle',
@@ -542,6 +679,21 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
           }),
           execution: 'idle',
           lastFailure: null,
+        }))
+      } else if (request.command.type === 'add-file-resource') {
+        if (work.status !== 'working') {
+          throw new WorkError('work/invalid-transition', 'Resources can only be added while Work is active.')
+        }
+        const decoded = decodeResource(request.command)
+        const existing = work.resources.find(resource => resource.resourceId === decoded.resourceId)
+        if (existing) return commit(mutated({ ...work }))
+        if (work.resources.length >= MAX_WORK_FILE_RESOURCES) {
+          throw new WorkError('work/resource-limit', 'A Work can contain at most 20 file resources.')
+        }
+        const resource = await persistResource(work.workspace, decoded)
+        return commit(mutated({
+          ...work,
+          resources: Object.freeze([...work.resources, resource]),
         }))
       } else if (request.command.type === 'record-file') {
         if (work.deliverable) {

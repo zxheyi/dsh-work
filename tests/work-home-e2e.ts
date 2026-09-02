@@ -168,8 +168,21 @@ async function run(): Promise<void> {
     assert.deepEqual(resourceMenu, {
       open: true,
       trigger: '+添加资料⌄',
-      items: ['添加文件即将支持', '添加文件夹即将支持', '添加网页即将支持', '粘贴内容即将支持'],
+      items: ['添加文件还可添加 20 个', '添加文件夹即将支持', '添加网页即将支持', '粘贴内容即将支持'],
     })
+    const stagedFile = await window.webContents.executeJavaScript(`(async () => {
+      const input = document.querySelector('.dsh-work-file-input')
+      if (!(input instanceof HTMLInputElement)) return null
+      const transfer = new DataTransfer()
+      transfer.items.add(new File(['Launch brief'], 'launch brief.txt', { type: 'text/plain' }))
+      input.files = transfer.files
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      const chip = document.querySelector('[data-work-pending-resource]')
+      return { name: chip?.getAttribute('data-work-pending-resource'), text: chip?.textContent }
+    })()`) as { name?: string; text?: string } | null
+    assert.equal(stagedFile?.name, 'launch brief.txt')
+    assert.match(stagedFile?.text ?? '', /待添加/u)
     const importPanel = await window.webContents.executeJavaScript(`(async () => {
       const menu = document.querySelector('.dsh-work-resource-menu')
       if (menu instanceof HTMLDetailsElement) menu.open = false

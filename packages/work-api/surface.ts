@@ -2,6 +2,7 @@ import {
   createElement,
   useCallback,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
   type FormEvent,
@@ -25,6 +26,8 @@ interface WorkSidebarProps extends WorkSurfaceInjected {
 }
 
 const h = createElement
+const MAX_RESOURCE_FILES = 20
+const MAX_RESOURCE_FILE_BYTES = 25 * 1024 * 1024
 
 const shortcuts = Object.freeze([
   Object.freeze({
@@ -140,8 +143,27 @@ function DisabledResourceItem({ children }: { readonly children: ReactNode }): R
   }, children, h('span', null, '即将支持'))
 }
 
-function ResourceEntry(): ReactNode {
+interface ResourceEntryProps {
+  readonly disabled: boolean
+  readonly onFiles: (files: readonly File[]) => void
+  readonly remaining: number
+}
+
+function ResourceEntry({ disabled, onFiles, remaining }: ResourceEntryProps): ReactNode {
+  const input = useRef<HTMLInputElement>(null)
   return h('div', { className: 'dsh-work-resource-entry' },
+    h('input', {
+      ref: input,
+      className: 'dsh-work-file-input',
+      type: 'file',
+      multiple: true,
+      disabled: disabled || remaining < 1,
+      onChange: (event: { currentTarget: HTMLInputElement }) => {
+        const files = Array.from(event.currentTarget.files ?? [])
+        event.currentTarget.value = ''
+        if (files.length > 0) onFiles(files)
+      },
+    }),
     h('details', { className: 'dsh-work-resource-menu' },
       h('summary', {
         className: 'dsh-work-resource-trigger',
@@ -151,11 +173,38 @@ function ResourceEntry(): ReactNode {
       h('span', null, '添加资料'),
       h('span', { className: 'dsh-work-resource-chevron', 'aria-hidden': 'true' }, '⌄')),
       h('div', { className: 'dsh-work-resource-popover', role: 'menu', 'aria-label': '添加资料方式' },
-        h(DisabledResourceItem, null, '添加文件'),
+        h('button', {
+          className: 'dsh-work-resource-item',
+          type: 'button',
+          disabled: disabled || remaining < 1,
+          onClick: (event: { currentTarget: HTMLButtonElement }) => {
+            const details = event.currentTarget.closest('details')
+            if (details instanceof HTMLDetailsElement) details.open = false
+            input.current?.click()
+          },
+        }, '添加文件', h('span', null, remaining > 0 ? `还可添加 ${remaining} 个` : '已达上限')),
         h(DisabledResourceItem, null, '添加文件夹'),
         h(DisabledResourceItem, null, '添加网页'),
         h(DisabledResourceItem, null, '粘贴内容'))),
-    h('span', { className: 'dsh-work-resource-help' }, '可选，文件和文件夹即将支持'))
+    h('span', { className: 'dsh-work-resource-help' }, '单个文件不能超过 25 MiB'))
+}
+
+async function fileBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  let binary = ''
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+  }
+  return btoa(binary)
+}
+
+function instructionWithResources(instruction: string, work: WorkView): string {
+  if (work.resources.length === 0) return instruction
+  return [
+    instruction,
+    '用户为这项 Work 主动添加了以下资料。请先用文件读取工具检查它们，再基于内容推进：',
+    ...work.resources.map(resource => `- @"${resource.path.replaceAll('"', '\\"')}"`),
+  ].join('\n\n')
 }
 
 function WorkRow({ work }: { readonly work: WorkView }): ReactNode {
@@ -185,8 +234,11 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
   const [importTitle, setImportTitle] = useState('')
   const [importContent, setImportContent] = useState('')
   const [importSource, setImportSource] = useState<'dsh' | 'dsh-desktop' | 'other'>('dsh-desktop')
+  const [pendingFiles, setPendingFiles] = useState<readonly File[]>([])
   const [actionError, setActionError] = useState<string | null>(null)
   const busy = creating || importing
+  const resourceCount = (work?.resources.length ?? 0) + pendingFiles.length
+  const resourceRemaining = Math.max(0, MAX_RESOURCE_FILES - resourceCount)
   const canSubmit = goal.trim().length > 0 && !busy
   const canImport = importContent.trim().length > 0 && importContent.length <= 100_000 && !busy
   const composerTitle = work ? '接下来想推进什么？' : '你想完成什么？'
@@ -194,27 +246,64 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
     ? '补充要求，继续推进同一项工作。'
     : '描述想要的结果，资料可以稍后添加。'
 
+  const addFiles = useCallback((files: readonly File[]) => {
+    setActionError(null)
+    const accepted: File[] = []
+    const known = new Set(pendingFiles.map(file => `${file.name}\0${file.size}\0${file.lastModified}`))
+    for (const file of files) {
+      if (accepted.length >= resourceRemaining) {
+        setActionError(`每项工作最多添加 ${MAX_RESOURCE_FILES} 个文件。`)
+        break
+      }
+      if (file.size < 1 || file.size > MAX_RESOURCE_FILE_BYTES) {
+        setActionError(`“${file.name}”为空或超过 25 MiB，未添加。`)
+        continue
+      }
+      if (file.name.length > 200 || file.name === '.' || file.name === '..' || /[\\/\u0000-\u001f\u007f]/u.test(file.name)) {
+        setActionError(`“${file.name}”的文件名不可用，未添加。`)
+        continue
+      }
+      const key = `${file.name}\0${file.size}\0${file.lastModified}`
+      if (known.has(key)) continue
+      known.add(key)
+      accepted.push(file)
+    }
+    if (accepted.length > 0) setPendingFiles(current => [...current, ...accepted])
+  }, [pendingFiles, resourceRemaining])
+
   const submit = useCallback(async () => {
     const instruction = goal.trim()
-    if (!instruction || creating) return
+    if (!instruction || busy) return
     setCreating(true)
     setActionError(null)
     try {
-      const target = work ?? await works.create({
+      let target = work ?? await works.create({
         title: titleFromGoal(instruction),
         goal: instruction,
       })
+      for (const file of pendingFiles) {
+        target = await works.dispatch({
+          workId: target.workId,
+          command: {
+            type: 'add-file-resource',
+            name: file.name,
+            ...(file.type ? { mediaType: file.type } : {}),
+            dataBase64: await fileBase64(file),
+          },
+        })
+      }
       await works.dispatch({
         workId: target.workId,
-        command: { type: 'submit-turn', instruction },
+        command: { type: 'submit-turn', instruction: instructionWithResources(instruction, target) },
       })
       setGoal('')
+      setPendingFiles([])
     } catch (error) {
       setActionError(error instanceof Error ? error.message : '工作暂时无法开始，请稍后重试。')
     } finally {
       setCreating(false)
     }
-  }, [creating, goal, work, works])
+  }, [busy, goal, pendingFiles, work, works])
 
   const importConversation = useCallback(async () => {
     const content = importContent.trim()
@@ -273,10 +362,30 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
             disabled: busy,
             placeholder: work
               ? '例如：把结论压缩成一页管理层摘要，并补充下一步建议。'
-              : '描述目标，或将文件和文件夹拖到这里（即将支持）',
+              : '描述你想完成的结果；需要时可在下方添加文件。',
             onChange: (event: { currentTarget: { value: string } }) => setGoal(event.currentTarget.value),
             onKeyDown,
           }),
+          work?.resources.length || pendingFiles.length
+            ? h('div', { className: 'dsh-work-resource-chips', 'aria-label': '已选资料' },
+              ...(work?.resources ?? []).map(resource => h('span', {
+                className: 'dsh-work-resource-chip',
+                key: resource.resourceId,
+                'data-work-resource': resource.path,
+                title: resource.path,
+              }, h('span', { 'aria-hidden': 'true' }, '文'), resource.name, h('small', null, '已添加'))),
+              ...pendingFiles.map(file => h('span', {
+                className: 'dsh-work-resource-chip is-pending',
+                key: `${file.name}-${file.size}-${file.lastModified}`,
+                'data-work-pending-resource': file.name,
+                title: file.name,
+              }, h('span', { 'aria-hidden': 'true' }, '文'), file.name, h('small', null, '待添加'), h('button', {
+                type: 'button',
+                disabled: busy,
+                'aria-label': `移除 ${file.name}`,
+                onClick: () => setPendingFiles(current => current.filter(item => item !== file)),
+              }, '×'))))
+            : null,
           actionError
             ? h('p', { className: 'dsh-work-inline-error', role: 'alert' }, actionError)
             : snapshot.state === 'error'
@@ -333,7 +442,7 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
             : null,
           h('div', { className: 'dsh-work-composer-actions' },
             h('div', { className: 'dsh-work-secondary-actions' },
-              h(ResourceEntry),
+              h(ResourceEntry, { disabled: busy, onFiles: addFiles, remaining: resourceRemaining }),
               !work ? h('button', {
                 className: 'dsh-work-import-trigger',
                 type: 'button',
@@ -446,6 +555,13 @@ body[data-ds-dark-theme] {
 .dsh-work-composer textarea::placeholder { color: var(--work-faint); }
 .dsh-work-composer textarea:focus { border-color: var(--work-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--work-accent) 22%, transparent); }
 .dsh-work-composer textarea:disabled { opacity: .72; }
+.dsh-work-resource-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.dsh-work-resource-chip { min-width: 0; max-width: 100%; height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid var(--work-border); border-radius: 8px; color: var(--work-text); background: var(--work-surface-subtle); font-size: 12px; line-height: 18px; }
+.dsh-work-resource-chip > span { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; flex: none; border-radius: 5px; color: var(--work-accent); background: var(--work-accent-subtle); font-size: 10px; font-weight: 700; }
+.dsh-work-resource-chip small { overflow: hidden; color: var(--work-faint); text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.dsh-work-resource-chip.is-pending { border-color: color-mix(in srgb, var(--work-accent) 28%, var(--work-border)); }
+.dsh-work-resource-chip button { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 5px; color: var(--work-muted); background: transparent; cursor: pointer; font: 400 16px/18px var(--work-font); }
+.dsh-work-resource-chip button:hover:not(:disabled) { color: var(--work-text); background: var(--work-border); }
 .dsh-work-inline-error { margin: 8px 0 -4px; color: var(--work-danger); font-size: 12px; line-height: 18px; }
 .dsh-work-import { margin-top: 16px; padding: 16px; border: 1px solid var(--work-border); border-radius: 10px; background: var(--work-surface-subtle); }
 .dsh-work-import-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
@@ -467,6 +583,7 @@ body[data-ds-dark-theme] {
 .dsh-work-composer-actions { min-height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; }
 .dsh-work-secondary-actions { min-width: 0; display: flex; align-items: center; gap: 12px; }
 .dsh-work-resource-entry { min-width: 0; display: flex; align-items: center; gap: 12px; }
+.dsh-work-file-input { position: fixed; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); opacity: 0; pointer-events: none; }
 .dsh-work-resource-menu { position: relative; flex: none; }
 .dsh-work-resource-trigger { min-width: 104px; height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border: 1px solid var(--work-border); border-radius: 9px; color: var(--work-muted); background: var(--work-surface); cursor: pointer; list-style: none; user-select: none; font: 550 13px/18px var(--work-font); }
 .dsh-work-resource-trigger::-webkit-details-marker { display: none; }
@@ -476,7 +593,7 @@ body[data-ds-dark-theme] {
 .dsh-work-resource-menu[open] .dsh-work-resource-trigger { color: var(--work-text); border-color: var(--work-border-strong); background: var(--work-surface-subtle); }
 .dsh-work-resource-menu[open] .dsh-work-resource-chevron { transform: rotate(180deg); }
 .dsh-work-resource-popover { position: absolute; z-index: 10; bottom: calc(100% + 8px); left: 0; width: 240px; display: grid; padding: 6px; border: 1px solid var(--work-border); border-radius: 10px; background: var(--work-surface); box-shadow: 0 14px 32px rgba(35, 50, 76, .14); }
-.dsh-work-resource-item { width: 100%; height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 10px; border: 0; border-radius: 7px; color: var(--work-text); background: transparent; text-align: left; font: 550 13px/20px var(--work-font); }
+.dsh-work-resource-item { width: 100%; height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 10px; border: 0; border-radius: 7px; color: var(--work-text); background: transparent; text-align: left; cursor: pointer; font: 550 13px/20px var(--work-font); }
 .dsh-work-resource-item:disabled { opacity: 1; cursor: default; }
 .dsh-work-resource-item:hover { background: var(--work-surface-subtle); }
 .dsh-work-resource-item span { color: var(--work-faint); font: 400 11px/16px var(--work-font); }

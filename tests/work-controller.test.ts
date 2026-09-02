@@ -50,6 +50,7 @@ test('creates the only Work and returns it through the public controller', async
       sessionId: 'session-1',
       turnCount: 0,
     },
+    resources: [],
     deliverable: null,
     status: 'working',
     execution: 'idle',
@@ -394,6 +395,74 @@ test('dispatches multiple Turns through the same Primary Session', async () => {
   ])
   assert.deepEqual(updated.primarySession, { sessionId: 'session-turns', turnCount: 2 })
   assert.equal(updated.revision, 3)
+})
+
+test('imports selected file bytes into the managed Workspace as a Work resource', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-resource-'))
+  const controller = createWorkController({
+    createId: () => 'work-resource',
+    createSessionId: () => 'session-resource',
+    workspaceRoot,
+    harness: testHarness(),
+  })
+  const created = await controller.create({ title: 'Resource', goal: 'Use the selected brief.' })
+  await fs.mkdir(created.workspace.path, { recursive: true })
+
+  const updated = await controller.dispatch({
+    workId: created.workId,
+    command: {
+      type: 'add-file-resource',
+      name: 'launch brief.txt',
+      mediaType: 'text/plain',
+      dataBase64: Buffer.from('trusted launch facts\n').toString('base64'),
+    },
+  })
+
+  assert.deepEqual(updated.resources, [{
+    resourceId: 'cd53702d2de9122ad190868a5ef52b22ca85f5eb67f06dc483c2c21958e92686',
+    kind: 'file',
+    name: 'launch brief.txt',
+    path: 'resources/cd53702d2de9122ad190868a5ef52b22/launch brief.txt',
+    bytes: 21,
+    mediaType: 'text/plain',
+    contentDigest: 'f03ff5595dc46c98228725abb9339077faaa993f5acdb365dd0bf81a7b9b932c',
+  }])
+  assert.equal(
+    await fs.readFile(path.join(created.workspace.path, updated.resources[0]!.path), 'utf8'),
+    'trusted launch facts\n',
+  )
+  assert.equal(updated.primarySession.turnCount, 0)
+  assert.equal(updated.status, 'working')
+  await fs.rm(workspaceRoot, { recursive: true, force: true })
+})
+
+test('rejects unsafe file resource names, malformed base64, and oversized bytes before writing', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-resource-invalid-'))
+  const controller = createWorkController({
+    createId: () => 'work-resource-invalid',
+    createSessionId: () => 'session-resource-invalid',
+    workspaceRoot,
+    harness: testHarness(),
+  })
+  const created = await controller.create({ title: 'Invalid resource', goal: 'Reject unsafe bytes.' })
+  await fs.mkdir(created.workspace.path, { recursive: true })
+  const invalidCommands = [
+    { type: 'add-file-resource' as const, name: '../outside.txt', dataBase64: 'dGVzdA==' },
+    { type: 'add-file-resource' as const, name: 'bad.txt', dataBase64: 'not base64!' },
+    {
+      type: 'add-file-resource' as const,
+      name: 'too-large.bin',
+      dataBase64: Buffer.alloc(25 * 1024 * 1024 + 1).toString('base64'),
+    },
+  ]
+
+  for (const command of invalidCommands) {
+    await assert.rejects(controller.dispatch({ workId: created.workId, command }),
+      (error: unknown) => error instanceof WorkError && error.code === 'work/resource-invalid')
+  }
+  assert.deepEqual((await controller.get())?.resources, [])
+  await assert.rejects(fs.stat(path.join(created.workspace.path, 'resources')), { code: 'ENOENT' })
+  await fs.rm(workspaceRoot, { recursive: true, force: true })
 })
 
 test('records one existing file inside the managed Workspace as the deliverable', async () => {

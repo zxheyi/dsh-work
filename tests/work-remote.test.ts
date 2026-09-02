@@ -76,6 +76,27 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
   }))
   assert.deepEqual(codec.schema.parse({
     workId: 'work-1',
+    mutationId: 'mutation-resource',
+    expectedRevision: 2,
+    command: {
+      type: 'add-file-resource',
+      name: 'brief.txt',
+      mediaType: 'text/plain',
+      dataBase64: 'YnJpZWY=',
+    },
+  }), {
+    workId: 'work-1',
+    mutationId: 'mutation-resource',
+    expectedRevision: 2,
+    command: {
+      type: 'add-file-resource',
+      name: 'brief.txt',
+      mediaType: 'text/plain',
+      dataBase64: 'YnJpZWY=',
+    },
+  })
+  assert.deepEqual(codec.schema.parse({
+    workId: 'work-1',
     mutationId: 'mutation-1',
     expectedRevision: 2,
     command: { type: 'deliver' },
@@ -141,6 +162,7 @@ test('projects Work state without exposing Harness Workspace or Session internal
     title: 'Remote Work',
     goal: 'Expose only product-owned state.',
     turnCount: 0,
+    resources: [],
     deliverable: null,
     status: 'working',
     execution: 'idle',

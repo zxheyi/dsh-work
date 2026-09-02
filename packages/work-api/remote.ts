@@ -15,12 +15,22 @@ const deliverableSchema = z.object({
   path: z.string().min(1),
 }).strict()
 const failureSchema = z.object({ message: z.string().min(1) }).strict()
+const resourceSchema = z.object({
+  resourceId: z.string().regex(/^[a-f0-9]{64}$/u),
+  kind: z.literal('file'),
+  name: z.string().min(1).max(200),
+  path: z.string().min(1),
+  bytes: z.number().int().positive().max(25 * 1024 * 1024),
+  mediaType: z.string().min(1).max(128).nullable(),
+  contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+}).strict()
 const workViewSchema: z.ZodType<WorkView> = z.object({
   workId: z.string().min(1),
   revision: z.number().int().positive(),
   title: z.string(),
   goal: z.string(),
   turnCount: z.number().int().nonnegative(),
+  resources: z.array(resourceSchema).max(20),
   deliverable: deliverableSchema.nullable(),
   status: z.enum(['working', 'awaiting-review', 'completed', 'delivered']),
   execution: z.enum(['idle', 'failed']),
@@ -42,6 +52,12 @@ const importConversationSchema = z.object({
 }).strict()
 const commandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('submit-turn'), instruction: z.string() }).strict(),
+  z.object({
+    type: z.literal('add-file-resource'),
+    name: z.string().min(1).max(200),
+    mediaType: z.string().min(1).max(128).optional(),
+    dataBase64: z.string().min(1).max(Math.ceil((25 * 1024 * 1024) / 3) * 4),
+  }).strict(),
   z.object({ type: z.literal('record-file'), path: z.string() }).strict(),
   z.object({ type: z.literal('complete') }).strict(),
   z.object({ type: z.literal('deliver') }).strict(),

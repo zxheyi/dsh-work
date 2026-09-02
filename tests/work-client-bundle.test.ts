@@ -50,6 +50,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
       createElement() {},
       useCallback(value: unknown) { return value },
       useMemo(value: () => unknown) { return value() },
+      useRef(value: unknown) { return { current: value } },
       useState(value: unknown) { return [value, () => {}] },
       useSyncExternalStore(_subscribe: unknown, getSnapshot: () => unknown) { return getSnapshot() },
     }
@@ -109,8 +110,10 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   ])
   assert.match(source, /你想完成什么？/)
   assert.match(source, /添加资料/)
+  assert.match(source, /type:\s*["']file["']/)
+  assert.match(source, /单个文件不能超过 25 MiB/)
   assert.match(source, /添加文件夹/)
-  assert.match(source, /文件和文件夹即将支持/)
+  assert.equal(source.includes('添加文件即将支持'), false)
   assert.match(source, /继续已有对话/)
   assert.match(source, /原对话不会改变/)
   assert.equal(source.includes('选择 Work 目录'), false)

@@ -25,6 +25,7 @@ export interface WorkView {
   readonly title: string
   readonly goal: string
   readonly turnCount: number
+  readonly resources: WorkSnapshot['resources']
   readonly deliverable: WorkSnapshot['deliverable']
   readonly status: WorkSnapshot['status']
   readonly execution: WorkSnapshot['execution']
@@ -58,6 +59,8 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'work/invalid-transition': Record<string, never>
     'work/mutation-conflict': Record<string, never>
     'work/recovery-conflict': Record<string, never>
+    'work/resource-invalid': Record<string, never>
+    'work/resource-limit': Record<string, never>
     'work/turn-failed': Record<string, never>
   }
 }
@@ -69,6 +72,7 @@ function projectWork(work: WorkSnapshot): WorkView {
     title: work.title,
     goal: work.goal,
     turnCount: work.primarySession.turnCount,
+    resources: work.resources,
     deliverable: work.deliverable,
     status: work.status,
     execution: work.execution,

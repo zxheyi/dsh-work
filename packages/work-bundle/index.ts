@@ -18,6 +18,15 @@ const primarySessionSchema = z.object({
   sessionId: z.string().min(1),
   turnCount: z.number().int().nonnegative(),
 })
+const resourceSchema = z.object({
+  resourceId: z.string().regex(/^[a-f0-9]{64}$/u),
+  kind: z.literal('file'),
+  name: z.string().min(1).max(200),
+  path: z.string().min(1),
+  bytes: z.number().int().positive().max(25 * 1024 * 1024),
+  mediaType: z.string().min(1).max(128).nullable(),
+  contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+})
 const deliverableSchema = z.object({
   kind: z.literal('file'),
   path: z.string().min(1),
@@ -40,6 +49,7 @@ const workSnapshotSchema = z.object({
   goal: z.string(),
   workspace: workspaceSchema,
   primarySession: primarySessionSchema,
+  resources: z.array(resourceSchema).max(20).default([]),
   deliverable: deliverableSchema.nullable(),
   status: z.enum(['working', 'awaiting-review', 'completed', 'delivered']),
   execution: z.enum(['idle', 'failed']),
