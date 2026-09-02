@@ -37,6 +37,8 @@ const commandSchema = z.discriminatedUnion('type', [
 ])
 const dispatchSchema: z.ZodType<WorkDispatchRequest> = z.object({
   workId: z.string().min(1),
+  mutationId: z.string().min(1).max(128),
+  expectedRevision: z.number().int().positive(),
   command: commandSchema,
 }).strict()
 const listSchema: z.ZodType<WorkListValue> = z.object({

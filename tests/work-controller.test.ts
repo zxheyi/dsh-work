@@ -54,6 +54,8 @@ test('creates the only Work and returns it through the public controller', async
     status: 'working',
     execution: 'idle',
     lastFailure: null,
+    lastMutationId: null,
+    lastMutationDigest: null,
   })
   assert.deepEqual(await controller.get(), created)
 })
@@ -485,4 +487,99 @@ test('continues in the same Primary Session after a failed Turn dispatch', async
   assert.equal(continued.execution, 'idle')
   assert.equal(continued.lastFailure, null)
   assert.equal(continued.primarySession.turnCount, 1)
+})
+
+test('deduplicates a retried remote mutation without submitting the Turn twice', async () => {
+  const turns: string[] = []
+  const controller = createWorkController({
+    createId: () => 'work-idempotent',
+    createSessionId: () => 'session-idempotent',
+    workspaceRoot: '/managed',
+    harness: {
+      ...testHarness(),
+      async submitTurn(request) { turns.push(request.instruction) },
+    },
+  })
+  const created = await controller.create({ title: 'Retry', goal: 'Do not duplicate remote commands.' })
+  const request = {
+    workId: created.workId,
+    mutationId: 'mutation-retried',
+    expectedRevision: created.revision,
+    command: { type: 'submit-turn' as const, instruction: 'Run exactly once.' },
+  }
+
+  const first = await controller.dispatch(request)
+  const retried = await controller.dispatch(request)
+
+  assert.deepEqual(turns, ['Run exactly once.'])
+  assert.deepEqual(retried, first)
+})
+
+test('rejects a reused mutation id carrying a different command', async () => {
+  const turns: string[] = []
+  const controller = createWorkController({
+    createId: () => 'work-mutation-collision',
+    createSessionId: () => 'session-mutation-collision',
+    workspaceRoot: '/managed',
+    harness: {
+      ...testHarness(),
+      async submitTurn(request) { turns.push(request.instruction) },
+    },
+  })
+  const created = await controller.create({ title: 'Collision', goal: 'Bind idempotency to command content.' })
+  await controller.dispatch({
+    workId: created.workId,
+    mutationId: 'mutation-collision',
+    expectedRevision: created.revision,
+    command: { type: 'submit-turn', instruction: 'Original command.' },
+  })
+
+  await assert.rejects(controller.dispatch({
+    workId: created.workId,
+    mutationId: 'mutation-collision',
+    expectedRevision: created.revision,
+    command: { type: 'submit-turn', instruction: 'Different command.' },
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/mutation-conflict')
+  assert.deepEqual(turns, ['Original command.'])
+})
+
+test('serializes concurrent remote mutations and rejects the stale revision', async () => {
+  let release: (() => void) | undefined
+  const entered = new Promise<void>(resolve => { release = resolve })
+  let unblock: (() => void) | undefined
+  const blocked = new Promise<void>(resolve => { unblock = resolve })
+  const turns: string[] = []
+  const controller = createWorkController({
+    createId: () => 'work-leased',
+    createSessionId: () => 'session-leased',
+    workspaceRoot: '/managed',
+    harness: {
+      ...testHarness(),
+      async submitTurn(request) {
+        turns.push(request.instruction)
+        release?.()
+        await blocked
+      },
+    },
+  })
+  const created = await controller.create({ title: 'Lease', goal: 'Accept one concurrent mutation.' })
+  const first = controller.dispatch({
+    workId: created.workId,
+    mutationId: 'mutation-first',
+    expectedRevision: created.revision,
+    command: { type: 'submit-turn', instruction: 'First client.' },
+  })
+  await entered
+  const second = controller.dispatch({
+    workId: created.workId,
+    mutationId: 'mutation-second',
+    expectedRevision: created.revision,
+    command: { type: 'submit-turn', instruction: 'Second client.' },
+  })
+  unblock?.()
+  await first
+
+  await assert.rejects(second, (error: unknown) =>
+    error instanceof WorkError && error.code === 'work/mutation-conflict')
+  assert.deepEqual(turns, ['First client.'])
 })

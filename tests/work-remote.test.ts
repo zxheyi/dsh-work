@@ -70,6 +70,23 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
   }
   assert.throws(() => codec.schema.parse({
     workId: 'work-1',
+    command: { type: 'deliver' },
+  }))
+  assert.deepEqual(codec.schema.parse({
+    workId: 'work-1',
+    mutationId: 'mutation-1',
+    expectedRevision: 2,
+    command: { type: 'deliver' },
+  }), {
+    workId: 'work-1',
+    mutationId: 'mutation-1',
+    expectedRevision: 2,
+    command: { type: 'deliver' },
+  })
+  assert.throws(() => codec.schema.parse({
+    workId: 'work-1',
+    mutationId: 'mutation-1',
+    expectedRevision: 2,
     command: { type: 'deliver', unexpected: true },
   }))
 })

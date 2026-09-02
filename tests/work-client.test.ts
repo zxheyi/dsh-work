@@ -122,3 +122,28 @@ test('provides ctx.works commands and throws typed Remote failures', async () =>
     (error: unknown) => error === failure,
   )
 })
+
+test('adds a unique mutation id and current revision to every client dispatch', async () => {
+  const requests: WorkDispatchRequest[] = []
+  const model = new ClientWorkModel(successfulRemote({
+    async dispatch(request) {
+      requests.push(request)
+      return { ok: true, value: view(2) }
+    },
+  }))
+  model.replaceBaseline({ items: [view(1)] })
+  const ctx = new Context()
+  const works = new WorksController(ctx, model, () => 'mutation-client')
+
+  await works.dispatch({
+    workId: 'work-client',
+    command: { type: 'submit-turn', instruction: 'Continue once.' },
+  })
+
+  assert.deepEqual(requests, [{
+    workId: 'work-client',
+    mutationId: 'mutation-client',
+    expectedRevision: 1,
+    command: { type: 'submit-turn', instruction: 'Continue once.' },
+  }])
+})

@@ -37,6 +37,8 @@ const workSnapshotSchema = z.object({
   status: z.enum(['working', 'awaiting-review', 'completed', 'delivered']),
   execution: z.enum(['idle', 'failed']),
   lastFailure: failureSchema.nullable(),
+  lastMutationId: z.string().min(1).nullable().default(null),
+  lastMutationDigest: z.string().regex(/^[a-f0-9]{64}$/u).nullable().default(null),
 })
 
 export const workDomainSpec = defineDomain({

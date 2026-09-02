@@ -11,7 +11,11 @@ import {
 } from '../work-domain/index.ts'
 
 export type WorkCreateSpec = CreateWorkSpec
-export type WorkDispatchRequest = DispatchWorkRequest
+export type WorkDispatchRequest = DispatchWorkRequest & Required<Pick<
+  DispatchWorkRequest,
+  'mutationId' | 'expectedRevision'
+>>
+export type WorkClientDispatchRequest = Omit<WorkDispatchRequest, 'mutationId' | 'expectedRevision'>
 
 export interface WorkView {
   readonly workId: string
@@ -49,6 +53,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'work/deliverable-exists': Record<string, never>
     'work/deliverable-invalid': Record<string, never>
     'work/invalid-transition': Record<string, never>
+    'work/mutation-conflict': Record<string, never>
     'work/recovery-conflict': Record<string, never>
     'work/turn-failed': Record<string, never>
   }

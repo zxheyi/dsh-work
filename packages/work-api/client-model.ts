@@ -7,6 +7,7 @@ import {
 
 import type {
   WorkCreateSpec,
+  WorkClientDispatchRequest,
   WorkDispatchRequest,
   WorkListValue,
   WorkRemoteFollowFrame,
@@ -35,7 +36,7 @@ export interface WorkSource {
 export interface IWorks {
   readonly list: WorkSource
   create(spec: WorkCreateSpec): Promise<WorkView>
-  dispatch(request: WorkDispatchRequest, signal?: AbortSignal): Promise<WorkView>
+  dispatch(request: WorkClientDispatchRequest, signal?: AbortSignal): Promise<WorkView>
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -134,10 +135,16 @@ export class ClientWorkModel implements WorkSource {
 export class WorksController extends Service implements IWorks {
   readonly list: WorkSource
   private readonly model: ClientWorkModel
+  private readonly createMutationId: () => string
 
-  constructor(ctx: Context, model: ClientWorkModel) {
+  constructor(
+    ctx: Context,
+    model: ClientWorkModel,
+    createMutationId: () => string = () => globalThis.crypto.randomUUID(),
+  ) {
     super(ctx, 'works')
     this.model = model
+    this.createMutationId = createMutationId
     this.list = model
   }
 
@@ -147,8 +154,14 @@ export class WorksController extends Service implements IWorks {
     return result.value
   }
 
-  async dispatch(request: WorkDispatchRequest, signal?: AbortSignal): Promise<WorkView> {
-    const result = await this.model.dispatch(request, signal)
+  async dispatch(request: WorkClientDispatchRequest, signal?: AbortSignal): Promise<WorkView> {
+    const current = this.model.getSnapshot().items.find(work => work.workId === request.workId)
+    if (!current) throw new Error('Work is not available for mutation.')
+    const result = await this.model.dispatch({
+      ...request,
+      mutationId: this.createMutationId(),
+      expectedRevision: current.revision,
+    }, signal)
     if (!result.ok) throw result.error
     return result.value
   }

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -8,6 +8,7 @@ export type WorkErrorCode =
   | 'work/deliverable-exists'
   | 'work/deliverable-invalid'
   | 'work/invalid-transition'
+  | 'work/mutation-conflict'
   | 'work/recovery-conflict'
   | 'work/turn-failed'
 
@@ -37,6 +38,8 @@ export interface WorkSnapshot {
   readonly status: WorkStatus
   readonly execution: WorkExecution
   readonly lastFailure: WorkFailure | null
+  readonly lastMutationId: string | null
+  readonly lastMutationDigest: string | null
 }
 
 export type WorkStatus = 'working' | 'awaiting-review' | 'completed' | 'delivered'
@@ -80,6 +83,8 @@ export type WorkFollowFrame =
 
 export interface DispatchWorkRequest {
   readonly workId: string
+  readonly mutationId?: string
+  readonly expectedRevision?: number
   readonly command: WorkCommand
 }
 
@@ -257,6 +262,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
   }
 
   let initialization: Promise<void> | null = null
+  let mutationTail: Promise<void> = Promise.resolve()
   const ready = (): Promise<void> => initialization ??= initialize()
   const publish = (frame: WorkFollowFrame): void => {
     for (const follower of followers) {
@@ -304,6 +310,8 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         status: 'working',
         execution: 'idle',
         lastFailure: null,
+        lastMutationId: null,
+        lastMutationDigest: null,
       })
     },
 
@@ -351,11 +359,30 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
       }
     },
 
-    async dispatch(request, signal) {
-      await ready()
+    dispatch(request, signal) {
+      const operation = mutationTail.then(async () => {
+        await ready()
       if (!work || work.workId !== request.workId) {
         throw new WorkError('work/not-found', `Work not found: ${request.workId}`)
       }
+      const mutationDigest = request.mutationId === undefined ? null : createHash('sha256')
+        .update(JSON.stringify(request.command))
+        .digest('hex')
+      if (request.mutationId !== undefined && request.mutationId === work.lastMutationId) {
+        if (mutationDigest !== work.lastMutationDigest) {
+          throw new WorkError('work/mutation-conflict', 'Mutation id was already used for a different command.')
+        }
+        if (work.execution === 'failed' && work.lastFailure) {
+          throw new WorkError('work/turn-failed', work.lastFailure.message)
+        }
+        return work
+      }
+      if (request.expectedRevision !== undefined && request.expectedRevision !== work.revision) {
+        throw new WorkError('work/mutation-conflict', 'Work changed before this command could acquire its mutation lease.')
+      }
+      const mutated = (next: WorkSnapshot): WorkSnapshot => request.mutationId === undefined
+        ? next
+        : { ...next, lastMutationId: request.mutationId, lastMutationDigest: mutationDigest }
       if (request.command.type === 'submit-turn') {
         if (work.status === 'completed' || work.status === 'delivered') {
           throw new WorkError('work/invalid-transition', `Cannot submit a Turn while Work is ${work.status}.`)
@@ -368,17 +395,17 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
             instruction: request.command.instruction,
           }, signal)
         } catch (cause) {
-          await commit({
+          await commit(mutated({
             ...work,
             execution: 'failed',
             lastFailure: {
               requestId,
               message: 'Harness did not accept the Turn.',
             },
-          })
+          }))
           throw new WorkError('work/turn-failed', 'Harness did not accept the Turn.', { cause })
         }
-        return commit({
+        return commit(mutated({
           ...work,
           primarySession: Object.freeze({
             ...work.primarySession,
@@ -386,7 +413,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
           }),
           execution: 'idle',
           lastFailure: null,
-        })
+        }))
       } else if (request.command.type === 'record-file') {
         if (work.deliverable) {
           throw new WorkError('work/deliverable-exists', 'The first-phase product supports one file deliverable.')
@@ -418,25 +445,28 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         ) {
           throw new WorkError('work/deliverable-invalid', 'The file deliverable must resolve inside the managed Workspace.')
         }
-        return commit({
+        return commit(mutated({
           ...work,
           deliverable: Object.freeze({
             kind: 'file',
             path: resolvedRelativePath.split(path.sep).join(path.posix.sep),
           }),
           status: 'awaiting-review',
-        })
+        }))
       } else if (request.command.type === 'complete') {
         if (work.status !== 'awaiting-review') {
           throw new WorkError('work/invalid-transition', 'Work must be awaiting review before completion.')
         }
-        return commit({ ...work, status: 'completed' })
+        return commit(mutated({ ...work, status: 'completed' }))
       } else {
         if (work.status !== 'completed') {
           throw new WorkError('work/invalid-transition', 'Work must be completed before delivery.')
         }
-        return commit({ ...work, status: 'delivered' })
+        return commit(mutated({ ...work, status: 'delivered' }))
       }
+      })
+      mutationTail = operation.then(() => undefined, () => undefined)
+      return operation
     },
   }
 }
