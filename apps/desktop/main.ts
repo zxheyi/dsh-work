@@ -2,6 +2,7 @@ import { app, type BrowserWindow } from 'electron'
 
 import { createGuardianClient, type GuardianClient } from '../../packages/runtime-guardian/client.ts'
 import { createUnavailableGuardianClient } from '../../packages/runtime-guardian/unavailable-client.ts'
+import { resolveDesktopNodePath } from './runtime-paths.ts'
 import { createDesktopWindow, registerDesktopScheme } from './window.ts'
 
 registerDesktopScheme()
@@ -50,7 +51,12 @@ const createDesktopSession = async (): Promise<DesktopSession> => {
   let host: GuardianClient
   try {
     host = await createGuardianClient({
-      node: process.env.DSH_WORK_NODE ?? '',
+      node: resolveDesktopNodePath({
+        isPackaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        platform: process.platform,
+        environment: process.env,
+      }),
       productRoot: app.getPath('userData'),
     })
   } catch {
