@@ -15,6 +15,7 @@ import type {
   WorkDispatchRequest,
   WorkListValue,
   WorkView,
+  WorkDeliverableContent,
 } from '../packages/work-api/index.ts'
 
 function view(revision: number, status: WorkView['status'] = 'working'): WorkView {
@@ -43,6 +44,16 @@ function successfulRemote(overrides: Partial<WorkClientRemote> = {}): WorkClient
     },
     async importConversation(_spec: WorkImportConversationSpec): Promise<RemoteResult<WorkView>> {
       return { ok: true, value: view(2) }
+    },
+    async readDeliverable(): Promise<RemoteResult<WorkDeliverableContent>> {
+      return {
+        ok: true,
+        value: {
+          path: 'deliverables/result.md',
+          content: '# Review me\n',
+          contentDigest: 'a'.repeat(64),
+        },
+      }
     },
     async list(): Promise<RemoteResult<WorkListValue>> {
       return { ok: true, value: { items: [view(1)] } }
@@ -175,4 +186,16 @@ test('imports an existing conversation through ctx.works and installs the return
   assert.deepEqual(imports, [spec])
   assert.deepEqual(imported, view(2))
   assert.deepEqual(model.getSnapshot().items, [view(2)])
+})
+
+test('reads deliverable content through ctx.works without installing it in the list projection', async () => {
+  const model = new ClientWorkModel(successfulRemote())
+  model.replaceBaseline({ items: [view(1)] })
+  const works = new WorksController(new Context(), model)
+
+  const content = await works.readDeliverable('work-client')
+
+  assert.equal(content.path, 'deliverables/result.md')
+  assert.equal(content.content, '# Review me\n')
+  assert.deepEqual(model.getSnapshot().items, [view(1)])
 })

@@ -6,6 +6,8 @@ import type {
   WorkDispatchRequest,
   WorkImportConversationSpec,
   WorkListValue,
+  WorkDeliverableContent,
+  WorkReadDeliverableRequest,
   WorkRemoteFollowFrame,
   WorkView,
 } from './index.ts'
@@ -57,6 +59,10 @@ const commandSchema = z.discriminatedUnion('type', [
     instruction: z.string().min(1).max(20_000),
   }).strict(),
   z.object({
+    type: z.literal('revise-markdown'),
+    instruction: z.string().min(1).max(20_000),
+  }).strict(),
+  z.object({
     type: z.literal('add-file-resource'),
     name: z.string().min(1).max(200),
     mediaType: z.string().min(1).max(128).optional(),
@@ -71,6 +77,14 @@ const dispatchSchema: z.ZodType<WorkDispatchRequest> = z.object({
   mutationId: z.string().min(1).max(128),
   expectedRevision: z.number().int().positive(),
   command: commandSchema,
+}).strict()
+const readDeliverableRequestSchema: z.ZodType<WorkReadDeliverableRequest> = z.object({
+  workId: z.string().min(1),
+}).strict()
+const deliverableContentSchema: z.ZodType<WorkDeliverableContent> = z.object({
+  path: z.string().min(1),
+  content: z.string().min(1).max(5 * 1024 * 1024),
+  contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
 }).strict()
 const listSchema: z.ZodType<WorkListValue> = z.object({
   items: z.array(workViewSchema).max(1),
@@ -137,6 +151,20 @@ export const TYPERT_REMOTE: TypertRemoteContribution = Object.freeze({
       result: strict('@dsh-work/work-api#WorkView', workViewSchema),
     }),
     Object.freeze({
+      id: '@dsh-work/work-api#work/readDeliverable',
+      service: 'workApi',
+      namespace: 'work',
+      method: 'readDeliverable',
+      invocation: Object.freeze({ kind: 'direct' as const }),
+      parameters: Object.freeze([Object.freeze({
+        name: 'request',
+        wire: 'request',
+        source: 'json' as const,
+        codec: strict('@dsh-work/work-api#WorkReadDeliverableRequest', readDeliverableRequestSchema),
+      })]),
+      result: strict('@dsh-work/work-api#WorkDeliverableContent', deliverableContentSchema),
+    }),
+    Object.freeze({
       id: '@dsh-work/work-api#work/list',
       service: 'workApi',
       namespace: 'work',
@@ -170,6 +198,9 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       request: WorkDispatchRequest,
       signal?: AbortSignal,
     ) => Promise<RemoteResult<WorkView>>
+    'work/readDeliverable': (
+      request: WorkReadDeliverableRequest,
+    ) => Promise<RemoteResult<WorkDeliverableContent>>
     'work/list': () => Promise<RemoteResult<WorkListValue>>
     'work/follow': (signal?: AbortSignal) => AsyncIterable<WorkRemoteFollowFrame>
   }
@@ -179,6 +210,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       create: TypertRemoteMap['work/create']
       importConversation: TypertRemoteMap['work/importConversation']
       dispatch: TypertRemoteMap['work/dispatch']
+      readDeliverable: TypertRemoteMap['work/readDeliverable']
       list: TypertRemoteMap['work/list']
       follow: TypertRemoteMap['work/follow']
     }

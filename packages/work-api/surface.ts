@@ -1,6 +1,7 @@
 import {
   createElement,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -15,6 +16,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 
 import type { IWorks, WorkClientSnapshot } from './client-model.ts'
 import type { WorkView } from './index.ts'
+import type { WorkDeliverableContent } from './index.ts'
 
 interface WorkSurfaceInjected {
   readonly works: IWorks
@@ -226,15 +228,18 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
   const [importContent, setImportContent] = useState('')
   const [importSource, setImportSource] = useState<'dsh' | 'dsh-desktop' | 'other'>('dsh-desktop')
   const [pendingFiles, setPendingFiles] = useState<readonly File[]>([])
+  const [deliverableContent, setDeliverableContent] = useState<WorkDeliverableContent | null>(null)
+  const [deliverableError, setDeliverableError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const busy = creating || importing
   const resourceCount = (work?.resources.length ?? 0) + pendingFiles.length
   const resourceRemaining = Math.max(0, MAX_RESOURCE_FILES - resourceCount)
-  const canSubmit = goal.trim().length > 0 && !busy && !work?.deliverable
+  const canRevise = Boolean(work?.deliverable && work.status === 'awaiting-review')
+  const canSubmit = goal.trim().length > 0 && !busy && (!work?.deliverable || canRevise)
   const canImport = importContent.trim().length > 0 && importContent.length <= 100_000 && !busy
-  const composerTitle = work?.deliverable ? 'Markdown 成果已生成' : work ? '接下来想推进什么？' : '你想完成什么？'
+  const composerTitle = work?.deliverable ? '审核 Markdown 成果' : work ? '接下来想推进什么？' : '你想完成什么？'
   const composerHint = work?.deliverable
-    ? '成果已经进入待审核状态。下一阶段会在这里提供预览和修改。'
+    ? '在下方查看 Markdown 原文预览，然后提出修改要求。'
     : work
       ? '补充成果要求，继续推进同一项工作。'
       : '描述想要的结果，资料可以稍后添加。'
@@ -287,7 +292,9 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
       }
       await works.dispatch({
         workId: target.workId,
-        command: { type: 'produce-markdown', instruction },
+        command: target.deliverable
+          ? { type: 'revise-markdown', instruction }
+          : { type: 'produce-markdown', instruction },
       })
       setGoal('')
       setPendingFiles([])
@@ -297,6 +304,23 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
       setCreating(false)
     }
   }, [busy, goal, pendingFiles, work, works])
+
+  useEffect(() => {
+    let active = true
+    if (!work?.deliverable) {
+      setDeliverableContent(null)
+      setDeliverableError(null)
+      return () => { active = false }
+    }
+    setDeliverableContent(null)
+    setDeliverableError(null)
+    void works.readDeliverable(work.workId).then(value => {
+      if (active) setDeliverableContent(value)
+    }, error => {
+      if (active) setDeliverableError(error instanceof Error ? error.message : '暂时无法读取成果。')
+    })
+    return () => { active = false }
+  }, [work?.deliverable, work?.revision, work?.workId, works])
 
   const importConversation = useCallback(async () => {
     const content = importContent.trim()
@@ -347,15 +371,26 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
           h('div', { className: 'dsh-work-composer-heading' },
             h('h2', null, composerTitle),
             h('p', null, composerHint)),
+          work?.deliverable
+            ? h('section', { className: 'dsh-work-markdown-preview', 'aria-label': 'Markdown 原文预览' },
+              h('div', { className: 'dsh-work-markdown-preview-heading' },
+                h('strong', null, 'Markdown 原文预览'),
+                h('span', null, work.deliverable.path)),
+              deliverableError
+                ? h('p', { className: 'dsh-work-inline-error', role: 'alert' }, deliverableError)
+                : deliverableContent
+                  ? h('pre', { 'data-work-markdown-preview': true }, deliverableContent.content)
+                  : h('div', { className: 'dsh-work-markdown-loading', 'aria-label': '正在读取成果' }, '正在读取成果…'))
+            : null,
           h('label', { className: 'dsh-work-visually-hidden', htmlFor: 'dsh-work-goal' }, '工作目标'),
           h('textarea', {
             id: 'dsh-work-goal',
             'data-work-goal': true,
             value: goal,
-            disabled: busy || Boolean(work?.deliverable),
+            disabled: busy || Boolean(work?.deliverable && work.status !== 'awaiting-review'),
             placeholder: work
               ? work.deliverable
-                ? '成果已生成，等待审核。'
+                ? '例如：把建议改得更具体，并为每个行动项补充负责人和日期。'
                 : '例如：把结论压缩成一页管理层摘要，并补充下一步建议。'
               : '描述你想完成的结果；需要时可在下方添加文件。',
             onChange: (event: { currentTarget: { value: string } }) => setGoal(event.currentTarget.value),
@@ -448,7 +483,9 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
               className: 'dsh-work-primary',
               type: 'submit',
               disabled: !canSubmit,
-            }, creating ? '正在生成成果' : work?.deliverable ? '等待审核' : work ? '生成成果' : '开始工作'))),
+            }, creating
+              ? work?.deliverable ? '正在修改成果' : '正在生成成果'
+              : work?.deliverable ? '按要求修改' : work ? '生成成果' : '开始工作'))),
         work?.deliverable
           ? h('section', { className: 'dsh-work-deliverable-card', 'aria-label': 'Markdown 成果' },
             h('span', { className: 'dsh-work-deliverable-token', 'aria-hidden': 'true' }, 'MD'),
@@ -554,6 +591,12 @@ body[data-ds-dark-theme] {
 .dsh-work-composer { min-height: 286px; padding: 28px; border: 1px solid var(--work-border); border-radius: 14px; background: var(--work-surface); box-shadow: var(--work-shadow); }
 .dsh-work-composer-heading h2 { margin: 0; font-size: 28px; line-height: 36px; font-weight: 650; letter-spacing: -.03em; }
 .dsh-work-composer-heading p { margin: 6px 0 16px; color: var(--work-muted); font-size: 14px; line-height: 22px; }
+.dsh-work-markdown-preview { margin: 0 0 14px; overflow: hidden; border: 1px solid var(--work-border); border-radius: 10px; background: var(--work-surface-subtle); }
+.dsh-work-markdown-preview-heading { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 12px; border-bottom: 1px solid var(--work-border); background: var(--work-surface); }
+.dsh-work-markdown-preview-heading strong { font-size: 12px; line-height: 18px; }
+.dsh-work-markdown-preview-heading span { overflow: hidden; color: var(--work-faint); text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 16px; }
+.dsh-work-markdown-preview pre { max-height: 320px; margin: 0; overflow: auto; padding: 16px; color: var(--work-text); white-space: pre-wrap; overflow-wrap: anywhere; font: 400 13px/21px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.dsh-work-markdown-loading { min-height: 96px; display: flex; align-items: center; justify-content: center; color: var(--work-faint); font-size: 12px; }
 .dsh-work-composer textarea { width: 100%; height: 118px; resize: none; padding: 14px 16px; border: 1px solid var(--work-border-strong); border-radius: 10px; outline: none; color: var(--work-text); background: var(--work-surface); font: 400 15px/24px var(--work-font); }
 .dsh-work-composer textarea::placeholder { color: var(--work-faint); }
 .dsh-work-composer textarea:focus { border-color: var(--work-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--work-accent) 22%, transparent); }

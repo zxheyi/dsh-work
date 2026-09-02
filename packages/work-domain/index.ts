@@ -101,11 +101,18 @@ export interface WorkFileDeliverable {
   readonly path: string
 }
 
+export interface WorkDeliverableContent {
+  readonly path: string
+  readonly content: string
+  readonly contentDigest: string
+}
+
 export interface WorkController {
   create(spec: CreateWorkSpec): Promise<WorkSnapshot>
   importConversation(spec: ImportConversationSpec, signal?: AbortSignal): Promise<WorkSnapshot>
   get(): Promise<WorkSnapshot | null>
   list(): Promise<readonly WorkSnapshot[]>
+  readDeliverable(workId: string): Promise<WorkDeliverableContent>
   follow(signal?: AbortSignal): AsyncIterable<WorkFollowFrame>
   dispatch(request: DispatchWorkRequest, signal?: AbortSignal): Promise<WorkSnapshot>
 }
@@ -128,6 +135,7 @@ export interface DispatchWorkRequest {
 export type WorkCommand =
   | SubmitTurnCommand
   | ProduceMarkdownCommand
+  | ReviseMarkdownCommand
   | AddFileResourceCommand
   | RecordFileCommand
   | CompleteWorkCommand
@@ -140,6 +148,11 @@ export interface SubmitTurnCommand {
 
 export interface ProduceMarkdownCommand {
   readonly type: 'produce-markdown'
+  readonly instruction: string
+}
+
+export interface ReviseMarkdownCommand {
+  readonly type: 'revise-markdown'
   readonly instruction: string
 }
 
@@ -464,7 +477,10 @@ export function createHarnessWorkPort(context: HarnessWorkContext): HarnessWorkP
   }
 }
 
-async function resolveMarkdownDeliverable(work: WorkSnapshot, requestedPath: string): Promise<WorkFileDeliverable> {
+async function inspectMarkdownDeliverable(work: WorkSnapshot, requestedPath: string): Promise<{
+  readonly deliverable: WorkFileDeliverable
+  readonly content: WorkDeliverableContent
+}> {
   if (path.posix.extname(requestedPath).toLowerCase() !== '.md') {
     throw new WorkError('work/deliverable-invalid', 'The first-phase deliverable must be a Markdown file.')
   }
@@ -483,11 +499,6 @@ async function resolveMarkdownDeliverable(work: WorkSnapshot, requestedPath: str
   let resolvedFilePath: string
   try {
     resolvedFilePath = await fs.realpath(candidatePath)
-    const stat = await fs.stat(resolvedFilePath)
-    if (!stat.isFile() || stat.size < 1 || stat.size > MAX_WORK_MARKDOWN_DELIVERABLE_BYTES) {
-      throw new Error('not a bounded regular file')
-    }
-    new TextDecoder('utf-8', { fatal: true }).decode(await fs.readFile(resolvedFilePath))
   } catch {
     throw new WorkError(
       'work/deliverable-invalid',
@@ -502,10 +513,37 @@ async function resolveMarkdownDeliverable(work: WorkSnapshot, requestedPath: str
   ) {
     throw new WorkError('work/deliverable-invalid', 'The Markdown deliverable must resolve inside the managed Workspace.')
   }
-  return Object.freeze({
+  let bytes: Buffer
+  let content: string
+  try {
+    const stat = await fs.stat(resolvedFilePath)
+    if (!stat.isFile() || stat.size < 1 || stat.size > MAX_WORK_MARKDOWN_DELIVERABLE_BYTES) {
+      throw new Error('not a bounded regular file')
+    }
+    bytes = await fs.readFile(resolvedFilePath)
+    content = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch {
+    throw new WorkError(
+      'work/deliverable-invalid',
+      'The Markdown deliverable must be an existing non-empty UTF-8 file no larger than 5 MiB.',
+    )
+  }
+  const deliverable = Object.freeze({
     kind: 'file',
     path: resolvedRelativePath.split(path.sep).join(path.posix.sep),
+  } as const)
+  return Object.freeze({
+    deliverable,
+    content: Object.freeze({
+      path: deliverable.path,
+      content,
+      contentDigest: createHash('sha256').update(bytes).digest('hex'),
+    }),
   })
+}
+
+async function resolveMarkdownDeliverable(work: WorkSnapshot, requestedPath: string): Promise<WorkFileDeliverable> {
+  return (await inspectMarkdownDeliverable(work, requestedPath)).deliverable
 }
 
 function markdownProductionInstruction(work: WorkSnapshot, instruction: string): string {
@@ -518,6 +556,16 @@ function markdownProductionInstruction(work: WorkSnapshot, instruction: string):
       : '本次没有附加文件资料。',
     `请使用可用的文件工具创建或更新 @"${WORK_MARKDOWN_DELIVERABLE_PATH}"。`,
     '成果必须是非空 UTF-8 Markdown，结构清楚、内容完整、可直接交给用户审核。不要只在对话中回答；结束前确认该文件已经写入。',
+  ].join('\n\n')
+}
+
+function markdownRevisionInstruction(work: WorkSnapshot, instruction: string): string {
+  return [
+    '用户正在审核 DSH Work 的唯一 Markdown 成果。',
+    `用户目标：${work.goal}`,
+    `修改要求：${instruction}`,
+    `请先读取 @"${work.deliverable?.path ?? WORK_MARKDOWN_DELIVERABLE_PATH}"，再使用文件工具直接修改同一文件。`,
+    '保持它为非空 UTF-8 Markdown。不要另建成果文件；结束前确认修改已经写入。',
   ].join('\n\n')
 }
 
@@ -731,6 +779,17 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
       return Object.freeze(work ? [work] : [])
     },
 
+    async readDeliverable(workId) {
+      await ready()
+      if (!work || work.workId !== workId) {
+        throw new WorkError('work/not-found', `Work not found: ${workId}`)
+      }
+      if (!work.deliverable) {
+        throw new WorkError('work/deliverable-invalid', 'This Work does not have a Markdown deliverable to review.')
+      }
+      return (await inspectMarkdownDeliverable(work, work.deliverable.path)).content
+    },
+
     async *follow(signal = new AbortController().signal) {
       await ready()
       if (signal.aborted) return
@@ -871,6 +930,71 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
           throw new WorkError(
             'work/deliverable-invalid',
             'The production Turn finished without a valid Markdown deliverable.',
+            { cause },
+          )
+        }
+        return commit(mutated({
+          ...work,
+          primarySession: Object.freeze({
+            ...work.primarySession,
+            turnCount: work.primarySession.turnCount + 1,
+          }),
+          deliverable,
+          status: 'awaiting-review',
+          execution: 'idle',
+          lastFailure: null,
+        }))
+      } else if (request.command.type === 'revise-markdown') {
+        if (work.status !== 'awaiting-review' || !work.deliverable) {
+          throw new WorkError('work/invalid-transition', 'Markdown can only be revised while its Work is awaiting review.')
+        }
+        const instruction = request.command.instruction.trim()
+        if (instruction.length < 1 || instruction.length > 20_000) {
+          throw new WorkError('work/deliverable-invalid', 'Markdown revision requires a bounded instruction.')
+        }
+        const requestId = createRequestId()
+        try {
+          await options.harness.submitTurn({
+            requestId,
+            sessionId: work.primarySession.sessionId,
+            instruction: markdownRevisionInstruction(work, instruction),
+            waitForCompletion: true,
+          }, signal)
+        } catch (cause) {
+          await commit(mutated({
+            ...work,
+            execution: 'failed',
+            lastFailure: {
+              requestId,
+              message: 'Harness did not complete the Markdown revision Turn.',
+            },
+          }))
+          throw new WorkError(
+            'work/turn-failed',
+            'Harness did not complete the Markdown revision Turn.',
+            { cause },
+          )
+        }
+        let deliverable: WorkFileDeliverable
+        try {
+          deliverable = await resolveMarkdownDeliverable(work, work.deliverable.path)
+        } catch (cause) {
+          await commit(mutated({
+            ...work,
+            primarySession: Object.freeze({
+              ...work.primarySession,
+              turnCount: work.primarySession.turnCount + 1,
+            }),
+            execution: 'failed',
+            lastFailure: {
+              requestId,
+              message: 'The revision Turn left no valid Markdown deliverable.',
+            },
+          }))
+          if (cause instanceof WorkError) throw cause
+          throw new WorkError(
+            'work/deliverable-invalid',
+            'The revision Turn left no valid Markdown deliverable.',
             { cause },
           )
         }

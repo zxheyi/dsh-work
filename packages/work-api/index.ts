@@ -7,6 +7,7 @@ import {
   type DispatchWorkRequest,
   type ImportConversationSpec,
   type WorkController,
+  type WorkDeliverableContent as DomainWorkDeliverableContent,
   type WorkFollowFrame,
   type WorkSnapshot,
 } from '../work-domain/index.ts'
@@ -18,6 +19,11 @@ export type WorkDispatchRequest = DispatchWorkRequest & Required<Pick<
   'mutationId' | 'expectedRevision'
 >>
 export type WorkClientDispatchRequest = Omit<WorkDispatchRequest, 'mutationId' | 'expectedRevision'>
+export type WorkDeliverableContent = DomainWorkDeliverableContent
+
+export interface WorkReadDeliverableRequest {
+  readonly workId: string
+}
 
 export interface WorkView {
   readonly workId: string
@@ -129,6 +135,10 @@ export class WorkRemoteController extends TypertRemoteService {
     return workResult(async () => projectWork(await this.controller.dispatch(request, signal)))
   }
 
+  readDeliverable(request: WorkReadDeliverableRequest): Promise<WorkDeliverableContent> {
+    return workResult(() => this.controller.readDeliverable(request.workId))
+  }
+
   async list(): Promise<WorkListValue> {
     return Object.freeze({
       items: Object.freeze((await this.controller.list()).map(projectWork)),
@@ -140,7 +150,7 @@ export class WorkRemoteController extends TypertRemoteService {
   }
 }
 
-type RemoteMethodName = 'create' | 'importConversation' | 'dispatch' | 'list' | 'follow'
+type RemoteMethodName = 'create' | 'importConversation' | 'dispatch' | 'readDeliverable' | 'list' | 'follow'
 type RemoteMethod = (this: WorkRemoteController, ...args: unknown[]) => unknown
 type RemoteDecorator = (
   method: RemoteMethod,
@@ -168,6 +178,7 @@ function installRemoteMarker(name: RemoteMethodName, decorator: RemoteDecorator)
 installRemoteMarker('create', Remote as RemoteDecorator)
 installRemoteMarker('importConversation', Remote as RemoteDecorator)
 installRemoteMarker('dispatch', Remote as RemoteDecorator)
+installRemoteMarker('readDeliverable', Remote as RemoteDecorator)
 installRemoteMarker('list', Remote as RemoteDecorator)
 installRemoteMarker('follow', Remote({ mode: 'stream' }) as RemoteDecorator)
 

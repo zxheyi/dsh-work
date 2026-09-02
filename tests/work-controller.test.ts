@@ -621,6 +621,59 @@ test('rejects a non-Markdown file as the first-phase deliverable', async () => {
   await fs.rm(workspaceRoot, { recursive: true, force: true })
 })
 
+test('reads the Markdown deliverable and revises the same file through natural language', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-revise-markdown-'))
+  let managedPath = ''
+  const turns: string[] = []
+  const controller = createWorkController({
+    createId: () => 'work-revise-markdown',
+    createSessionId: () => 'session-revise-markdown',
+    createRequestId: () => 'request-revise-markdown',
+    workspaceRoot,
+    harness: {
+      ...testHarness(),
+      async ensureWorkspace(request) {
+        managedPath = request.path
+        await fs.mkdir(request.path, { recursive: true })
+        return { workspaceId: 'workspace-revise-markdown', path: request.path }
+      },
+      async submitTurn(request) {
+        turns.push(request.instruction)
+        await fs.writeFile(
+          path.join(managedPath, 'deliverables', 'result.md'),
+          '# Revised launch brief\n\n- Add owners\n- Add dates\n',
+        )
+      },
+    },
+  })
+  const created = await controller.create({ title: 'Revise Markdown', goal: 'Prepare a clear launch brief.' })
+  await fs.mkdir(path.join(created.workspace.path, 'deliverables'), { recursive: true })
+  await fs.writeFile(path.join(created.workspace.path, 'deliverables', 'result.md'), '# First draft\n')
+  const recorded = await controller.dispatch({
+    workId: created.workId,
+    command: { type: 'record-file', path: 'deliverables/result.md' },
+  })
+
+  const before = await controller.readDeliverable(created.workId)
+  const revised = await controller.dispatch({
+    workId: created.workId,
+    command: { type: 'revise-markdown', instruction: 'Add a clear owner and date to every action.' },
+  })
+  const after = await controller.readDeliverable(created.workId)
+
+  assert.equal(before.content, '# First draft\n')
+  assert.equal(before.path, 'deliverables/result.md')
+  assert.match(before.contentDigest, /^[a-f0-9]{64}$/u)
+  assert.match(turns[0] ?? '', /Add a clear owner and date/u)
+  assert.match(turns[0] ?? '', /deliverables\/result\.md/u)
+  assert.equal(revised.deliverable?.path, recorded.deliverable?.path)
+  assert.equal(revised.status, 'awaiting-review')
+  assert.equal(revised.primarySession.turnCount, 1)
+  assert.match(after.content, /Revised launch brief/u)
+  assert.notEqual(after.contentDigest, before.contentDigest)
+  await fs.rm(workspaceRoot, { recursive: true, force: true })
+})
+
 test('rejects a second file deliverable', async () => {
   const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-one-file-'))
   const controller = createWorkController({

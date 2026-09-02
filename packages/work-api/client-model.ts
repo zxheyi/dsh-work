@@ -9,6 +9,7 @@ import type {
   WorkCreateSpec,
   WorkClientDispatchRequest,
   WorkDispatchRequest,
+  WorkDeliverableContent,
   WorkListValue,
   WorkImportConversationSpec,
   WorkRemoteFollowFrame,
@@ -22,6 +23,7 @@ export interface WorkClientRemote {
     signal?: AbortSignal,
   ): Promise<RemoteResult<WorkView>>
   dispatch(request: WorkDispatchRequest, signal?: AbortSignal): Promise<RemoteResult<WorkView>>
+  readDeliverable(request: { readonly workId: string }): Promise<RemoteResult<WorkDeliverableContent>>
   list(): Promise<RemoteResult<WorkListValue>>
   follow(signal?: AbortSignal): AsyncIterable<WorkRemoteFollowFrame>
 }
@@ -43,6 +45,7 @@ export interface IWorks {
   create(spec: WorkCreateSpec): Promise<WorkView>
   importConversation(spec: WorkImportConversationSpec, signal?: AbortSignal): Promise<WorkView>
   dispatch(request: WorkClientDispatchRequest, signal?: AbortSignal): Promise<WorkView>
+  readDeliverable(workId: string): Promise<WorkDeliverableContent>
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -86,6 +89,10 @@ export class ClientWorkModel implements WorkSource {
     const result = await this.remote.dispatch(request, signal)
     if (result.ok) this.upsertView(result.value)
     return result
+  }
+
+  readDeliverable(workId: string): Promise<RemoteResult<WorkDeliverableContent>> {
+    return this.remote.readDeliverable({ workId })
   }
 
   replaceBaseline(value: WorkListValue): void {
@@ -186,6 +193,12 @@ export class WorksController extends Service implements IWorks {
       mutationId: this.createMutationId(),
       expectedRevision: current.revision,
     }, signal)
+    if (!result.ok) throw result.error
+    return result.value
+  }
+
+  async readDeliverable(workId: string): Promise<WorkDeliverableContent> {
+    const result = await this.model.readDeliverable(workId)
     if (!result.ok) throw result.error
     return result.value
   }

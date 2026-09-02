@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import test from 'node:test'
 
 import { Context } from '@deepseek-ai/cordis'
@@ -48,6 +51,7 @@ test('exports the narrow Work surface through public Typert markers', () => {
     { method: 'create', mode: 'unary' },
     { method: 'importConversation', mode: 'unary' },
     { method: 'dispatch', mode: 'unary' },
+    { method: 'readDeliverable', mode: 'unary' },
     { method: 'list', mode: 'unary' },
     { method: 'follow', mode: 'stream' },
   ])
@@ -59,6 +63,7 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
     'work/create',
     'work/importConversation',
     'work/dispatch',
+    'work/readDeliverable',
     'work/list',
     'work/follow',
   ])
@@ -105,6 +110,17 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
     mutationId: 'mutation-1',
     expectedRevision: 2,
     command: { type: 'produce-markdown', instruction: 'Create a concise report.' },
+  })
+  assert.deepEqual(codec.schema.parse({
+    workId: 'work-1',
+    mutationId: 'mutation-revision',
+    expectedRevision: 3,
+    command: { type: 'revise-markdown', instruction: 'Make the recommendation more specific.' },
+  }), {
+    workId: 'work-1',
+    mutationId: 'mutation-revision',
+    expectedRevision: 3,
+    command: { type: 'revise-markdown', instruction: 'Make the recommendation more specific.' },
   })
   assert.deepEqual(codec.schema.parse({
     workId: 'work-1',
@@ -157,6 +173,39 @@ test('imports conversation content through the product Remote without exposing p
   assert.equal('importSource' in imported, false)
   assert.equal('workspace' in imported, false)
   assert.equal('primarySession' in imported, false)
+})
+
+test('reads only bounded Markdown content through the product Remote', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-remote-read-'))
+  const ctx = new Context()
+  const controller = createWorkController({
+    createId: () => 'work-remote-read',
+    createSessionId: () => 'session-remote-read',
+    workspaceRoot,
+    harness: harness(),
+  })
+  ctx.provide('workController', controller)
+  const remote = new WorkRemoteController(ctx)
+  const created = await remote.create({ title: 'Read result', goal: 'Review safely.' })
+  const workspacePath = path.join(workspaceRoot, created.workId)
+  await fs.mkdir(path.join(workspacePath, 'deliverables'), { recursive: true })
+  await fs.writeFile(path.join(workspacePath, 'deliverables', 'result.md'), '# Safe preview\n')
+  await remote.dispatch({
+    workId: created.workId,
+    mutationId: 'record-for-read',
+    expectedRevision: created.revision,
+    command: { type: 'record-file', path: 'deliverables/result.md' },
+  })
+
+  const content = await remote.readDeliverable({ workId: created.workId })
+
+  assert.deepEqual(content, {
+    path: 'deliverables/result.md',
+    content: '# Safe preview\n',
+    contentDigest: 'f8c420147280db99c816fcb16fc624c30af28bd00bbcb6ec5fbb88332728bf76',
+  })
+  assert.equal('workspacePath' in content, false)
+  await fs.rm(workspaceRoot, { recursive: true, force: true })
 })
 
 test('projects Work state without exposing Harness Workspace or Session internals', async () => {

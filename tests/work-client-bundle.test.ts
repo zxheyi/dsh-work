@@ -49,6 +49,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
     if (specifier === 'react') return {
       createElement() {},
       useCallback(value: unknown) { return value },
+      useEffect() {},
       useMemo(value: () => unknown) { return value() },
       useRef(value: unknown) { return { current: value } },
       useState(value: unknown) { return [value, () => {}] },
@@ -117,6 +118,8 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   assert.match(source, /继续已有对话/)
   assert.match(source, /原对话不会改变/)
   assert.match(source, /Markdown 成果/)
+  assert.match(source, /Markdown 原文预览/)
+  assert.match(source, /提出修改要求/)
   assert.equal(source.includes('选择 Work 目录'), false)
   assert.equal(source.includes('选择工作目录'), false)
   await dispose()
