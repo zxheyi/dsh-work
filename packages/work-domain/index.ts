@@ -127,6 +127,7 @@ export interface DispatchWorkRequest {
 
 export type WorkCommand =
   | SubmitTurnCommand
+  | ProduceMarkdownCommand
   | AddFileResourceCommand
   | RecordFileCommand
   | CompleteWorkCommand
@@ -134,6 +135,11 @@ export type WorkCommand =
 
 export interface SubmitTurnCommand {
   readonly type: 'submit-turn'
+  readonly instruction: string
+}
+
+export interface ProduceMarkdownCommand {
+  readonly type: 'produce-markdown'
   readonly instruction: string
 }
 
@@ -224,10 +230,13 @@ export interface SubmitTurnRequest {
   readonly requestId: string
   readonly sessionId: string
   readonly instruction: string
+  readonly waitForCompletion?: boolean
 }
 
 export const MAX_WORK_FILE_RESOURCES = 20
 export const MAX_WORK_FILE_RESOURCE_BYTES = 25 * 1024 * 1024
+export const WORK_MARKDOWN_DELIVERABLE_PATH = 'deliverables/result.md'
+export const MAX_WORK_MARKDOWN_DELIVERABLE_BYTES = 5 * 1024 * 1024
 
 const MAX_WORK_FILE_RESOURCE_BASE64_CHARS = Math.ceil(MAX_WORK_FILE_RESOURCE_BYTES / 3) * 4
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u
@@ -350,6 +359,76 @@ export interface HarnessWorkContext {
       readonly mode: 'queue'
       readonly content: readonly [{ readonly type: 'text'; readonly text: string }]
     }, signal: AbortSignal): Promise<{ readonly accepted: true }>
+    follow?(request: {
+      readonly address: { readonly kind: 'session'; readonly sessionId: string }
+      readonly maxMessages: number
+    }, signal: AbortSignal): AsyncIterable<{
+      readonly type: string
+      readonly event?: {
+        readonly type: string
+        readonly data: unknown
+      }
+    }>
+  }
+}
+
+function recordData(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+async function waitForSubmittedTurn(
+  context: HarnessWorkContext,
+  request: SubmitTurnRequest,
+  signal: AbortSignal,
+): Promise<void> {
+  const follow = context.sessionController.follow
+  if (!follow) throw new Error('Session completion follow is unavailable.')
+  const streamAbort = new AbortController()
+  const onAbort = (): void => streamAbort.abort(signal.reason)
+  signal.addEventListener('abort', onAbort, { once: true })
+  if (signal.aborted) streamAbort.abort(signal.reason)
+  const iterator = follow({
+    address: { kind: 'session', sessionId: request.sessionId },
+    maxMessages: 200,
+  }, streamAbort.signal)[Symbol.asyncIterator]()
+  try {
+    const opening = await iterator.next()
+    if (opening.done || opening.value.type !== 'snapshot') {
+      throw new Error('Session completion follow ended before its opening snapshot.')
+    }
+    await context.sessionController.prompt({
+      requestId: request.requestId,
+      sessionId: request.sessionId,
+      mode: 'queue',
+      content: [{ type: 'text', text: request.instruction }],
+    }, signal)
+    let matchedRequest = false
+    let matchedTurn: number | null = null
+    while (true) {
+      const next = await iterator.next()
+      if (next.done) throw new Error('Session completion follow ended before the production Turn.')
+      const event = next.value.event
+      if (!event) continue
+      const data = recordData(event.data)
+      if (event.type === 'user/message') {
+        const source = recordData(data?.source)
+        if (source?.kind === 'user' && source.rpcId === request.requestId) matchedRequest = true
+      } else if (matchedRequest && matchedTurn === null && event.type === 'turn/start') {
+        if (typeof data?.turn === 'number') matchedTurn = data.turn
+      } else if (matchedTurn !== null && event.type === 'turn/end' && data?.turn === matchedTurn) {
+        const reason = recordData(data.reason)
+        if (reason?.kind !== 'completed') {
+          throw new Error(`Markdown production Turn ended as ${String(reason?.kind ?? 'unknown')}.`)
+        }
+        return
+      }
+    }
+  } finally {
+    signal.removeEventListener('abort', onAbort)
+    streamAbort.abort()
+    await iterator.return?.()
   }
 }
 
@@ -371,6 +450,10 @@ export function createHarnessWorkPort(context: HarnessWorkContext): HarnessWorkP
       return Object.freeze({ sessionId: session.sessionId })
     },
     async submitTurn(request, signal = new AbortController().signal) {
+      if (request.waitForCompletion) {
+        await waitForSubmittedTurn(context, request, signal)
+        return
+      }
       await context.sessionController.prompt({
         requestId: request.requestId,
         sessionId: request.sessionId,
@@ -379,6 +462,63 @@ export function createHarnessWorkPort(context: HarnessWorkContext): HarnessWorkP
       }, signal)
     },
   }
+}
+
+async function resolveMarkdownDeliverable(work: WorkSnapshot, requestedPath: string): Promise<WorkFileDeliverable> {
+  if (path.posix.extname(requestedPath).toLowerCase() !== '.md') {
+    throw new WorkError('work/deliverable-invalid', 'The first-phase deliverable must be a Markdown file.')
+  }
+  const workspacePath = await fs.realpath(work.workspace.path)
+  const candidatePath = path.resolve(workspacePath, requestedPath)
+  const relativePath = path.relative(workspacePath, candidatePath)
+  if (
+    path.isAbsolute(requestedPath)
+    || relativePath === ''
+    || relativePath === '..'
+    || relativePath.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relativePath)
+  ) {
+    throw new WorkError('work/deliverable-invalid', 'The Markdown deliverable must be inside the managed Workspace.')
+  }
+  let resolvedFilePath: string
+  try {
+    resolvedFilePath = await fs.realpath(candidatePath)
+    const stat = await fs.stat(resolvedFilePath)
+    if (!stat.isFile() || stat.size < 1 || stat.size > MAX_WORK_MARKDOWN_DELIVERABLE_BYTES) {
+      throw new Error('not a bounded regular file')
+    }
+    new TextDecoder('utf-8', { fatal: true }).decode(await fs.readFile(resolvedFilePath))
+  } catch {
+    throw new WorkError(
+      'work/deliverable-invalid',
+      'The Markdown deliverable must be an existing non-empty UTF-8 file no larger than 5 MiB.',
+    )
+  }
+  const resolvedRelativePath = path.relative(workspacePath, resolvedFilePath)
+  if (
+    resolvedRelativePath === '..'
+    || resolvedRelativePath.startsWith(`..${path.sep}`)
+    || path.isAbsolute(resolvedRelativePath)
+  ) {
+    throw new WorkError('work/deliverable-invalid', 'The Markdown deliverable must resolve inside the managed Workspace.')
+  }
+  return Object.freeze({
+    kind: 'file',
+    path: resolvedRelativePath.split(path.sep).join(path.posix.sep),
+  })
+}
+
+function markdownProductionInstruction(work: WorkSnapshot, instruction: string): string {
+  return [
+    '你正在为 DSH Work 生产这一项工作的唯一文件型成果。',
+    `用户目标：${work.goal}`,
+    `本次要求：${instruction}`,
+    work.resources.length > 0
+      ? ['请先读取以下用户资料：', ...work.resources.map(resource => `- @"${resource.path.replaceAll('"', '\\"')}"`)].join('\n')
+      : '本次没有附加文件资料。',
+    `请使用可用的文件工具创建或更新 @"${WORK_MARKDOWN_DELIVERABLE_PATH}"。`,
+    '成果必须是非空 UTF-8 Markdown，结构清楚、内容完整、可直接交给用户审核。不要只在对话中回答；结束前确认该文件已经写入。',
+  ].join('\n\n')
 }
 
 export function createWorkController(options: WorkControllerOptions): WorkController {
@@ -680,6 +820,71 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
           execution: 'idle',
           lastFailure: null,
         }))
+      } else if (request.command.type === 'produce-markdown') {
+        if (work.status !== 'working' || work.deliverable) {
+          throw new WorkError('work/invalid-transition', 'A Markdown deliverable can only be produced once while Work is active.')
+        }
+        const instruction = request.command.instruction.trim()
+        if (instruction.length < 1 || instruction.length > 20_000) {
+          throw new WorkError('work/deliverable-invalid', 'Markdown production requires a bounded instruction.')
+        }
+        const requestId = createRequestId()
+        try {
+          await options.harness.submitTurn({
+            requestId,
+            sessionId: work.primarySession.sessionId,
+            instruction: markdownProductionInstruction(work, instruction),
+            waitForCompletion: true,
+          }, signal)
+        } catch (cause) {
+          await commit(mutated({
+            ...work,
+            execution: 'failed',
+            lastFailure: {
+              requestId,
+              message: 'Harness did not complete the Markdown production Turn.',
+            },
+          }))
+          throw new WorkError(
+            'work/turn-failed',
+            'Harness did not complete the Markdown production Turn.',
+            { cause },
+          )
+        }
+        let deliverable: WorkFileDeliverable
+        try {
+          deliverable = await resolveMarkdownDeliverable(work, WORK_MARKDOWN_DELIVERABLE_PATH)
+        } catch (cause) {
+          await commit(mutated({
+            ...work,
+            primarySession: Object.freeze({
+              ...work.primarySession,
+              turnCount: work.primarySession.turnCount + 1,
+            }),
+            execution: 'failed',
+            lastFailure: {
+              requestId,
+              message: 'The production Turn finished without a valid Markdown deliverable.',
+            },
+          }))
+          if (cause instanceof WorkError) throw cause
+          throw new WorkError(
+            'work/deliverable-invalid',
+            'The production Turn finished without a valid Markdown deliverable.',
+            { cause },
+          )
+        }
+        return commit(mutated({
+          ...work,
+          primarySession: Object.freeze({
+            ...work.primarySession,
+            turnCount: work.primarySession.turnCount + 1,
+          }),
+          deliverable,
+          status: 'awaiting-review',
+          execution: 'idle',
+          lastFailure: null,
+        }))
       } else if (request.command.type === 'add-file-resource') {
         if (work.status !== 'working') {
           throw new WorkError('work/invalid-transition', 'Resources can only be added while Work is active.')
@@ -699,39 +904,10 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         if (work.deliverable) {
           throw new WorkError('work/deliverable-exists', 'The first-phase product supports one file deliverable.')
         }
-        const workspacePath = await fs.realpath(work.workspace.path)
-        const candidatePath = path.resolve(workspacePath, request.command.path)
-        const relativePath = path.relative(workspacePath, candidatePath)
-        if (
-          path.isAbsolute(request.command.path)
-          || relativePath === ''
-          || relativePath === '..'
-          || relativePath.startsWith(`..${path.sep}`)
-          || path.isAbsolute(relativePath)
-        ) {
-          throw new WorkError('work/deliverable-invalid', 'The file deliverable must be inside the managed Workspace.')
-        }
-        let resolvedFilePath: string
-        try {
-          resolvedFilePath = await fs.realpath(candidatePath)
-          if (!(await fs.stat(resolvedFilePath)).isFile()) throw new Error('not a regular file')
-        } catch {
-          throw new WorkError('work/deliverable-invalid', 'The file deliverable must be an existing regular file.')
-        }
-        const resolvedRelativePath = path.relative(workspacePath, resolvedFilePath)
-        if (
-          resolvedRelativePath === '..'
-          || resolvedRelativePath.startsWith(`..${path.sep}`)
-          || path.isAbsolute(resolvedRelativePath)
-        ) {
-          throw new WorkError('work/deliverable-invalid', 'The file deliverable must resolve inside the managed Workspace.')
-        }
+        const deliverable = await resolveMarkdownDeliverable(work, request.command.path)
         return commit(mutated({
           ...work,
-          deliverable: Object.freeze({
-            kind: 'file',
-            path: resolvedRelativePath.split(path.sep).join(path.posix.sep),
-          }),
+          deliverable,
           status: 'awaiting-review',
         }))
       } else if (request.command.type === 'complete') {

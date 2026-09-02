@@ -116,6 +116,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   assert.equal(source.includes('添加文件即将支持'), false)
   assert.match(source, /继续已有对话/)
   assert.match(source, /原对话不会改变/)
+  assert.match(source, /Markdown 成果/)
   assert.equal(source.includes('选择 Work 目录'), false)
   assert.equal(source.includes('选择工作目录'), false)
   await dispose()

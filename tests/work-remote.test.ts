@@ -99,10 +99,21 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
     workId: 'work-1',
     mutationId: 'mutation-1',
     expectedRevision: 2,
-    command: { type: 'deliver' },
+    command: { type: 'produce-markdown', instruction: 'Create a concise report.' },
   }), {
     workId: 'work-1',
     mutationId: 'mutation-1',
+    expectedRevision: 2,
+    command: { type: 'produce-markdown', instruction: 'Create a concise report.' },
+  })
+  assert.deepEqual(codec.schema.parse({
+    workId: 'work-1',
+    mutationId: 'mutation-2',
+    expectedRevision: 2,
+    command: { type: 'deliver' },
+  }), {
+    workId: 'work-1',
+    mutationId: 'mutation-2',
     expectedRevision: 2,
     command: { type: 'deliver' },
   })

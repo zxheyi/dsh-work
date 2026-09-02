@@ -322,6 +322,47 @@ test('binds the Primary Session by workspaceId without forwarding cwd', async ()
   }])
 })
 
+test('waits for the correlated completed Turn through the public Session follow stream', async () => {
+  const calls: string[] = []
+  const harness = createHarnessWorkPort({
+    workspaceRegistry: {
+      async create(workspacePath) { return { id: 'workspace-follow', path: workspacePath } },
+    },
+    sessionController: {
+      async create(request) { return { sessionId: request.sessionId } },
+      async prompt(request) {
+        calls.push(`prompt:${request.requestId}`)
+        return { accepted: true as const }
+      },
+      async *follow(request) {
+        calls.push(`follow:${request.address.sessionId}`)
+        yield { type: 'snapshot' }
+        yield {
+          type: 'event',
+          event: {
+            type: 'user/message',
+            data: { source: { kind: 'user', rpcId: 'request-follow' } },
+          },
+        }
+        yield { type: 'event', event: { type: 'turn/start', data: { turn: 4 } } }
+        yield {
+          type: 'event',
+          event: { type: 'turn/end', data: { turn: 4, reason: { kind: 'completed' } } },
+        }
+      },
+    },
+  })
+
+  await harness.submitTurn({
+    requestId: 'request-follow',
+    sessionId: 'session-follow',
+    instruction: 'Produce Markdown.',
+    waitForCompletion: true,
+  })
+
+  assert.deepEqual(calls, ['follow:session-follow', 'prompt:request-follow'])
+})
+
 test('creates one Primary Session bound to the managed Workspace', async () => {
   const sessionRequests: Array<{
     sessionId: string
@@ -488,6 +529,95 @@ test('records one existing file inside the managed Workspace as the deliverable'
     path: 'launch-brief.md',
   })
   assert.equal(updated.primarySession.turnCount, 0)
+  await fs.rm(workspaceRoot, { recursive: true, force: true })
+})
+
+test('produces and registers one Markdown deliverable through the Primary Session', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-produce-markdown-'))
+  let managedPath = ''
+  const turns: Array<{ instruction: string; waitForCompletion?: boolean }> = []
+  const controller = createWorkController({
+    createId: () => 'work-markdown',
+    createSessionId: () => 'session-markdown',
+    createRequestId: () => 'request-markdown',
+    workspaceRoot,
+    harness: {
+      ...testHarness(),
+      async ensureWorkspace(request) {
+        managedPath = request.path
+        await fs.mkdir(request.path, { recursive: true })
+        return { workspaceId: 'workspace-markdown', path: request.path }
+      },
+      async submitTurn(request) {
+        turns.push(request)
+        await fs.mkdir(path.join(managedPath, 'deliverables'), { recursive: true })
+        await fs.writeFile(path.join(managedPath, 'deliverables', 'result.md'), '# Launch brief\n\nReady.')
+      },
+    },
+  })
+  const created = await controller.create({ title: 'Markdown', goal: 'Produce the launch brief.' })
+  const withResource = await controller.dispatch({
+    workId: created.workId,
+    command: {
+      type: 'add-file-resource',
+      name: 'brief.txt',
+      mediaType: 'text/plain',
+      dataBase64: Buffer.from('source material').toString('base64'),
+    },
+  })
+
+  const produced = await controller.dispatch({
+    workId: created.workId,
+    command: { type: 'produce-markdown', instruction: 'Draft a concise launch brief.' },
+  })
+
+  assert.equal(turns.length, 1)
+  assert.equal(turns[0]?.waitForCompletion, true)
+  assert.match(turns[0]?.instruction ?? '', /deliverables\/result\.md/u)
+  assert.match(turns[0]?.instruction ?? '', new RegExp(withResource.resources[0]!.path.replace('.', '\\.')))
+  assert.deepEqual(produced.deliverable, { kind: 'file', path: 'deliverables/result.md' })
+  assert.equal(produced.primarySession.turnCount, 1)
+  assert.equal(produced.status, 'awaiting-review')
+  assert.equal(produced.execution, 'idle')
+  await fs.rm(workspaceRoot, { recursive: true, force: true })
+})
+
+test('rejects a completed production Turn that did not create the Markdown deliverable', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-missing-markdown-'))
+  const controller = createWorkController({
+    createId: () => 'work-missing-markdown',
+    createSessionId: () => 'session-missing-markdown',
+    workspaceRoot,
+    harness: testHarness(),
+  })
+  const created = await controller.create({ title: 'Missing Markdown', goal: 'Produce a result.' })
+  await fs.mkdir(created.workspace.path, { recursive: true })
+
+  await assert.rejects(controller.dispatch({
+    workId: created.workId,
+    command: { type: 'produce-markdown', instruction: 'Create the result.' },
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/deliverable-invalid')
+  assert.equal((await controller.get())?.deliverable, null)
+  assert.equal((await controller.get())?.execution, 'failed')
+  await fs.rm(workspaceRoot, { recursive: true, force: true })
+})
+
+test('rejects a non-Markdown file as the first-phase deliverable', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-non-markdown-'))
+  const controller = createWorkController({
+    createId: () => 'work-non-markdown',
+    createSessionId: () => 'session-non-markdown',
+    workspaceRoot,
+    harness: testHarness(),
+  })
+  const created = await controller.create({ title: 'Markdown only', goal: 'Keep the first output simple.' })
+  await fs.mkdir(created.workspace.path, { recursive: true })
+  await fs.writeFile(path.join(created.workspace.path, 'result.txt'), 'not markdown')
+
+  await assert.rejects(controller.dispatch({
+    workId: created.workId,
+    command: { type: 'record-file', path: 'result.txt' },
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/deliverable-invalid')
   await fs.rm(workspaceRoot, { recursive: true, force: true })
 })
 

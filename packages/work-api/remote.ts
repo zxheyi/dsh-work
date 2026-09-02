@@ -53,6 +53,10 @@ const importConversationSchema = z.object({
 const commandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('submit-turn'), instruction: z.string() }).strict(),
   z.object({
+    type: z.literal('produce-markdown'),
+    instruction: z.string().min(1).max(20_000),
+  }).strict(),
+  z.object({
     type: z.literal('add-file-resource'),
     name: z.string().min(1).max(200),
     mediaType: z.string().min(1).max(128).optional(),

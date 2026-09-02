@@ -198,15 +198,6 @@ async function fileBase64(file: File): Promise<string> {
   return btoa(binary)
 }
 
-function instructionWithResources(instruction: string, work: WorkView): string {
-  if (work.resources.length === 0) return instruction
-  return [
-    instruction,
-    '用户为这项 Work 主动添加了以下资料。请先用文件读取工具检查它们，再基于内容推进：',
-    ...work.resources.map(resource => `- @"${resource.path.replaceAll('"', '\\"')}"`),
-  ].join('\n\n')
-}
-
 function WorkRow({ work }: { readonly work: WorkView }): ReactNode {
   const status = workStatus(work)
   return h('article', { className: 'dsh-work-row', 'data-work-id': work.workId },
@@ -239,12 +230,14 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
   const busy = creating || importing
   const resourceCount = (work?.resources.length ?? 0) + pendingFiles.length
   const resourceRemaining = Math.max(0, MAX_RESOURCE_FILES - resourceCount)
-  const canSubmit = goal.trim().length > 0 && !busy
+  const canSubmit = goal.trim().length > 0 && !busy && !work?.deliverable
   const canImport = importContent.trim().length > 0 && importContent.length <= 100_000 && !busy
-  const composerTitle = work ? '接下来想推进什么？' : '你想完成什么？'
-  const composerHint = work
-    ? '补充要求，继续推进同一项工作。'
-    : '描述想要的结果，资料可以稍后添加。'
+  const composerTitle = work?.deliverable ? 'Markdown 成果已生成' : work ? '接下来想推进什么？' : '你想完成什么？'
+  const composerHint = work?.deliverable
+    ? '成果已经进入待审核状态。下一阶段会在这里提供预览和修改。'
+    : work
+      ? '补充成果要求，继续推进同一项工作。'
+      : '描述想要的结果，资料可以稍后添加。'
 
   const addFiles = useCallback((files: readonly File[]) => {
     setActionError(null)
@@ -294,7 +287,7 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
       }
       await works.dispatch({
         workId: target.workId,
-        command: { type: 'submit-turn', instruction: instructionWithResources(instruction, target) },
+        command: { type: 'produce-markdown', instruction },
       })
       setGoal('')
       setPendingFiles([])
@@ -359,9 +352,11 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
             id: 'dsh-work-goal',
             'data-work-goal': true,
             value: goal,
-            disabled: busy,
+            disabled: busy || Boolean(work?.deliverable),
             placeholder: work
-              ? '例如：把结论压缩成一页管理层摘要，并补充下一步建议。'
+              ? work.deliverable
+                ? '成果已生成，等待审核。'
+                : '例如：把结论压缩成一页管理层摘要，并补充下一步建议。'
               : '描述你想完成的结果；需要时可在下方添加文件。',
             onChange: (event: { currentTarget: { value: string } }) => setGoal(event.currentTarget.value),
             onKeyDown,
@@ -442,7 +437,7 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
             : null,
           h('div', { className: 'dsh-work-composer-actions' },
             h('div', { className: 'dsh-work-secondary-actions' },
-              h(ResourceEntry, { disabled: busy, onFiles: addFiles, remaining: resourceRemaining }),
+              h(ResourceEntry, { disabled: busy || Boolean(work?.deliverable), onFiles: addFiles, remaining: resourceRemaining }),
               !work ? h('button', {
                 className: 'dsh-work-import-trigger',
                 type: 'button',
@@ -453,7 +448,15 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
               className: 'dsh-work-primary',
               type: 'submit',
               disabled: !canSubmit,
-            }, creating ? '正在创建' : work ? '继续工作' : '开始工作'))),
+            }, creating ? '正在生成成果' : work?.deliverable ? '等待审核' : work ? '生成成果' : '开始工作'))),
+        work?.deliverable
+          ? h('section', { className: 'dsh-work-deliverable-card', 'aria-label': 'Markdown 成果' },
+            h('span', { className: 'dsh-work-deliverable-token', 'aria-hidden': 'true' }, 'MD'),
+            h('div', null,
+              h('strong', null, 'Markdown 成果'),
+              h('span', { title: work.deliverable.path }, work.deliverable.path)),
+            h('span', { className: 'dsh-work-status is-warning' }, '待审核'))
+          : null,
         h('section', { className: 'dsh-work-shortcuts', 'aria-labelledby': 'dsh-work-shortcuts-title' },
           h('h2', { id: 'dsh-work-shortcuts-title' }, '常见工作'),
           h('div', { className: 'dsh-work-shortcut-grid' }, shortcuts.map(shortcut =>
@@ -605,6 +608,11 @@ body[data-ds-dark-theme] {
 .dsh-work-primary:hover:not(:disabled) { background: var(--work-accent-hover); }
 .dsh-work-primary:disabled { opacity: .42; cursor: default; }
 .dsh-work-primary:active:not(:disabled), .dsh-work-shortcut:active:not(:disabled), .dsh-work-sidebar-create:active { transform: translateY(1px); }
+.dsh-work-deliverable-card { min-height: 72px; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 12px; margin-top: 16px; padding: 14px 16px; border: 1px solid var(--work-border); border-radius: 12px; background: var(--work-surface); box-shadow: var(--work-shadow); }
+.dsh-work-deliverable-token { width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; color: var(--work-accent); background: var(--work-accent-subtle); font-size: 11px; font-weight: 750; }
+.dsh-work-deliverable-card strong, .dsh-work-deliverable-card div > span { display: block; min-width: 0; }
+.dsh-work-deliverable-card strong { font-size: 14px; line-height: 20px; }
+.dsh-work-deliverable-card div > span { margin-top: 2px; overflow: hidden; color: var(--work-muted); text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 18px; }
 .dsh-work-shortcuts { margin-top: 28px; }
 .dsh-work-shortcuts h2, .dsh-work-section-heading h2 { margin: 0 0 12px; font-size: 18px; line-height: 26px; font-weight: 650; letter-spacing: -.015em; }
 .dsh-work-shortcut-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
