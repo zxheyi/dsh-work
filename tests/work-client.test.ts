@@ -55,6 +55,9 @@ function successfulRemote(overrides: Partial<WorkClientRemote> = {}): WorkClient
         },
       }
     },
+    async showDelivery(): Promise<RemoteResult<{ readonly shown: true }>> {
+      return { ok: true, value: { shown: true } }
+    },
     async list(): Promise<RemoteResult<WorkListValue>> {
       return { ok: true, value: { items: [view(1)] } }
     },
@@ -198,4 +201,20 @@ test('reads deliverable content through ctx.works without installing it in the l
   assert.equal(content.path, 'deliverables/result.md')
   assert.equal(content.content, '# Review me\n')
   assert.deepEqual(model.getSnapshot().items, [view(1)])
+})
+
+test('shows a delivered Work through ctx.works', async () => {
+  const shown: string[] = []
+  const model = new ClientWorkModel(successfulRemote({
+    async showDelivery(request) {
+      shown.push(request.workId)
+      return { ok: true, value: { shown: true } }
+    },
+  }))
+  model.replaceBaseline({ items: [view(1)] })
+  const works = new WorksController(new Context(), model)
+
+  await works.showDelivery('work-client')
+
+  assert.deepEqual(shown, ['work-client'])
 })

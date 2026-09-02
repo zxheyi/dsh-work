@@ -224,6 +224,7 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
   const [creating, setCreating] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [finalizing, setFinalizing] = useState(false)
   const [importTitle, setImportTitle] = useState('')
   const [importContent, setImportContent] = useState('')
   const [importSource, setImportSource] = useState<'dsh' | 'dsh-desktop' | 'other'>('dsh-desktop')
@@ -231,7 +232,7 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
   const [deliverableContent, setDeliverableContent] = useState<WorkDeliverableContent | null>(null)
   const [deliverableError, setDeliverableError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-  const busy = creating || importing
+  const busy = creating || importing || finalizing
   const resourceCount = (work?.resources.length ?? 0) + pendingFiles.length
   const resourceRemaining = Math.max(0, MAX_RESOURCE_FILES - resourceCount)
   const canRevise = Boolean(work?.deliverable && work.status === 'awaiting-review')
@@ -321,6 +322,25 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
     })
     return () => { active = false }
   }, [work?.deliverable, work?.revision, work?.workId, works])
+
+  const finalize = useCallback(async () => {
+    if (!work?.deliverable || finalizing) return
+    setFinalizing(true)
+    setActionError(null)
+    try {
+      if (work.status === 'awaiting-review') {
+        await works.dispatch({ workId: work.workId, command: { type: 'complete' } })
+      } else if (work.status === 'completed') {
+        await works.dispatch({ workId: work.workId, command: { type: 'deliver' } })
+      } else if (work.status === 'delivered') {
+        await works.showDelivery(work.workId)
+      }
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '成果操作暂时失败，请稍后重试。')
+    } finally {
+      setFinalizing(false)
+    }
+  }, [finalizing, work, works])
 
   const importConversation = useCallback(async () => {
     const content = importContent.trim()
@@ -492,7 +512,15 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
             h('div', null,
               h('strong', null, 'Markdown 成果'),
               h('span', { title: work.deliverable.path }, work.deliverable.path)),
-            h('span', { className: 'dsh-work-status is-warning' }, '待审核'))
+            h('div', { className: 'dsh-work-deliverable-actions' },
+              h('span', { className: `dsh-work-status is-${workStatus(work).tone}` }, workStatus(work).label),
+              h('button', {
+                type: 'button',
+                disabled: finalizing,
+                onClick: () => { void finalize() },
+              }, finalizing
+                ? work.status === 'awaiting-review' ? '正在完成' : work.status === 'completed' ? '正在导出' : '正在打开'
+                : work.status === 'awaiting-review' ? '确认完成' : work.status === 'completed' ? '导出成果' : '在 Finder 中显示')))
           : null,
         h('section', { className: 'dsh-work-shortcuts', 'aria-labelledby': 'dsh-work-shortcuts-title' },
           h('h2', { id: 'dsh-work-shortcuts-title' }, '常见工作'),
@@ -656,6 +684,11 @@ body[data-ds-dark-theme] {
 .dsh-work-deliverable-card strong, .dsh-work-deliverable-card div > span { display: block; min-width: 0; }
 .dsh-work-deliverable-card strong { font-size: 14px; line-height: 20px; }
 .dsh-work-deliverable-card div > span { margin-top: 2px; overflow: hidden; color: var(--work-muted); text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 18px; }
+.dsh-work-deliverable-actions { display: flex; align-items: center; gap: 10px; }
+.dsh-work-deliverable-actions .dsh-work-status { margin: 0; }
+.dsh-work-deliverable-actions button { height: 34px; padding: 0 12px; border: 1px solid var(--work-border-strong); border-radius: 8px; color: var(--work-accent); background: var(--work-surface); cursor: pointer; white-space: nowrap; font: 600 12px/18px var(--work-font); }
+.dsh-work-deliverable-actions button:hover:not(:disabled) { border-color: var(--work-accent); background: var(--work-accent-subtle); }
+.dsh-work-deliverable-actions button:disabled { opacity: .5; cursor: default; }
 .dsh-work-shortcuts { margin-top: 28px; }
 .dsh-work-shortcuts h2, .dsh-work-section-heading h2 { margin: 0 0 12px; font-size: 18px; line-height: 26px; font-weight: 650; letter-spacing: -.015em; }
 .dsh-work-shortcut-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }

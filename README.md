@@ -19,7 +19,7 @@ DSH Work 希望让普通用户从“我想完成什么”开始，而不是先�
 
 它不是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的重新实现，也不是 [DSH Desktop](https://github.com/anywhere-labs/dsh-desktop) 或 dsh-web 的桌面复刻。Harness 提供 Agent 运行时与原生插件体系；DSH Work 负责把这些能力组织成普通用户能够理解、审核和交付的完整工作体验。
 
-> **当前状态：** 已实现单 Work、受管 Workspace、Primary Session、多 Turn、单文件成果状态、重启恢复、失败继续、Work Remote/Client API、桌面首页壳，以及“继续已有对话”的安全可读内容导入。它们仍是发行前实现；安装包签名、升级、自动发现外部对话、完整资料与成果编辑尚未完成。
+> **当前状态：** 已打通首个发行前闭环：单 Work、受管 Workspace、Primary Session、多 Turn、受控文件资料、单一 Markdown 成果生产、安全原文预览、自然语言修改、确认完成、导出副本与 Finder 展示；同时支持重启恢复、失败继续，以及把已有对话的可读内容安全复制到新 Work。安装包签名、升级、外部会话自动发现、多成果版本和 Office 格式仍未完成。
 
 **产品资料：** [查看 PRD 源文件](docs/product-prd.html) · [在线预览交互式 PRD](https://htmlpreview.github.io/?https://github.com/zxheyi/dsh-work/blob/main/docs/product-prd.html) · [阅读 Work 聚合 ADR](docs/decisions/0006-work-as-product-owned-aggregate.md)
 
@@ -123,8 +123,11 @@ flowchart LR
 - 最小 Work 聚合、持久化与失败恢复；
 - Web／Desktop 共用的 Work Remote、Client API 与修订绑定命令；
 - 面向目标的桌面首页，以及把可读既有对话复制到新 Work 的安全导入入口。
+- 最多 20 个、单文件 25 MiB 的受控文件资料导入，不要求用户选择 Workspace 目录；
+- 由 Primary Session 生产固定 Markdown 成果，并在应用内安全预览、用自然语言继续修改；
+- 用户确认完成后导出受管副本，并通过 Harness 原生路径能力在 Finder 中显示交付位置。
 
-下一阶段将继续补齐资料导入、文件型成果生产与审核界面，并在上游提供明确授权的来源契约后接入外部会话自动发现。README 与 PRD 中超出上述实现清单的内容仍是产品方向，不代表已经交付。
+下一阶段将重点验证真实模型与权限流程、补充进度和失败恢复体验、设计多成果版本，并在上游提供明确授权的来源契约后接入外部会话自动发现。表格、演示、PDF 和复杂 Office 往返仍是产品方向，不代表已经交付。
 
 ## 开发与参与
 

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -363,6 +364,27 @@ test('waits for the correlated completed Turn through the public Session follow 
   assert.deepEqual(calls, ['follow:session-follow', 'prompt:request-follow'])
 })
 
+test('hands an approved delivery directory to the public native path opener', async () => {
+  const opened: string[] = []
+  const harness = createHarnessWorkPort({
+    workspaceRegistry: {
+      async create(workspacePath) { return { id: 'workspace-open', path: workspacePath } },
+    },
+    sessionController: {
+      async create(request) { return { sessionId: request.sessionId } },
+      async prompt() { return { accepted: true as const } },
+      async openWorkspacePath(request) {
+        opened.push(request.path)
+        return { opened: true as const }
+      },
+    },
+  })
+
+  await harness.openPath!('/managed/deliveries/work-1')
+
+  assert.deepEqual(opened, ['/managed/deliveries/work-1'])
+})
+
 test('creates one Primary Session bound to the managed Workspace', async () => {
   const sessionRequests: Array<{
     sessionId: string
@@ -703,11 +725,17 @@ test('rejects a second file deliverable', async () => {
 
 test('moves a file deliverable through review, completion, and delivery', async () => {
   const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-status-'))
+  const deliveryRoot = path.join(workspaceRoot, 'exports')
+  const opened: string[] = []
   const controller = createWorkController({
     createId: () => 'work-status',
     createSessionId: () => 'session-status',
     workspaceRoot,
-    harness: testHarness(),
+    deliveryRoot,
+    harness: {
+      ...testHarness(),
+      async openPath(target) { opened.push(target) },
+    },
   })
   const created = await controller.create({ title: 'Status', goal: 'Make progress understandable.' })
   await fs.mkdir(created.workspace.path, { recursive: true })
@@ -730,6 +758,16 @@ test('moves a file deliverable through review, completion, and delivery', async 
   assert.equal(awaitingReview.status, 'awaiting-review')
   assert.equal(completed.status, 'completed')
   assert.equal(delivered.status, 'delivered')
+  const exportDirectories = await fs.readdir(deliveryRoot)
+  assert.equal(exportDirectories.length, 1)
+  const exportDirectory = path.join(deliveryRoot, exportDirectories[0]!)
+  const exportedFiles = await fs.readdir(exportDirectory)
+  assert.deepEqual(exportedFiles, ['Status.md'])
+  assert.equal(await fs.readFile(path.join(exportDirectory, 'Status.md'), 'utf8'), 'ready')
+
+  await controller.showDelivery(created.workId)
+
+  assert.deepEqual(opened, [await fs.realpath(exportDirectory)])
   await fs.rm(workspaceRoot, { recursive: true, force: true })
 })
 
@@ -746,6 +784,46 @@ test('does not deliver a Work before review completion', async () => {
     controller.dispatch({ workId: created.workId, command: { type: 'deliver' } }),
     (error: unknown) => error instanceof WorkError && error.code === 'work/invalid-transition',
   )
+})
+
+test('does not overwrite different bytes at the managed delivery path', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-delivery-conflict-'))
+  const deliveryRoot = path.join(workspaceRoot, 'exports')
+  const controller = createWorkController({
+    createId: () => 'work-delivery-conflict',
+    createSessionId: () => 'session-delivery-conflict',
+    workspaceRoot,
+    deliveryRoot,
+    harness: testHarness(),
+  })
+  const created = await controller.create({ title: 'Conflict', goal: 'Never overwrite another export.' })
+  await fs.mkdir(created.workspace.path, { recursive: true })
+  await fs.writeFile(path.join(created.workspace.path, 'result.md'), 'accepted bytes')
+  const review = await controller.dispatch({
+    workId: created.workId,
+    command: { type: 'record-file', path: 'result.md' },
+  })
+  const completed = await controller.dispatch({
+    workId: created.workId,
+    command: { type: 'complete' },
+  })
+  const deliveryDirectory = path.join(
+    deliveryRoot,
+    createHash('sha256').update(created.workId).digest('hex').slice(0, 32),
+  )
+  await fs.mkdir(deliveryDirectory, { recursive: true })
+  await fs.writeFile(path.join(deliveryDirectory, 'Conflict.md'), 'different bytes')
+
+  await assert.rejects(controller.dispatch({
+    workId: created.workId,
+    command: { type: 'deliver' },
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/delivery-failed')
+
+  assert.equal((await controller.get())?.status, 'completed')
+  assert.equal(await fs.readFile(path.join(deliveryDirectory, 'Conflict.md'), 'utf8'), 'different bytes')
+  assert.equal(review.status, 'awaiting-review')
+  assert.equal(completed.status, 'completed')
+  await fs.rm(workspaceRoot, { recursive: true, force: true })
 })
 
 test('restores the Work, managed Workspace, and Primary Session after restart', async () => {

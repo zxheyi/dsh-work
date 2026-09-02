@@ -19,7 +19,7 @@ DSH Work is designed to start with “What do you want to finish?” rather than
 
 It is neither a reimplementation of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) nor a desktop replica of [DSH Desktop](https://github.com/anywhere-labs/dsh-desktop) or dsh-web. Harness provides the Agent runtime and native plugin system. DSH Work turns those capabilities into a complete work experience that ordinary users can understand, review, and deliver.
 
-> **Current status:** the desktop host, official Harness alpha.2 runtime boundary, external guardian, and persistent Profile-generation recovery have passed native macOS and Windows verification. The Work aggregate and work surface are accepted product direction, not a daily-use release.
+> **Current status:** the first pre-release Work loop is implemented: one Work, a managed Workspace, one Primary Session, bounded file sources, one Markdown deliverable, safe source preview, natural-language revision, explicit completion, managed export, and native delivery-location opening. Runtime recovery and readable conversation import are also present. Signing, upgrades, authorized external-conversation discovery, deliverable versions, and Office formats remain open.
 
 **Product material:** [PRD source](docs/product-prd.html) · [Interactive PRD preview](https://htmlpreview.github.io/?https://github.com/zxheyi/dsh-work/blob/main/docs/product-prd.html) · [Work aggregate ADR](docs/decisions/0006-work-as-product-owned-aggregate.md)
 
@@ -120,8 +120,11 @@ The repository currently establishes:
 - official DeepSeek Harness alpha.2 CLI, Profile, and Bundle composition;
 - a crash-safe external guardian, Profile generations, and explicit recovery;
 - TypeScript product source, builds, unit and contract tests, and native desktop verification.
+- a persistent singleton Work with a managed Workspace, Primary Session, Turns, bounded file-resource import, and readable conversation import;
+- one Primary-Session-produced Markdown deliverable with safe in-app preview and natural-language revision;
+- explicit completion, managed export, and native delivery-location opening.
 
-The next product stage will use [ADR 0006](docs/decisions/0006-work-as-product-owned-aggregate.md) to constrain a minimal Work Host plugin, primary-Session orchestration, deliverable versions, and a Work Client surface. The README and PRD describe product direction, not shipped UI.
+The next product stage will validate real model and permission flows, improve progress and failure recovery, and design deliverable versions. Spreadsheet, presentation, PDF, and complex Office round trips remain product direction rather than implemented UI.
 
 ## Development and contributing
 

@@ -7,6 +7,7 @@ export type WorkErrorCode =
   | 'work/not-found'
   | 'work/deliverable-exists'
   | 'work/deliverable-invalid'
+  | 'work/delivery-failed'
   | 'work/import-invalid'
   | 'work/invalid-transition'
   | 'work/mutation-conflict'
@@ -113,6 +114,7 @@ export interface WorkController {
   get(): Promise<WorkSnapshot | null>
   list(): Promise<readonly WorkSnapshot[]>
   readDeliverable(workId: string): Promise<WorkDeliverableContent>
+  showDelivery(workId: string, signal?: AbortSignal): Promise<void>
   follow(signal?: AbortSignal): AsyncIterable<WorkFollowFrame>
   dispatch(request: DispatchWorkRequest, signal?: AbortSignal): Promise<WorkSnapshot>
 }
@@ -182,6 +184,7 @@ export interface WorkControllerOptions {
   readonly createRequestId?: () => string
   readonly now?: () => string
   readonly workspaceRoot: string
+  readonly deliveryRoot?: string
   readonly harness: HarnessWorkPort
   readonly store?: WorkStore
 }
@@ -232,6 +235,7 @@ export interface HarnessWorkPort {
   ensureWorkspace(request: EnsureWorkspaceRequest): Promise<WorkWorkspace>
   ensurePrimarySession(request: EnsurePrimarySessionRequest): Promise<{ readonly sessionId: string }>
   submitTurn(request: SubmitTurnRequest, signal?: AbortSignal): Promise<void>
+  openPath?(path: string, signal?: AbortSignal): Promise<void>
 }
 
 export interface EnsurePrimarySessionRequest {
@@ -382,6 +386,10 @@ export interface HarnessWorkContext {
         readonly data: unknown
       }
     }>
+    openWorkspacePath?(
+      request: { readonly path: string },
+      signal: AbortSignal,
+    ): Promise<{ readonly opened: true }>
   }
 }
 
@@ -473,6 +481,12 @@ export function createHarnessWorkPort(context: HarnessWorkContext): HarnessWorkP
         mode: 'queue',
         content: [{ type: 'text', text: request.instruction }],
       }, signal)
+    },
+    async openPath(target, signal = new AbortController().signal) {
+      if (!context.sessionController.openWorkspacePath) {
+        throw new Error('Native path opening is unavailable.')
+      }
+      await context.sessionController.openWorkspacePath({ path: target }, signal)
     },
   }
 }
@@ -569,12 +583,96 @@ function markdownRevisionInstruction(work: WorkSnapshot, instruction: string): s
   ].join('\n\n')
 }
 
+function deliveryError(message: string, options?: ErrorOptions): WorkError {
+  return new WorkError('work/delivery-failed', message, options)
+}
+
+function deliveryFileName(title: string): string {
+  let base = title.normalize('NFKC')
+    .replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/gu, '-')
+    .replace(/\s+/gu, ' ')
+    .replace(/^[. ]+|[. ]+$/gu, '')
+    .slice(0, 80)
+    .replace(/[. ]+$/gu, '')
+  if (!base) base = 'result'
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/iu.test(base)) base = `_${base}`
+  return `${base}.md`
+}
+
+function deliveryRelativeLocation(work: WorkSnapshot): { readonly directory: string; readonly fileName: string } {
+  return Object.freeze({
+    directory: createHash('sha256').update(work.workId).digest('hex').slice(0, 32),
+    fileName: deliveryFileName(work.title),
+  })
+}
+
+async function ensureDeliveryDirectory(directory: string, recursive = false): Promise<void> {
+  try {
+    await fs.mkdir(directory, recursive ? { recursive: true } : undefined)
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) {
+      throw deliveryError('The delivery directory could not be created.', { cause: error })
+    }
+  }
+  const stat = await fs.lstat(directory)
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw deliveryError('The delivery directory is not a plain directory.')
+  }
+}
+
+async function exportMarkdownDeliverable(work: WorkSnapshot, deliveryRoot: string): Promise<string> {
+  if (!work.deliverable) throw deliveryError('This Work does not have a deliverable to export.')
+  const inspected = await inspectMarkdownDeliverable(work, work.deliverable.path)
+  await ensureDeliveryDirectory(deliveryRoot, true)
+  const root = await fs.realpath(deliveryRoot)
+  const location = deliveryRelativeLocation(work)
+  const directory = path.join(root, location.directory)
+  await ensureDeliveryDirectory(directory)
+  const target = path.join(directory, location.fileName)
+  const bytes = Buffer.from(inspected.content.content, 'utf8')
+  try {
+    await fs.writeFile(target, bytes, { flag: 'wx', mode: 0o600 })
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) {
+      throw deliveryError('The Markdown deliverable could not be exported.', { cause: error })
+    }
+    const existing = await fs.readFile(target)
+    if (createHash('sha256').update(existing).digest('hex') !== inspected.content.contentDigest) {
+      throw deliveryError('The delivery path already contains a different file.')
+    }
+  }
+  const resolved = await fs.realpath(target)
+  const relative = path.relative(root, resolved)
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw deliveryError('The exported deliverable resolved outside the managed delivery root.')
+  }
+  return directory
+}
+
+async function resolveDeliveryDirectory(work: WorkSnapshot, deliveryRoot: string): Promise<string> {
+  const root = await fs.realpath(deliveryRoot)
+  const location = deliveryRelativeLocation(work)
+  const directory = await fs.realpath(path.join(root, location.directory))
+  const relative = path.relative(root, directory)
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw deliveryError('The delivery directory resolved outside the managed delivery root.')
+  }
+  const target = await fs.realpath(path.join(directory, location.fileName))
+  if (!(await fs.stat(target)).isFile()) throw deliveryError('The exported deliverable is not a regular file.')
+  const targetRelative = path.relative(directory, target)
+  if (targetRelative !== location.fileName) {
+    throw deliveryError('The exported deliverable resolved outside its delivery directory.')
+  }
+  return directory
+}
+
 export function createWorkController(options: WorkControllerOptions): WorkController {
   const createId = options.createId ?? randomUUID
   const createSessionId = options.createSessionId ?? randomUUID
   const createRequestId = options.createRequestId ?? randomUUID
   const now = options.now ?? (() => new Date().toISOString())
   const store = options.store ?? createMemoryWorkStore()
+  const deliveryRoot = options.deliveryRoot ?? path.join(options.workspaceRoot, '.dsh-work-deliveries')
   let work: WorkSnapshot | null = null
   const followers = new Set<{
     readonly frames: WorkFollowFrame[]
@@ -788,6 +886,27 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         throw new WorkError('work/deliverable-invalid', 'This Work does not have a Markdown deliverable to review.')
       }
       return (await inspectMarkdownDeliverable(work, work.deliverable.path)).content
+    },
+
+    async showDelivery(workId, signal) {
+      await ready()
+      if (!work || work.workId !== workId) {
+        throw new WorkError('work/not-found', `Work not found: ${workId}`)
+      }
+      if (work.status !== 'delivered') {
+        throw new WorkError('work/invalid-transition', 'Work must be delivered before showing its export location.')
+      }
+      if (!options.harness.openPath) {
+        throw deliveryError('This Host cannot show native delivery locations.')
+      }
+      let directory: string
+      try {
+        directory = await resolveDeliveryDirectory(work, deliveryRoot)
+        await options.harness.openPath(directory, signal)
+      } catch (cause) {
+        if (cause instanceof WorkError) throw cause
+        throw deliveryError('The delivery location could not be shown.', { cause })
+      }
     },
 
     async *follow(signal = new AbortController().signal) {
@@ -1042,6 +1161,12 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
       } else {
         if (work.status !== 'completed') {
           throw new WorkError('work/invalid-transition', 'Work must be completed before delivery.')
+        }
+        try {
+          await exportMarkdownDeliverable(work, deliveryRoot)
+        } catch (cause) {
+          if (cause instanceof WorkError) throw cause
+          throw deliveryError('The Markdown deliverable could not be exported.', { cause })
         }
         return commit(mutated({ ...work, status: 'delivered' }))
       }

@@ -8,6 +8,8 @@ import type {
   WorkListValue,
   WorkDeliverableContent,
   WorkReadDeliverableRequest,
+  WorkShowDeliveryRequest,
+  WorkShowDeliveryValue,
   WorkRemoteFollowFrame,
   WorkView,
 } from './index.ts'
@@ -85,6 +87,9 @@ const deliverableContentSchema: z.ZodType<WorkDeliverableContent> = z.object({
   path: z.string().min(1),
   content: z.string().min(1).max(5 * 1024 * 1024),
   contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+}).strict()
+const showDeliveryValueSchema: z.ZodType<WorkShowDeliveryValue> = z.object({
+  shown: z.literal(true),
 }).strict()
 const listSchema: z.ZodType<WorkListValue> = z.object({
   items: z.array(workViewSchema).max(1),
@@ -165,6 +170,21 @@ export const TYPERT_REMOTE: TypertRemoteContribution = Object.freeze({
       result: strict('@dsh-work/work-api#WorkDeliverableContent', deliverableContentSchema),
     }),
     Object.freeze({
+      id: '@dsh-work/work-api#work/showDelivery',
+      service: 'workApi',
+      namespace: 'work',
+      method: 'showDelivery',
+      invocation: Object.freeze({ kind: 'direct' as const }),
+      parameters: Object.freeze([Object.freeze({
+        name: 'request',
+        wire: 'request',
+        source: 'json' as const,
+        codec: strict('@dsh-work/work-api#WorkShowDeliveryRequest', readDeliverableRequestSchema),
+      })]),
+      cancellation: Object.freeze({ parameter: 'signal' as const }),
+      result: strict('@dsh-work/work-api#WorkShowDeliveryValue', showDeliveryValueSchema),
+    }),
+    Object.freeze({
       id: '@dsh-work/work-api#work/list',
       service: 'workApi',
       namespace: 'work',
@@ -201,6 +221,10 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'work/readDeliverable': (
       request: WorkReadDeliverableRequest,
     ) => Promise<RemoteResult<WorkDeliverableContent>>
+    'work/showDelivery': (
+      request: WorkShowDeliveryRequest,
+      signal?: AbortSignal,
+    ) => Promise<RemoteResult<WorkShowDeliveryValue>>
     'work/list': () => Promise<RemoteResult<WorkListValue>>
     'work/follow': (signal?: AbortSignal) => AsyncIterable<WorkRemoteFollowFrame>
   }
@@ -211,6 +235,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       importConversation: TypertRemoteMap['work/importConversation']
       dispatch: TypertRemoteMap['work/dispatch']
       readDeliverable: TypertRemoteMap['work/readDeliverable']
+      showDelivery: TypertRemoteMap['work/showDelivery']
       list: TypertRemoteMap['work/list']
       follow: TypertRemoteMap['work/follow']
     }

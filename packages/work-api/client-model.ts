@@ -14,6 +14,7 @@ import type {
   WorkImportConversationSpec,
   WorkRemoteFollowFrame,
   WorkView,
+  WorkShowDeliveryValue,
 } from './index.ts'
 
 export interface WorkClientRemote {
@@ -24,6 +25,7 @@ export interface WorkClientRemote {
   ): Promise<RemoteResult<WorkView>>
   dispatch(request: WorkDispatchRequest, signal?: AbortSignal): Promise<RemoteResult<WorkView>>
   readDeliverable(request: { readonly workId: string }): Promise<RemoteResult<WorkDeliverableContent>>
+  showDelivery(request: { readonly workId: string }, signal?: AbortSignal): Promise<RemoteResult<WorkShowDeliveryValue>>
   list(): Promise<RemoteResult<WorkListValue>>
   follow(signal?: AbortSignal): AsyncIterable<WorkRemoteFollowFrame>
 }
@@ -46,6 +48,7 @@ export interface IWorks {
   importConversation(spec: WorkImportConversationSpec, signal?: AbortSignal): Promise<WorkView>
   dispatch(request: WorkClientDispatchRequest, signal?: AbortSignal): Promise<WorkView>
   readDeliverable(workId: string): Promise<WorkDeliverableContent>
+  showDelivery(workId: string, signal?: AbortSignal): Promise<void>
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -93,6 +96,10 @@ export class ClientWorkModel implements WorkSource {
 
   readDeliverable(workId: string): Promise<RemoteResult<WorkDeliverableContent>> {
     return this.remote.readDeliverable({ workId })
+  }
+
+  showDelivery(workId: string, signal?: AbortSignal): Promise<RemoteResult<WorkShowDeliveryValue>> {
+    return this.remote.showDelivery({ workId }, signal)
   }
 
   replaceBaseline(value: WorkListValue): void {
@@ -201,5 +208,10 @@ export class WorksController extends Service implements IWorks {
     const result = await this.model.readDeliverable(workId)
     if (!result.ok) throw result.error
     return result.value
+  }
+
+  async showDelivery(workId: string, signal?: AbortSignal): Promise<void> {
+    const result = await this.model.showDelivery(workId, signal)
+    if (!result.ok) throw result.error
   }
 }

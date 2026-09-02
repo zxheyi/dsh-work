@@ -25,6 +25,9 @@ export interface WorkReadDeliverableRequest {
   readonly workId: string
 }
 
+export type WorkShowDeliveryRequest = WorkReadDeliverableRequest
+export interface WorkShowDeliveryValue { readonly shown: true }
+
 export interface WorkView {
   readonly workId: string
   readonly revision: number
@@ -61,6 +64,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'work/not-found': Record<string, never>
     'work/deliverable-exists': Record<string, never>
     'work/deliverable-invalid': Record<string, never>
+    'work/delivery-failed': Record<string, never>
     'work/import-invalid': Record<string, never>
     'work/invalid-transition': Record<string, never>
     'work/mutation-conflict': Record<string, never>
@@ -139,6 +143,13 @@ export class WorkRemoteController extends TypertRemoteService {
     return workResult(() => this.controller.readDeliverable(request.workId))
   }
 
+  showDelivery(request: WorkShowDeliveryRequest, signal?: AbortSignal): Promise<WorkShowDeliveryValue> {
+    return workResult(async () => {
+      await this.controller.showDelivery(request.workId, signal)
+      return Object.freeze({ shown: true as const })
+    })
+  }
+
   async list(): Promise<WorkListValue> {
     return Object.freeze({
       items: Object.freeze((await this.controller.list()).map(projectWork)),
@@ -150,7 +161,7 @@ export class WorkRemoteController extends TypertRemoteService {
   }
 }
 
-type RemoteMethodName = 'create' | 'importConversation' | 'dispatch' | 'readDeliverable' | 'list' | 'follow'
+type RemoteMethodName = 'create' | 'importConversation' | 'dispatch' | 'readDeliverable' | 'showDelivery' | 'list' | 'follow'
 type RemoteMethod = (this: WorkRemoteController, ...args: unknown[]) => unknown
 type RemoteDecorator = (
   method: RemoteMethod,
@@ -179,6 +190,7 @@ installRemoteMarker('create', Remote as RemoteDecorator)
 installRemoteMarker('importConversation', Remote as RemoteDecorator)
 installRemoteMarker('dispatch', Remote as RemoteDecorator)
 installRemoteMarker('readDeliverable', Remote as RemoteDecorator)
+installRemoteMarker('showDelivery', Remote as RemoteDecorator)
 installRemoteMarker('list', Remote as RemoteDecorator)
 installRemoteMarker('follow', Remote({ mode: 'stream' }) as RemoteDecorator)
 

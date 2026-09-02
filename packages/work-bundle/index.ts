@@ -89,6 +89,7 @@ export async function apply(context: WorkBundleContext): Promise<void> {
   context.effect(() => () => domain.close())
   context.provide('workController', createWorkController({
     workspaceRoot: context.dshHomePath('workspaces'),
+    deliveryRoot: context.dshHomePath('deliveries'),
     harness: createHarnessWorkPort(context),
     store: createDomainWorkStore(domain.global),
   }))
