@@ -7,6 +7,7 @@ import {
   matchesSessionOutputSelection,
   parseSafeMarkdown,
   planSafeMarkdownRender,
+  sessionOutputSaveTarget,
   sessionOutputVersionSummary,
 } from '../packages/work-api/surface.ts'
 import {
@@ -18,6 +19,22 @@ import {
   type WorkRecoveryContext,
 } from '../packages/work-api/recovery-context.ts'
 import { planTextDiff } from '../packages/work-api/text-diff.ts'
+
+test('retries the original selected output version after the visible selection changes', () => {
+  const selection = { sessionId: 'session-save', turn: 2, throughSeq: 9, path: 'report.md' }
+  const first = sessionOutputSaveTarget(selection, {
+    fileId: 'a'.repeat(32), versionId: 'b'.repeat(32), ordinal: 1,
+  })
+  const visibleSecond = {
+    fileId: 'a'.repeat(32), versionId: 'c'.repeat(32), ordinal: 2,
+  }
+
+  assert.equal(sessionOutputSaveTarget(selection, visibleSecond, first), first)
+  assert.deepEqual(first.spec.version, {
+    fileId: 'a'.repeat(32), versionId: 'b'.repeat(32),
+  })
+  assert.equal(first.ordinal, 1)
+})
 
 test('round trips only bounded exact recovery context without file content', () => {
   const context: WorkRecoveryContext = {

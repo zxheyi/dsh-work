@@ -3065,6 +3065,93 @@ test('saves an unadopted Session output idempotently and opens its real managed 
   await fs.rm(root, { recursive: true, force: true })
 })
 
+test('saves the exact selected immutable version while live output and selection advance', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-selected-version-save-'))
+  const workspace = path.join(root, 'workspace')
+  const versionRoot = path.join(root, 'versions')
+  const deliveryRoot = path.join(root, 'saved')
+  await fs.mkdir(workspace)
+  const firstContent = '# First version\n'
+  const secondContent = '# Second version\n'
+  const events: unknown[] = []
+  const addWrite = (turn: number, firstSeq: number, content: string): void => {
+    const callId = `write-${String(turn)}`
+    events.push(
+      { seq: firstSeq, type: 'tool/call', data: {
+        turn, callId, name: 'write', arguments: JSON.stringify({ file_path: 'report.md', content }),
+      } },
+      { seq: firstSeq + 1, type: 'tool/result', surfaceOp: 'append', data: {
+        turn, message: { source: { callId }, content: [{ type: 'tool-result', isError: false }] },
+      } },
+      { seq: firstSeq + 2, type: 'turn/end', data: { turn, reason: { kind: 'completed' } } },
+    )
+  }
+  const harness: HarnessWorkPort = {
+    ...testHarness(),
+    async inspectSession() { return { cwd: workspace, events } },
+    async inspectSessionWorkspace() { return workspace },
+  }
+  await fs.writeFile(path.join(workspace, 'report.md'), firstContent)
+  addWrite(1, 1, firstContent)
+  const publisher = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot,
+    deliveryRoot, harness,
+  })
+  await publisher.inspectSessionOutputs({ sessionId: 'session-version-save', turn: 1, throughSeq: 3 })
+  await fs.writeFile(path.join(workspace, 'report.md'), secondContent)
+  addWrite(2, 4, secondContent)
+  await publisher.inspectSessionOutputs({ sessionId: 'session-version-save', turn: 2, throughSeq: 6 })
+  const versions = await publisher.listSessionOutputVersions({
+    sessionId: 'session-version-save', path: 'report.md',
+  })
+  assert.equal(versions.length, 2)
+  assert.equal(versions[0]?.adoption, undefined)
+  let advanced = false
+  const saver = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot,
+    deliveryRoot, harness,
+    sessionOutputSaveInternals: {
+      async afterTargetOpen() {
+        if (advanced) return
+        advanced = true
+        await fs.writeFile(path.join(workspace, 'report.md'), '# Live version advanced\n')
+      },
+    },
+  })
+  const selectedSpec = {
+    sessionId: 'session-version-save', turn: 2, throughSeq: 6, path: 'report.md',
+    version: { fileId: versions[0]!.fileId, versionId: versions[0]!.versionId },
+  }
+  const savedFirst = await saver.saveSessionOutput(selectedSpec)
+  assert.equal(advanced, true)
+  assert.deepEqual(savedFirst.sourceVersion, {
+    fileId: versions[0]!.fileId, versionId: versions[0]!.versionId, ordinal: 1,
+  })
+  assert.equal(savedFirst.contentDigest, versions[0]!.contentDigest)
+  assert.equal(await fs.readFile(path.join(savedFirst.location, savedFirst.fileName), 'utf8'), firstContent)
+  assert.equal(await fs.readFile(path.join(workspace, 'report.md'), 'utf8'), '# Live version advanced\n')
+
+  const savedSecond = await saver.saveSessionOutput({
+    ...selectedSpec,
+    version: { fileId: versions[1]!.fileId, versionId: versions[1]!.versionId },
+  })
+  assert.deepEqual(savedSecond.sourceVersion, {
+    fileId: versions[1]!.fileId, versionId: versions[1]!.versionId, ordinal: 2,
+  })
+  assert.notEqual(savedSecond.location, savedFirst.location)
+  assert.equal(await fs.readFile(path.join(savedSecond.location, savedSecond.fileName), 'utf8'), secondContent)
+
+  await fs.writeFile(path.join(savedFirst.location, savedFirst.fileName), '# Conflicting saved bytes\n')
+  const retriedFirst = await saver.saveSessionOutput(selectedSpec)
+  assert.notEqual(retriedFirst.location, savedFirst.location)
+  assert.equal(await fs.readFile(path.join(savedFirst.location, savedFirst.fileName), 'utf8'), '# Conflicting saved bytes\n')
+  assert.equal(await fs.readFile(path.join(retriedFirst.location, retriedFirst.fileName), 'utf8'), firstContent)
+  await assert.rejects(saver.saveSessionOutput({
+    ...selectedSpec, sessionId: 'other-session',
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-output-save-failed')
+  await fs.rm(root, { recursive: true, force: true })
+})
+
 test('isolates a cancelled Session output save attempt and allows retry without publishing it', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-save-cancel-'))
   const deliveryRoot = path.join(root, 'saved')

@@ -531,6 +531,7 @@ test('saves and opens a Session output without changing the Work projection', as
   const saved = {
     sessionId: 'session-save', turn: 2, name: 'report.md', path: 'report.md',
     bytes: 9, mediaType: 'text/markdown', contentDigest: 'a'.repeat(64),
+    sourceVersion: { fileId: 'c'.repeat(32), versionId: 'd'.repeat(32), ordinal: 1 },
     saveId: 'b'.repeat(32), fileName: 'report.md', location: '/managed/saved',
   }
   const model = new ClientWorkModel(successfulRemote({
@@ -545,7 +546,10 @@ test('saves and opens a Session output without changing the Work projection', as
   }))
   model.replaceBaseline({ items: [view(1)] })
   const works = new WorksController(new Context(), model)
-  const output = { sessionId: 'session-save', turn: 2, throughSeq: 9, path: 'report.md' }
+  const output = {
+    sessionId: 'session-save', turn: 2, throughSeq: 9, path: 'report.md',
+    version: { fileId: saved.sourceVersion.fileId, versionId: saved.sourceVersion.versionId },
+  }
 
   assert.deepEqual(await works.saveSessionOutput(output), saved)
   await works.showSessionOutputSave({

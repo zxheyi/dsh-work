@@ -169,6 +169,13 @@ const sessionOutputVersionIdentitySchema = z.object({
   fileId: z.string().regex(/^[a-f0-9]{32}$/u),
   versionId: z.string().regex(/^[a-f0-9]{32}$/u),
 }).strict()
+const saveSessionOutputSchema: z.ZodType<WorkSaveSessionOutputSpec> = z.object({
+  sessionId: z.string().min(1).max(256),
+  turn: z.number().int().nonnegative(),
+  throughSeq: z.number().int().nonnegative(),
+  path: z.string().min(1).max(4096),
+  version: sessionOutputVersionIdentitySchema.optional(),
+}).strict()
 const prepareSessionOutputRevisionSchema: z.ZodType<WorkPrepareSessionOutputRevisionSpec> = z.object({
   sessionId: z.string().min(1).max(256),
   turn: z.number().int().nonnegative(),
@@ -212,6 +219,11 @@ const sessionOutputSaveSchema: z.ZodType<WorkSessionOutputSave> = z.object({
   bytes: z.number().int().positive().max(25 * 1024 * 1024),
   mediaType: z.string().min(1).max(128).nullable(),
   contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+  sourceVersion: z.object({
+    fileId: z.string().regex(/^[a-f0-9]{32}$/u),
+    versionId: z.string().regex(/^[a-f0-9]{32}$/u),
+    ordinal: z.number().int().positive().max(512),
+  }).strict().optional(),
   saveId: z.string().regex(/^[a-f0-9]{32}$/u),
   fileName: z.string().min(1).max(160),
   location: z.string().min(1).max(4096),
@@ -484,7 +496,7 @@ export const TYPERT_REMOTE: TypertRemoteContribution = Object.freeze({
         name: 'spec',
         wire: 'spec',
         source: 'json' as const,
-        codec: strict('@dsh-work/work-api#WorkSaveSessionOutputSpec', readSessionOutputSchema),
+        codec: strict('@dsh-work/work-api#WorkSaveSessionOutputSpec', saveSessionOutputSchema),
       })]),
       cancellation: Object.freeze({ parameter: 'signal' as const }),
       result: strict('@dsh-work/work-api#WorkSessionOutputSave', sessionOutputSaveSchema),

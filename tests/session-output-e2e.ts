@@ -671,6 +671,25 @@ async function run(): Promise<void> {
     assert.equal(readOutputVersionRecords().filter(record =>
       record.sessionId === baseline.sessionA && record.path === 'report-a.md').length, 2)
 
+    step = 'save-historical-version'; report('fail')
+    const savedBeforeHistorical = fs.readdirSync(savesRoot).length
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] button')).find(item => item.textContent?.trim() === '保存 v1 副本'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true })()"), true)
+    await waitFor(
+      () => js<string>("document.querySelector('.dsh-work-output-preview-actions > span')?.textContent ?? ''"),
+      text => text.includes('已保存 v1 到'),
+      'Saving selected v1 did not report the bound historical version',
+    )
+    const historicalSave = await waitFor(
+      async () => fs.readdirSync(savesRoot)
+        .map(name => path.join(savesRoot, name))
+        .find(candidate => fs.existsSync(path.join(candidate, 'report-a.md'))
+          && fs.readFileSync(path.join(candidate, 'report-a.md'), 'utf8') === reportA),
+      candidate => Boolean(candidate) && fs.readdirSync(savesRoot).length > savedBeforeHistorical,
+      'Historical v1 bytes were not copied to a distinct managed save record',
+    )
+    assert.ok(historicalSave)
+    assert.equal(fs.readFileSync(reportAPath, 'utf8'), '# 甲报告（已修改）\n\n修改成功。\n')
+
     step = 'adopt-historical-version'; report('fail')
     assert.equal(await js<boolean>("(() => { const button = document.querySelector('[data-work-output-adopt=\"v1\"]'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true })()"), true)
     await waitFor(

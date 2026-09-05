@@ -393,7 +393,7 @@
       "files": "packages/work-domain/index.ts；packages/work-api/remote.ts；packages/work-api/surface.ts",
       "verification": "导出字节/并发选择/冲突集成、旧版保存 E2E",
       "limits": "采用与保存两种状态保持独立。",
-      "status": "pending"
+      "status": "verified"
     },
     {
       "id": "T21",

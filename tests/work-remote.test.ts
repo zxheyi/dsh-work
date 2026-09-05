@@ -299,10 +299,23 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
   assert.deepEqual(saveCodec.schema.parse({
     sessionId: 'session-remote', turn: 2, throughSeq: 12, path: 'report.md',
   }), { sessionId: 'session-remote', turn: 2, throughSeq: 12, path: 'report.md' })
+  assert.deepEqual(saveCodec.schema.parse({
+    sessionId: 'session-remote', turn: 2, throughSeq: 12, path: 'report.md',
+    version: { fileId: 'b'.repeat(32), versionId: 'c'.repeat(32) },
+  }), {
+    sessionId: 'session-remote', turn: 2, throughSeq: 12, path: 'report.md',
+    version: { fileId: 'b'.repeat(32), versionId: 'c'.repeat(32) },
+  })
   assert.throws(() => saveResultCodec.schema.parse({
     sessionId: 'session-remote', turn: 2, name: 'report.md', path: 'report.md',
     bytes: 12, mediaType: 'text/markdown', contentDigest: 'a'.repeat(64),
     saveId: '../escape', fileName: 'report.md', location: '/managed/saved',
+  }))
+  assert.throws(() => saveResultCodec.schema.parse({
+    sessionId: 'session-remote', turn: 2, name: 'report.md', path: 'report.md',
+    bytes: 12, mediaType: 'text/markdown', contentDigest: 'a'.repeat(64),
+    sourceVersion: { fileId: 'b'.repeat(32), versionId: '../escape', ordinal: 1 },
+    saveId: 'c'.repeat(32), fileName: 'report.md', location: '/managed/saved',
   }))
 
   const listVersions = TYPERT_REMOTE.descriptors.find(

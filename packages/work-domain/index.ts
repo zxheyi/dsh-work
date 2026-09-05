@@ -194,7 +194,15 @@ export interface SessionOutputRevisionFailure {
   readonly message: string
 }
 
-export interface SaveSessionOutputSpec extends ReadSessionOutputSpec {}
+export interface SaveSessionOutputSpec extends ReadSessionOutputSpec {
+  readonly version?: ReadSessionOutputVersionSpec | undefined
+}
+
+export interface SessionOutputSaveVersion {
+  readonly fileId: string
+  readonly versionId: string
+  readonly ordinal: number
+}
 
 export interface SessionOutputSave {
   readonly sessionId: string
@@ -204,6 +212,7 @@ export interface SessionOutputSave {
   readonly bytes: number
   readonly mediaType: string | null
   readonly contentDigest: string
+  readonly sourceVersion?: SessionOutputSaveVersion | undefined
   readonly saveId: string
   readonly fileName: string
   readonly location: string
@@ -1939,6 +1948,7 @@ async function persistSessionOutputSave(
   deliveryRoot: string,
   signal?: AbortSignal,
   internals?: WorkControllerOptions['sessionOutputSaveInternals'],
+  sourceVersion?: SessionOutputSaveVersion,
 ): Promise<SessionOutputSave> {
   await ensureDeliveryDirectory(deliveryRoot, true)
   const root = await fs.realpath(deliveryRoot)
@@ -1966,6 +1976,7 @@ async function persistSessionOutputSave(
   const result = (saveId: string, directory: string): SessionOutputSave => Object.freeze({
     ...captured.output,
     contentDigest: captured.contentDigest,
+    ...(sourceVersion ? { sourceVersion: Object.freeze({ ...sourceVersion }) } : {}),
     saveId,
     fileName,
     location: directory,
@@ -3993,6 +4004,66 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
     },
 
     async saveSessionOutput(spec, signal) {
+      if (spec.version) {
+        await ready()
+        if (!versionRoot || !/^[a-f0-9]{32}$/u.test(spec.version.fileId)
+          || !/^[a-f0-9]{32}$/u.test(spec.version.versionId)) {
+          throw new WorkError(
+            'work/session-output-save-failed',
+            'The selected Session output version is not available for saving.',
+          )
+        }
+        let capturedVersion: Awaited<ReturnType<typeof readSessionOutputVersionRecord>>
+        try {
+          capturedVersion = await withVersionLock(async () => {
+            const journal = await openVersionJournal(versionRoot)
+            await recoverVersionIntentsForFile(
+              journal, spec.version!.fileId, signal, options.sessionOutputVersionInternals,
+            )
+            return readSessionOutputVersionRecord(versionRoot, spec.version!)
+          })
+        } catch (cause) {
+          if (signal?.aborted) throw cause
+          throw new WorkError(
+            'work/session-output-save-failed',
+            'The selected Session output version could not be verified for saving.',
+            { cause },
+          )
+        }
+        const version = capturedVersion.version
+        if (version.sessionId !== spec.sessionId || version.path !== spec.path) {
+          throw new WorkError(
+            'work/session-output-save-failed',
+            'The selected version does not belong to this Session output.',
+          )
+        }
+        const captured: CapturedSessionOutput = Object.freeze({
+          output: Object.freeze({
+            sessionId: version.sessionId,
+            turn: spec.turn,
+            name: version.name,
+            path: version.path,
+            bytes: version.bytes,
+            mediaType: version.mediaType,
+          }),
+          workspacePath: '',
+          normalizedPath: `${version.fileId}\0${version.versionId}`,
+          data: Buffer.from(capturedVersion.data),
+          contentDigest: version.contentDigest,
+        })
+        return withRevisionLock(() => persistSessionOutputSave(
+          captured,
+          spec,
+          deliveryRoot,
+          signal,
+          options.sessionOutputSaveInternals,
+          Object.freeze({
+            fileId: version.fileId,
+            versionId: version.versionId,
+            ordinal: version.ordinal,
+          }),
+        ))
+      }
       if (!options.harness.inspectSession) {
         throw new WorkError(
           'work/session-output-save-failed',

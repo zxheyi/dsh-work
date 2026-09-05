@@ -25,6 +25,7 @@ import type {
   WorkSessionOutputSave,
   WorkSessionOutputVersion,
   WorkSessionOutputVersionContent,
+  WorkSaveSessionOutputSpec,
   WorkView,
 } from './index.ts'
 import type { WorkDeliverableContent } from './index.ts'
@@ -122,6 +123,32 @@ interface SessionResourceReferenceDetail {
 interface SessionOutputPreviewSelection extends WorkSessionOutputFile {
   readonly throughSeq: number
   readonly open: () => void
+}
+
+export interface SessionOutputSaveTarget {
+  readonly spec: WorkSaveSessionOutputSpec
+  readonly ordinal: number | null
+}
+
+export function sessionOutputSaveTarget(
+  selection: Pick<SessionOutputPreviewSelection, 'sessionId' | 'turn' | 'throughSeq' | 'path'>,
+  version: Pick<WorkSessionOutputVersion, 'fileId' | 'versionId' | 'ordinal'> | null,
+  retry?: SessionOutputSaveTarget,
+): SessionOutputSaveTarget {
+  if (retry) return retry
+  return Object.freeze({
+    spec: Object.freeze({
+      sessionId: selection.sessionId,
+      turn: selection.turn,
+      throughSeq: selection.throughSeq,
+      path: selection.path,
+      ...(version ? { version: Object.freeze({
+        fileId: version.fileId,
+        versionId: version.versionId,
+      }) } : {}),
+    }),
+    ordinal: version?.ordinal ?? null,
+  })
 }
 
 type SessionOutputPreviewDetail = Omit<SessionOutputPreviewSelection, 'open'>
@@ -1527,7 +1554,14 @@ function NativeSessionOutputPreview({
   const [revisionPhase, setRevisionPhase] = useState<'idle' | 'preparing' | 'error'>('idle')
   const [revisionError, setRevisionError] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<
-    | { readonly phase: 'idle' | 'saving' | 'error' }
+    | { readonly phase: 'idle' }
+    | {
+      readonly phase: 'saving' | 'error'
+      readonly target: {
+        readonly spec: WorkSaveSessionOutputSpec
+        readonly ordinal: number | null
+      }
+    }
     | { readonly phase: 'saved'; readonly value: WorkSessionOutputSave }
   >({ phase: 'idle' })
   const [saveOpenError, setSaveOpenError] = useState(false)
@@ -1836,6 +1870,24 @@ function NativeSessionOutputPreview({
       },
     )
   }
+  const saveOutput = (retained?: SessionOutputSaveTarget): void => {
+    const target = selection
+    const versionTarget = tab === 'versions' ? revisionBase : null
+    const saveTarget = sessionOutputSaveTarget(target, versionTarget, retained)
+    setSaveState({ phase: 'saving', target: saveTarget })
+    void works.saveSessionOutput(saveTarget.spec).then(saved => {
+      if (matchesSessionOutputSelection(preview.getSnapshot(), target)
+        && sessionId === target.sessionId) {
+        setSaveOpenError(false)
+        setSaveState({ phase: 'saved', value: saved })
+      }
+    }).catch(() => {
+      if (matchesSessionOutputSelection(preview.getSnapshot(), target)) {
+        setSaveOpenError(false)
+        setSaveState({ phase: 'error', target: saveTarget })
+      }
+    })
+  }
   const versionPanel = versionState.phase === 'loading' || versionState.phase === 'idle'
     ? h('div', { className: 'dsh-work-output-preview-status', role: 'status', 'aria-live': 'polite' }, '正在读取版本记录…')
     : versionState.phase === 'error'
@@ -2023,10 +2075,10 @@ function NativeSessionOutputPreview({
       ? revisionError ?? '无法保护当前文件，请重新读取后再试。'
       : saveState.phase === 'saved'
       ? saveOpenError
-        ? `副本已保存到 ${saveState.value.location}，但暂时无法打开位置。`
-        : `已保存到 ${saveState.value.location}`
+        ? `${saveState.value.sourceVersion ? `v${String(saveState.value.sourceVersion.ordinal)} ` : ''}副本已保存到 ${saveState.value.location}，但暂时无法打开位置。`
+        : `已保存${saveState.value.sourceVersion ? ` v${String(saveState.value.sourceVersion.ordinal)} ` : ''}到 ${saveState.value.location}`
       : saveState.phase === 'error'
-        ? '保存结果尚未确认，请重试。'
+        ? `${saveState.target.ordinal ? `v${String(saveState.target.ordinal)} ` : ''}副本保存结果尚未确认，请重试。`
         : unsupported
             ? '保存会复制当前文件到受管位置'
             : tab === 'versions'
@@ -2054,34 +2106,16 @@ function NativeSessionOutputPreview({
       h('button', {
         type: 'button',
         className: 'is-secondary',
-        disabled: saveState.phase === 'saving',
-        onClick: () => {
-          const target = selection
-          setSaveState({ phase: 'saving' })
-          void works.saveSessionOutput({
-            sessionId: target.sessionId,
-            turn: target.turn,
-            throughSeq: target.throughSeq,
-            path: target.path,
-          }).then(saved => {
-            if (matchesSessionOutputSelection(preview.getSnapshot(), target)
-              && sessionId === target.sessionId) {
-              setSaveOpenError(false)
-              setSaveState({ phase: 'saved', value: saved })
-            }
-          }).catch(() => {
-            if (matchesSessionOutputSelection(preview.getSnapshot(), target)) {
-              setSaveOpenError(false)
-              setSaveState({ phase: 'error' })
-            }
-          })
-        },
+        disabled: saveState.phase === 'saving'
+          || (saveState.phase !== 'error'
+            && tab === 'versions' && (!revisionBase || !selectedVersionContent)),
+        onClick: () => saveOutput(saveState.phase === 'error' ? saveState.target : undefined),
       }, saveState.phase === 'saving'
-        ? '正在保存…'
+        ? `正在保存${saveState.target.ordinal ? ` v${String(saveState.target.ordinal)}` : ''}…`
         : saveState.phase === 'error'
-          ? '重试保存'
-          : tab === 'versions'
-            ? '保存当前版副本'
+          ? `重试保存${saveState.target.ordinal ? ` v${String(saveState.target.ordinal)}` : ''}`
+          : revisionBase
+            ? `保存 v${String(revisionBase.ordinal)} 副本`
             : '保存副本'),
       !unsupported && revisionBase ? h('button', {
         type: 'button',
