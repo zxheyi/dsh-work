@@ -87,10 +87,12 @@ export const name = 'dsh-work'
 export async function apply(context: WorkBundleContext): Promise<void> {
   const domain = await context.storageDomain.open(workDomainSpec)
   context.effect(() => () => domain.close())
-  context.provide('workController', createWorkController({
+  const controller = createWorkController({
     workspaceRoot: context.dshHomePath('workspaces'),
     deliveryRoot: context.dshHomePath('deliveries'),
     harness: createHarnessWorkPort(context),
     store: createDomainWorkStore(domain.global),
-  }))
+  })
+  await controller.initialize()
+  context.provide('workController', controller)
 }

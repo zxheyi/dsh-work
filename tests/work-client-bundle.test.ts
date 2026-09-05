@@ -105,7 +105,12 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   }
   const dispose = await exports.apply!(clientContext)
   assert.deepEqual(injectedServices.map(value => Array.from(value)), [['remote.work']])
-  assert.deepEqual(injectedSlots, ['sidebar.brand.name', 'sidebar.brand.mark', 'sidebar.footer.action', 'shell.overlay'])
+  assert.deepEqual(injectedSlots, [
+    'sidebar.brand.name',
+    'sidebar.brand.mark',
+    'sidebar.footer.action',
+    'shell.overlay',
+  ])
   assert.deepEqual(registeredSlots, [
     { name: 'sidebar.brand.name', priority: -100 },
     { name: 'sidebar.brand.mark', priority: -100 },
@@ -113,23 +118,11 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
     { name: 'shell.overlay' },
   ])
   assert.match(source, /data-dsh-work-brand/)
-  assert.match(source, /data-work-legacy-open/)
-  assert.match(source, /你想完成什么？/)
-  assert.match(source, /添加资料/)
-  assert.match(source, /type:\s*["']file["']/)
-  assert.match(source, /单个文件不能超过 25 MiB/)
-  assert.match(source, /添加文件夹/)
-  assert.equal(source.includes('添加文件即将支持'), false)
-  assert.match(source, /继续已有对话/)
-  assert.match(source, /原对话不会改变/)
-  assert.match(source, /Markdown 成果/)
-  assert.match(source, /Markdown 原文预览/)
-  assert.match(source, /提出修改要求/)
-  assert.match(source, /确认完成/)
-  assert.match(source, /导出成果/)
-  assert.match(source, /在 Finder 中显示/)
-  assert.equal(source.includes('选择 Work 目录'), false)
-  assert.equal(source.includes('选择工作目录'), false)
+  assert.match(source, /data-work-legacy-deliverable-open/)
+  assert.match(source, /data-work-legacy-deliverable-preview/)
+  assert.equal(source.includes('data-work-legacy-open'), false)
+  assert.equal(source.includes('data-work-legacy-surface'), false)
+  assert.equal(source.includes('你想完成什么？'), false)
   await dispose()
   assert.equal(source.includes('node:crypto'), false)
   assert.equal(source.includes('/Users/'), false)

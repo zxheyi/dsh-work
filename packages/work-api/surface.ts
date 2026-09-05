@@ -218,6 +218,79 @@ function LoadingHome(): ReactNode {
     h('div', { className: 'dsh-work-skeleton is-row' }))
 }
 
+function LegacyDeliverableAction({ works, wide }: WorkSurfaceInjected & { readonly wide: boolean }): ReactNode {
+  const snapshot = useWorks(works)
+  const work = snapshot.items.find(item => item.deliverable !== null)
+  if (!work) return null
+  return h('button', {
+    className: 'dsh-work-legacy-deliverable-open',
+    type: 'button',
+    title: '查看旧成果',
+    'aria-label': '查看旧成果',
+    'data-work-legacy-deliverable-open': true,
+    onClick: () => window.dispatchEvent(new Event('dsh-work:open-legacy-deliverable')),
+  }, wide ? '旧成果' : '文')
+}
+
+function LegacyDeliverableOverlay({ works }: WorkSurfaceInjected): ReactNode {
+  const snapshot = useWorks(works)
+  const work = snapshot.items.find(item => item.deliverable !== null)
+  const [open, setOpen] = useState(false)
+  const [content, setContent] = useState<WorkDeliverableContent | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [opening, setOpening] = useState(false)
+  useEffect(() => {
+    const show = (): void => setOpen(true)
+    window.addEventListener('dsh-work:open-legacy-deliverable', show)
+    return () => window.removeEventListener('dsh-work:open-legacy-deliverable', show)
+  }, [])
+  useEffect(() => {
+    let active = true
+    if (!open || !work?.deliverable) return () => { active = false }
+    setContent(null)
+    setError(null)
+    void works.readDeliverable(work.workId).then(value => {
+      if (active) setContent(value)
+    }, reason => {
+      if (active) setError(reason instanceof Error ? reason.message : '暂时无法读取旧成果。')
+    })
+    return () => { active = false }
+  }, [open, work?.deliverable, work?.revision, work?.workId, works])
+  if (!open || !work?.deliverable) return null
+  return h('section', {
+    className: 'dsh-work-legacy-deliverable-overlay',
+    role: 'dialog',
+    'aria-modal': 'true',
+    'aria-label': '旧成果',
+    'data-work-legacy-deliverable-surface': true,
+  }, h('div', { className: 'dsh-work-legacy-deliverable-frame' },
+    h('header', null,
+      h('div', null, h('strong', null, work.title), h('span', null, work.deliverable.path)),
+      h('button', {
+        type: 'button',
+        'aria-label': '关闭旧成果',
+        onClick: () => setOpen(false),
+      }, '关闭')),
+    error
+      ? h('p', { className: 'dsh-work-inline-error', role: 'alert' }, error)
+      : content
+        ? h('pre', { 'data-work-legacy-deliverable-preview': true }, content.content)
+        : h('p', { className: 'dsh-work-legacy-deliverable-loading' }, '正在读取旧成果…'),
+    work.status === 'delivered'
+      ? h('footer', null, h('button', {
+        type: 'button',
+        disabled: opening,
+        onClick: () => {
+          setOpening(true)
+          setError(null)
+          void works.showDelivery(work.workId).catch(reason => {
+            setError(reason instanceof Error ? reason.message : '暂时无法打开导出位置。')
+          }).finally(() => setOpening(false))
+        },
+      }, opening ? '正在打开' : '在 Finder 中显示'))
+      : null))
+}
+
 export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
   const snapshot = useWorks(works)
   const work = snapshot.items[0]
@@ -590,12 +663,19 @@ body[data-ds-dark-theme] {
 }
 .dsh-work-sidebar, .dsh-work-home { font-family: var(--work-font); color: var(--work-text); }
 .dsh-work-native-brand-mark { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: white; background: #365eca; font: 700 13px/1 var(--work-font); }
-.dsh-work-legacy-open { min-width: 30px; height: 30px; padding: 0 9px; border: 1px solid var(--work-border); border-radius: 6px; color: var(--work-muted); background: var(--work-surface); cursor: pointer; font: 550 12px/1 var(--work-font); white-space: nowrap; }
-.dsh-work-legacy-open:hover { color: var(--work-accent); border-color: var(--work-accent); }
-.dsh-work-legacy-overlay { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 28px; background: rgb(20 24 32 / .28); pointer-events: auto; }
-.dsh-work-legacy-frame { position: relative; width: min(1180px, calc(100vw - 56px)); height: min(760px, calc(100vh - 56px)); overflow: hidden; border: 1px solid var(--work-border); border-radius: 12px; background: var(--work-surface); box-shadow: 0 22px 70px rgb(20 24 32 / .22); }
-.dsh-work-legacy-frame .dsh-work-home { height: 100%; }
-.dsh-work-legacy-close { position: absolute; z-index: 2; top: 14px; right: 20px; height: 32px; padding: 0 12px; border: 1px solid var(--work-border); border-radius: 6px; color: var(--work-text); background: var(--work-surface); cursor: pointer; font: 550 12px/1 var(--work-font); }
+.dsh-work-legacy-deliverable-open { min-width: 30px; height: 30px; padding: 0 9px; border: 1px solid var(--work-border); border-radius: 6px; color: var(--work-muted); background: var(--work-surface); cursor: pointer; font: 550 12px/1 var(--work-font); white-space: nowrap; }
+.dsh-work-legacy-deliverable-open:hover { color: var(--work-accent); border-color: var(--work-accent); }
+.dsh-work-legacy-deliverable-overlay { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 28px; background: rgb(20 24 32 / .28); pointer-events: auto; }
+.dsh-work-legacy-deliverable-frame { width: min(760px, calc(100vw - 56px)); max-height: min(680px, calc(100vh - 56px)); overflow: hidden; display: flex; flex-direction: column; border: 1px solid var(--work-border); border-radius: 12px; color: var(--work-text); background: var(--work-surface); box-shadow: 0 22px 70px rgb(20 24 32 / .22); font-family: var(--work-font); }
+.dsh-work-legacy-deliverable-frame header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 18px; border-bottom: 1px solid var(--work-border); }
+.dsh-work-legacy-deliverable-frame header div { min-width: 0; }
+.dsh-work-legacy-deliverable-frame header strong, .dsh-work-legacy-deliverable-frame header span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-work-legacy-deliverable-frame header strong { font-size: 15px; line-height: 22px; }
+.dsh-work-legacy-deliverable-frame header span { margin-top: 2px; color: var(--work-muted); font-size: 12px; line-height: 18px; }
+.dsh-work-legacy-deliverable-frame button { height: 32px; padding: 0 12px; border: 1px solid var(--work-border-strong); border-radius: 7px; color: var(--work-text); background: var(--work-surface); cursor: pointer; font: 550 12px/1 var(--work-font); }
+.dsh-work-legacy-deliverable-frame pre { min-height: 160px; margin: 0; overflow: auto; padding: 20px; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 13px/21px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.dsh-work-legacy-deliverable-loading { min-height: 160px; display: grid; place-items: center; margin: 0; color: var(--work-muted); font-size: 13px; }
+.dsh-work-legacy-deliverable-frame footer { display: flex; justify-content: flex-end; padding: 12px 18px; border-top: 1px solid var(--work-border); }
 .dsh-work-sidebar { height: 100%; min-width: 0; display: flex; flex-direction: column; padding: 16px 20px; background: var(--work-sidebar); }
 .dsh-work-sidebar.is-collapsed { align-items: center; padding: 18px 10px; gap: 18px; }
 .dsh-work-sidebar-brand { height: 36px; display: flex; align-items: center; gap: 10px; font-size: 19px; letter-spacing: -.02em; }
@@ -791,47 +871,16 @@ export function registerWorkSurface(ctx: Context, works: IWorks): () => void {
   }, 'W')))
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action',
-    id: 'dsh-work-legacy-open',
-    label: '旧版工作',
-  }, ({ wide }: { readonly wide: boolean }) => h('button', {
-    className: 'dsh-work-legacy-open',
-    type: 'button',
-    title: '打开旧版工作',
-    'aria-label': '打开旧版工作',
-    'data-work-legacy-open': true,
-    onClick: () => window.dispatchEvent(new Event('dsh-work:open-legacy')),
-  }, wide ? '旧版工作' : 'W')))
+    id: 'dsh-work-legacy-deliverable-open',
+    label: '旧成果',
+    inject: () => ({ works }),
+  }, LegacyDeliverableAction))
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay',
-    id: 'dsh-work-legacy-surface',
+    id: 'dsh-work-legacy-deliverable-surface',
     order: 100,
-    label: '旧版工作',
+    label: '旧成果',
     inject: () => ({ works }),
-  }, LegacyWorkOverlay))
+  }, LegacyDeliverableOverlay))
   return removeStyles
-}
-
-function LegacyWorkOverlay({ works }: WorkSurfaceInjected): ReactNode {
-  const [open, setOpen] = useState(false)
-  useEffect(() => {
-    const show = (): void => setOpen(true)
-    window.addEventListener('dsh-work:open-legacy', show)
-    return () => window.removeEventListener('dsh-work:open-legacy', show)
-  }, [])
-  if (!open) return null
-  return h('section', {
-    className: 'dsh-work-legacy-overlay',
-    role: 'dialog',
-    'aria-modal': 'true',
-    'aria-label': '旧版工作',
-    'data-work-legacy-surface': true,
-  },
-  h('div', { className: 'dsh-work-legacy-frame' },
-    h('button', {
-      className: 'dsh-work-legacy-close',
-      type: 'button',
-      'aria-label': '关闭旧版工作',
-      onClick: () => setOpen(false),
-    }, '关闭'),
-    h(WorkHomeSurface, { works })))
 }

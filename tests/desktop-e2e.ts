@@ -40,20 +40,28 @@ try {
     }
     throw new Error('state timeout')
   }
-  const waitForWorkSurface = async (): Promise<{ readonly text: string; readonly url: string }> => {
+  const waitForNativeSurface = async (): Promise<{ readonly text: string; readonly url: string }> => {
     const deadline = Date.now() + 35_000
     while (Date.now() < deadline) {
       try {
-        const value = await js<{ ready: boolean; text: string }>(`({
-          ready: Boolean(document.querySelector('.dsh-work-home')),
-          text: document.body.innerText,
-        })`)
+        const value = await js<{ ready: boolean; text: string }>(`(() => {
+          for (const label of ['继续', '稍后配置']) {
+            const button = Array.from(document.querySelectorAll('button'))
+              .find(item => item.textContent?.trim() === label)
+            if (button instanceof HTMLButtonElement) button.click()
+          }
+          return {
+            ready: Boolean(document.querySelector('[data-dsh-work-brand="name"]')
+              && document.querySelector('[data-composer-card]')),
+            text: document.body.innerText,
+          }
+        })()`)
         const url = active.window.webContents.getURL()
-        if (value.ready && value.text.includes('你想完成什么？')) return { text: value.text, url }
+        if (value.ready) return { text: value.text, url }
       } catch {}
       await new Promise(resolve => setTimeout(resolve, 25))
     }
-    throw new Error('Work surface timeout')
+    throw new Error('native conversation surface timeout')
   }
   const screenshot = async (file: string): Promise<void> => {
     fs.writeFileSync(path.join(output, file), (await active.window.webContents.capturePage()).toPNG())
@@ -82,13 +90,14 @@ try {
     await js("document.getElementById('start').click()")
     await waitState('failed')
   } else {
-    phase = 'automatic-work-surface'
-    const surface = await waitForWorkSurface()
+    phase = 'automatic-native-surface'
+    const surface = await waitForNativeSurface()
     assert.match(surface.url, /^http:\/\/127\.0\.0\.1:\d+\/$/u)
     assert.equal(await js('typeof window.dshWork'), 'undefined')
-    assert.ok(surface.text.includes('常见工作'))
-    assert.ok(surface.text.includes('最近工作'))
-    assert.doesNotMatch(surface.text, /DSH Web|Workspace|Session|Profile|模型|插件/u)
+    assert.ok(surface.text.includes('DSH Work'))
+    assert.ok(surface.text.includes('新会话'))
+    assert.ok(surface.text.includes('设置'))
+    assert.doesNotMatch(surface.text, /你想完成什么？|常见工作|最近工作|旧版工作/u)
     assert.equal(active.host.snapshot().state, 'ready')
     await screenshot('ready.png')
   }

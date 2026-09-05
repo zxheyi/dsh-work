@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-work-workspace-test-setup
+      name: '@dsh-work/workspace-test-setup'

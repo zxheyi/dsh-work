@@ -109,6 +109,7 @@ export interface WorkDeliverableContent {
 }
 
 export interface WorkController {
+  initialize(): Promise<void>
   create(spec: CreateWorkSpec): Promise<WorkSnapshot>
   importConversation(spec: ImportConversationSpec, signal?: AbortSignal): Promise<WorkSnapshot>
   get(): Promise<WorkSnapshot | null>
@@ -731,6 +732,10 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
   }
 
   return {
+    initialize() {
+      return ready()
+    },
+
     create(spec) {
       const title = spec.title
       const goal = spec.goal

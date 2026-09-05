@@ -71,7 +71,15 @@ async function run(): Promise<void> {
 
     phase = 'explicit-isolated-recovery'
     await js("document.getElementById('recover').click()")
-    await wait("Boolean(document.querySelector('.dsh-work-home')) && document.body.innerText.includes('你想完成什么？')")
+    await wait(`(() => {
+      for (const label of ['继续', '稍后配置']) {
+        const button = Array.from(document.querySelectorAll('button'))
+          .find(item => item.textContent?.trim() === label)
+        if (button instanceof HTMLButtonElement) button.click()
+      }
+      return Boolean(document.querySelector('[data-dsh-work-brand="name"]')
+        && document.querySelector('[data-composer-card]'))
+    })()`)
     const recoveredGeneration = JSON.parse(fs.readFileSync(path.join(productRoot, 'runtime/active.json'), 'utf8')).generation
     assert.notEqual(recoveredGeneration, stale.generation)
     assert.equal(fs.readFileSync(path.join(stale.home, 'uncertain.txt'), 'utf8'), 'preserved')

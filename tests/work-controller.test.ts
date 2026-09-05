@@ -462,11 +462,18 @@ test('dispatches multiple Turns through the same Primary Session', async () => {
 
 test('imports selected file bytes into the managed Workspace as a Work resource', async () => {
   const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-resource-'))
+  let workspaceEnsures = 0
   const controller = createWorkController({
     createId: () => 'work-resource',
     createSessionId: () => 'session-resource',
     workspaceRoot,
-    harness: testHarness(),
+    harness: {
+      ...testHarness(),
+      async ensureWorkspace(request) {
+        workspaceEnsures += 1
+        return { workspaceId: 'workspace-1', path: request.path }
+      },
+    },
   })
   const created = await controller.create({ title: 'Resource', goal: 'Use the selected brief.' })
   await fs.mkdir(created.workspace.path, { recursive: true })
@@ -496,6 +503,7 @@ test('imports selected file bytes into the managed Workspace as a Work resource'
   )
   assert.equal(updated.primarySession.turnCount, 0)
   assert.equal(updated.status, 'working')
+  assert.equal(workspaceEnsures, 1)
   await fs.rm(workspaceRoot, { recursive: true, force: true })
 })
 
@@ -867,6 +875,7 @@ test('restores the Work, managed Workspace, and Primary Session after restart', 
     store,
   })
 
+  await Promise.all([restarted.initialize(), restarted.initialize()])
   assert.deepEqual(await restarted.get(), beforeRestart)
   assert.deepEqual(recoveries, [
     `workspace:${beforeRestart.workspace.path}`,

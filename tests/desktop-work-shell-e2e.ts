@@ -75,7 +75,6 @@ async function run(): Promise<void> {
       ready: await js<boolean>(`Boolean(
         document.querySelector('[data-dsh-work-brand="name"]')
         && document.querySelector('[data-composer-card]')
-        && document.querySelector('[data-work-legacy-open]')
       )`),
       bridge: await js<string>('typeof window.dshWork'),
     }), value => value.ready && /^http:\/\/127\.0\.0\.1:\d+\/$/u.test(value.url),
@@ -86,14 +85,8 @@ async function run(): Promise<void> {
     assert.ok(surface.text.includes('新会话'))
     assert.ok(surface.text.includes('工作区'))
     assert.ok(surface.text.includes('设置'))
+    assert.doesNotMatch(surface.text, /旧版工作/u)
     assert.doesNotMatch(surface.text, /你想完成什么？|常见工作|最近工作/u)
-    await js("document.querySelector('[data-work-legacy-open]')?.click()")
-    await waitFor(
-      () => js<boolean>("Boolean(document.querySelector('[data-work-legacy-surface]') && document.querySelector('.dsh-work-home'))"),
-      value => value,
-      'Legacy Work access did not open',
-    )
-    await js("document.querySelector('[aria-label=\"关闭旧版工作\"]')?.click()")
     const preferences = active.window.webContents as unknown as {
       getLastWebPreferences(): { sandbox?: boolean; contextIsolation?: boolean; nodeIntegration?: boolean }
     }

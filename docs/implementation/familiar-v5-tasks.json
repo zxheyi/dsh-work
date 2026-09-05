@@ -81,7 +81,7 @@
       "files": "packages/work-domain/index.ts；packages/work-api/index.ts；packages/work-api/remote.ts；packages/work-api/client-model.ts",
       "verification": "Workspace/Session 集成、创建中断恢复、双会话重启 E2E",
       "limits": "保持现有存储可回读；完整批量迁移另列 D01。",
-      "status": "pending"
+      "status": "verified"
     },
     {
       "id": "T05",

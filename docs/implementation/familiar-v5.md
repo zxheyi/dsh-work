@@ -60,7 +60,7 @@ T01-T22 cover the main product implementation. D01-D03 remain follow-on epics fr
 ### T02 Native conversation shell
 
 - Removed the Work plugin's full `sidebar` and `conversation` takeovers. The locked alpha.2 sidebar, Workspace/Session browser, conversation, composer, model controls and settings now retain their native owners.
-- DSH Work uses the official `sidebar.brand.*`, `sidebar.footer.action` and `shell.overlay` extension seats. A temporary “旧版工作” action keeps existing Work records reachable until T04 maps them to native Sessions.
+- DSH Work uses the official `sidebar.brand.*` extension seats. T04 maps existing Work records into native Workspace/Session navigation and replaces the temporary full “旧版工作” overlay with a bounded “旧成果” reader for files that have not yet moved to the native file panel.
 - Added the already locked alpha.2 sidebar package as an explicit type/load-order dependency. It adds no new version, license or runtime family; rollback removes the fine-grained registrations and direct declaration together.
 - Verification: Work Client bundle and frozen dependency tests passed 2/2; TypeScript passed; real alpha.2 Loader/Profile/runtime integration passed 11/11; 1440×900 Work UI acceptance passed; authenticated desktop Shell E2E passed with sandbox, navigation and clean-stop assertions.
 - First-run alpha.2 still presents its native internal-testing/model onboarding. T03 owns the exact missing-model and draft-preservation behavior; T02 does not claim credentials or a live model were verified.
@@ -73,5 +73,14 @@ T01-T22 cover the main product implementation. D01-D03 remain follow-on epics fr
 - After reconnection, two prompts and responses remain in that durable Session. The native Stop action must abort a deliberately delayed third model request within three seconds; waiting for the fixture to finish cannot satisfy the check.
 - The connected ordinary-chat flow leaves the Workspace empty and renders no Markdown result or delivery action. The selected model is read from the real Host model catalog rather than a client constant.
 - Verification: `pnpm typecheck`, `pnpm test` (130/130) and `pnpm check` passed; `DSH_WORK_NODE=<locked-node> pnpm test:conversation` passed both missing and connected phases, including the plain-JSONL test-only persistence record. Screenshots are written to ignored `artifacts/conversation/` for local review.
+
+### T04 Multiple Sessions inside one Workspace
+
+- Added an explicit idempotent `WorkController.initialize()` boundary and await it before publishing the Host service. A stored Work now re-registers its existing Workspace path and Primary Session through public Harness services before native clients can navigate it.
+- Removed the temporary legacy Work homepage and its duplicate goal/navigation flow. Old Work IDs, Workspace IDs, Session IDs and files remain unchanged; the mapped Session appears in the native Workspace tree. A bounded “旧成果” action keeps an existing Work deliverable readable, and a delivered Work can still reveal its export location until T09/T12 replace this compatibility path.
+- Native new-conversation behavior remains owned by the upstream Workspace/Session services. The real desktop acceptance clicks the Workspace row's native new-Session action, sends a turn through the native composer, and observes the resulting distinct Session in the same directory without creating another Work or Workspace.
+- The create phase freezes Work, Workspace, primary Session, UI-created Session, path, prompt and file-byte evidence. The restore fixture only reads and compares that baseline; it cannot recreate a Session, sentinel file or identity before the UI proves both original Sessions are present after restart.
+- Empty Profiles retain both native “选择工作区” and “添加工作区” entries. Resource verification also proves adding a file to the existing Work does not call Workspace creation again.
+- Verification: `pnpm typecheck`, `pnpm test` (131/131) and `pnpm check` passed; `DSH_WORK_NODE=<locked-node> pnpm test:workspace-sessions` passed empty, create and restore phases. The desktop evidence confirms one Workspace row, two distinct Session IDs, unchanged legacy bytes, no legacy homepage, and the bounded legacy deliverable preview.
 
 Further entries record actual commands and results, not intended verification. Human usability, Windows and live-model evidence must remain explicitly pending until obtained.
