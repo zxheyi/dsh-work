@@ -16,6 +16,8 @@ import type {
   WorkInspectSessionOutputSourcesSpec,
   WorkInspectSessionOutputsSpec,
   WorkPrepareSessionOutputRevisionSpec,
+  WorkSaveSessionOutputSpec,
+  WorkShowSessionOutputSaveSpec,
   WorkReadSessionOutputSpec,
   WorkRemoteFollowFrame,
   WorkView,
@@ -26,6 +28,8 @@ import type {
   WorkSessionOutputSource,
   WorkSessionOutputRevision,
   WorkSessionOutputRevisionFailure,
+  WorkSessionOutputSave,
+  WorkShowSessionOutputSaveValue,
   WorkSessionOutputSourcesValue,
   WorkSessionOutputsValue,
 } from './index.ts'
@@ -59,6 +63,14 @@ export interface WorkClientRemote {
     spec: WorkInspectSessionOutputsSpec,
     signal?: AbortSignal,
   ): Promise<RemoteResult<WorkSessionOutputRevisionFailure | null>>
+  saveSessionOutput(
+    spec: WorkSaveSessionOutputSpec,
+    signal?: AbortSignal,
+  ): Promise<RemoteResult<WorkSessionOutputSave>>
+  showSessionOutputSave(
+    spec: WorkShowSessionOutputSaveSpec,
+    signal?: AbortSignal,
+  ): Promise<RemoteResult<WorkShowSessionOutputSaveValue>>
   readSessionOutput(
     spec: WorkReadSessionOutputSpec,
     signal?: AbortSignal,
@@ -106,6 +118,14 @@ export interface IWorks {
     spec: WorkInspectSessionOutputsSpec,
     signal?: AbortSignal,
   ): Promise<WorkSessionOutputRevisionFailure | null>
+  saveSessionOutput(
+    spec: WorkSaveSessionOutputSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkSessionOutputSave>
+  showSessionOutputSave(
+    spec: WorkShowSessionOutputSaveSpec,
+    signal?: AbortSignal,
+  ): Promise<void>
   readSessionOutput(
     spec: WorkReadSessionOutputSpec,
     signal?: AbortSignal,
@@ -196,6 +216,20 @@ export class ClientWorkModel implements WorkSource {
     signal?: AbortSignal,
   ): Promise<RemoteResult<WorkSessionOutputRevisionFailure | null>> {
     return this.remote.inspectSessionRevision(spec, signal)
+  }
+
+  saveSessionOutput(
+    spec: WorkSaveSessionOutputSpec,
+    signal?: AbortSignal,
+  ): Promise<RemoteResult<WorkSessionOutputSave>> {
+    return this.remote.saveSessionOutput(spec, signal)
+  }
+
+  showSessionOutputSave(
+    spec: WorkShowSessionOutputSaveSpec,
+    signal?: AbortSignal,
+  ): Promise<RemoteResult<WorkShowSessionOutputSaveValue>> {
+    return this.remote.showSessionOutputSave(spec, signal)
   }
 
   readSessionOutput(
@@ -361,6 +395,23 @@ export class WorksController extends Service implements IWorks {
     const result = await this.model.inspectSessionRevision(spec, signal)
     if (!result.ok) throw result.error
     return result.value
+  }
+
+  async saveSessionOutput(
+    spec: WorkSaveSessionOutputSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkSessionOutputSave> {
+    const result = await this.model.saveSessionOutput(spec, signal)
+    if (!result.ok) throw result.error
+    return result.value
+  }
+
+  async showSessionOutputSave(
+    spec: WorkShowSessionOutputSaveSpec,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const result = await this.model.showSessionOutputSave(spec, signal)
+    if (!result.ok) throw result.error
   }
 
   async readSessionOutput(

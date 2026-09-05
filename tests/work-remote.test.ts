@@ -58,6 +58,8 @@ test('exports the narrow Work surface through public Typert markers', () => {
     { method: 'inspectSessionOutputSources', mode: 'unary' },
     { method: 'prepareSessionOutputRevision', mode: 'unary' },
     { method: 'inspectSessionRevision', mode: 'unary' },
+    { method: 'saveSessionOutput', mode: 'unary' },
+    { method: 'showSessionOutputSave', mode: 'unary' },
     { method: 'readSessionOutput', mode: 'unary' },
     { method: 'list', mode: 'unary' },
     { method: 'follow', mode: 'stream' },
@@ -79,6 +81,8 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
     'work/readSessionOutput',
     'work/prepareSessionOutputRevision',
     'work/inspectSessionRevision',
+    'work/saveSessionOutput',
+    'work/showSessionOutputSave',
     'work/follow',
   ])
   const dispatch = TYPERT_REMOTE.descriptors.find(descriptor => descriptor.method === 'dispatch')
@@ -236,6 +240,25 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
   assert.deepEqual(readOutputCodec.schema.parse({
     sessionId: 'session-remote', turn: 2, throughSeq: 12, path: 'report.md',
   }), { sessionId: 'session-remote', turn: 2, throughSeq: 12, path: 'report.md' })
+
+  const saveOutput = TYPERT_REMOTE.descriptors.find(
+    descriptor => descriptor.method === 'saveSessionOutput',
+  )
+  assert.ok(saveOutput)
+  const saveCodec = saveOutput.parameters[0]?.codec
+  const saveResultCodec = saveOutput.result
+  assert.equal(saveCodec?.mode, 'strict')
+  if (!saveCodec || saveCodec.mode !== 'strict' || saveResultCodec.mode !== 'strict') {
+    throw new Error('Session output save must publish strict codecs')
+  }
+  assert.deepEqual(saveCodec.schema.parse({
+    sessionId: 'session-remote', turn: 2, throughSeq: 12, path: 'report.md',
+  }), { sessionId: 'session-remote', turn: 2, throughSeq: 12, path: 'report.md' })
+  assert.throws(() => saveResultCodec.schema.parse({
+    sessionId: 'session-remote', turn: 2, name: 'report.md', path: 'report.md',
+    bytes: 12, mediaType: 'text/markdown', contentDigest: 'a'.repeat(64),
+    saveId: '../escape', fileName: 'report.md', location: '/managed/saved',
+  }))
 })
 
 test('imports conversation content through the product Remote without exposing provenance internals', async () => {

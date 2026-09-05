@@ -390,6 +390,35 @@ async function run(): Promise<void> {
       'Markdown preview did not reopen for revision',
     )
 
+    step = 'save-current-output'; report('fail')
+    const selectedBytes = fs.readFileSync(reportAPath)
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] button')).find(item => item.textContent?.trim() === '保存副本'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
+    await waitFor(
+      () => js<string>("document.querySelector('.dsh-work-output-preview-actions')?.textContent ?? ''"),
+      text => text.includes('已保存到') && text.includes('打开位置'),
+      'Managed save did not report its real location after the copy completed',
+    )
+    const savesRoot = path.join(home, 'deliveries', 'session-outputs')
+    const savedDirectory = await waitFor(
+      async () => fs.existsSync(savesRoot)
+        ? fs.readdirSync(savesRoot).map(name => path.join(savesRoot, name)).find(candidate =>
+          fs.existsSync(path.join(candidate, 'report-a.md'))) ?? ''
+        : '',
+      value => value.length > 0,
+      'Managed Session output copy was not created',
+    )
+    assert.deepEqual(fs.readFileSync(path.join(savedDirectory, 'report-a.md')), selectedBytes)
+    fs.writeFileSync(path.join(output, 'saved.png'), (await window.webContents.capturePage()).toPNG())
+    fs.unlinkSync(path.join(savedDirectory, 'report-a.md'))
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] button')).find(item => item.textContent?.trim() === '打开位置'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
+    await waitFor(
+      () => js<string>("document.querySelector('.dsh-work-output-preview-actions')?.textContent ?? ''"),
+      text => text.includes('副本已保存到')
+        && text.includes('暂时无法打开位置')
+        && !text.includes('未生成文件副本'),
+      'Opening failure incorrectly denied the already completed save',
+    )
+
     step = 'same-session-revision-recovery'; report('fail')
     assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] button')).find(item => item.textContent?.trim() === '要求修改'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
     const revisionDraft = await waitFor(

@@ -89,6 +89,19 @@ function successfulRemote(overrides: Partial<WorkClientRemote> = {}): WorkClient
     async inspectSessionRevision() {
       return { ok: true as const, value: null }
     },
+    async saveSessionOutput() {
+      return {
+        ok: true as const,
+        value: {
+          sessionId: 'session-client', turn: 1, name: 'report.md', path: 'report.md',
+          bytes: 9, mediaType: 'text/markdown', contentDigest: 'd'.repeat(64),
+          saveId: 'e'.repeat(32), fileName: 'report.md', location: '/managed/saved',
+        },
+      }
+    },
+    async showSessionOutputSave() {
+      return { ok: true as const, value: { shown: true as const } }
+    },
     async readSessionOutput() {
       return {
         ok: true as const,
@@ -437,6 +450,40 @@ test('prepares and inspects a Session revision without changing the Work project
   assert.deepEqual(received, [
     ['prepare', output],
     ['inspect', { sessionId: 'session-revision', turn: 5, throughSeq: 31 }],
+  ])
+  assert.deepEqual(model.getSnapshot().items, [view(1)])
+})
+
+test('saves and opens a Session output without changing the Work projection', async () => {
+  const received: unknown[] = []
+  const saved = {
+    sessionId: 'session-save', turn: 2, name: 'report.md', path: 'report.md',
+    bytes: 9, mediaType: 'text/markdown', contentDigest: 'a'.repeat(64),
+    saveId: 'b'.repeat(32), fileName: 'report.md', location: '/managed/saved',
+  }
+  const model = new ClientWorkModel(successfulRemote({
+    async saveSessionOutput(spec) {
+      received.push(['save', spec])
+      return { ok: true, value: saved }
+    },
+    async showSessionOutputSave(spec) {
+      received.push(['show', spec])
+      return { ok: true, value: { shown: true } }
+    },
+  }))
+  model.replaceBaseline({ items: [view(1)] })
+  const works = new WorksController(new Context(), model)
+  const output = { sessionId: 'session-save', turn: 2, throughSeq: 9, path: 'report.md' }
+
+  assert.deepEqual(await works.saveSessionOutput(output), saved)
+  await works.showSessionOutputSave({
+    saveId: saved.saveId,
+    fileName: saved.fileName,
+    contentDigest: saved.contentDigest,
+  })
+  assert.deepEqual(received, [
+    ['save', output],
+    ['show', { saveId: saved.saveId, fileName: saved.fileName, contentDigest: saved.contentDigest }],
   ])
   assert.deepEqual(model.getSnapshot().items, [view(1)])
 })

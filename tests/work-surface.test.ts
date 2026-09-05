@@ -3,9 +3,21 @@ import test from 'node:test'
 
 import {
   LatestPreviewRequest,
+  matchesSessionOutputSelection,
   parseSafeMarkdown,
   planSafeMarkdownRender,
 } from '../packages/work-api/surface.ts'
+
+test('binds asynchronous file actions to the exact Session output Turn', () => {
+  const oldSelection = {
+    sessionId: 'session-1', turn: 2, throughSeq: 9, name: 'report.md', path: 'report.md',
+    bytes: 9, mediaType: 'text/markdown', open() {},
+  }
+
+  assert.equal(matchesSessionOutputSelection(oldSelection, oldSelection), true)
+  assert.equal(matchesSessionOutputSelection({ ...oldSelection, turn: 3, throughSeq: 15 }, oldSelection), false)
+  assert.equal(matchesSessionOutputSelection({ ...oldSelection, path: 'other.md' }, oldSelection), false)
+})
 
 test('parses headings, paragraphs, lists and code without creating active HTML or resources', () => {
   const source = [

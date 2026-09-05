@@ -1687,6 +1687,164 @@ test('reads only the addressed validated Markdown output on demand', async () =>
   await fs.rm(root, { recursive: true, force: true })
 })
 
+test('saves an unadopted Session output idempotently and opens its real managed location', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-save-'))
+  const deliveryRoot = path.join(root, 'saved')
+  const outputPath = path.join(root, 'report.md')
+  const content = '# Save this copy\n'
+  await fs.writeFile(outputPath, content)
+  const events: unknown[] = [
+    { seq: 1, type: 'tool/call', data: {
+      turn: 1, callId: 'write-report', name: 'write',
+      arguments: JSON.stringify({ file_path: 'report.md', content }),
+    } },
+    { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1,
+      message: { source: { callId: 'write-report' }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ]
+  const opened: string[] = []
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    deliveryRoot,
+    harness: {
+      ...testHarness(),
+      async inspectSession() { return { cwd: root, events } },
+      async openPath(location) { opened.push(location) },
+    },
+  })
+  const spec = { sessionId: 'session-save', turn: 1, throughSeq: 2, path: 'report.md' }
+
+  const saved = await controller.saveSessionOutput(spec)
+  assert.equal(saved.contentDigest, createHash('sha256').update(content).digest('hex'))
+  assert.equal(saved.bytes, Buffer.byteLength(content))
+  assert.equal(await fs.readFile(path.join(saved.location, saved.fileName), 'utf8'), content)
+  assert.deepEqual(await controller.saveSessionOutput(spec), saved)
+  const reconnected = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    deliveryRoot,
+    harness: {
+      ...testHarness(),
+      async inspectSession() { return { cwd: root, events } },
+    },
+  })
+  assert.deepEqual(await reconnected.saveSessionOutput(spec), saved)
+  await controller.showSessionOutputSave({
+    saveId: saved.saveId,
+    fileName: saved.fileName,
+    contentDigest: saved.contentDigest,
+  })
+  assert.deepEqual(opened, [saved.location])
+
+  await fs.writeFile(outputPath, '# Changed after save\n')
+  const changedSave = await controller.saveSessionOutput(spec)
+  assert.notEqual(changedSave.location, saved.location)
+  assert.equal(
+    await fs.readFile(path.join(changedSave.location, changedSave.fileName), 'utf8'),
+    '# Changed after save\n',
+  )
+  assert.equal(await fs.readFile(path.join(saved.location, saved.fileName), 'utf8'), content)
+  await fs.writeFile(outputPath, content)
+  assert.equal((await controller.prepareSessionOutputRevision(spec)).path, 'report.md')
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('isolates a cancelled Session output save attempt and allows retry without publishing it', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-save-cancel-'))
+  const deliveryRoot = path.join(root, 'saved')
+  const content = '# Retry save\n'
+  await fs.writeFile(path.join(root, 'report.md'), content)
+  const events: unknown[] = [
+    { seq: 1, type: 'tool/call', data: {
+      turn: 1, callId: 'write-report', name: 'write',
+      arguments: JSON.stringify({ file_path: 'report.md', content }),
+    } },
+    { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1,
+      message: { source: { callId: 'write-report' }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ]
+  const abort = new AbortController()
+  let cancelFirst = true
+  let pendingPath = ''
+  let targetPath = ''
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    deliveryRoot,
+    harness: {
+      ...testHarness(),
+      async inspectSession() { return { cwd: root, events } },
+    },
+    sessionOutputSaveInternals: {
+      afterTargetOpen(paths) {
+        if (cancelFirst) {
+          pendingPath = paths.pendingPath
+          targetPath = paths.targetPath
+          cancelFirst = false
+          abort.abort()
+        }
+      },
+    },
+  })
+  const spec = { sessionId: 'session-save-cancel', turn: 1, throughSeq: 2, path: 'report.md' }
+
+  await assert.rejects(controller.saveSessionOutput(spec, abort.signal), error =>
+    error instanceof DOMException && error.name === 'AbortError')
+  assert.equal(pendingPath, targetPath)
+  assert.equal((await fs.stat(targetPath)).size, 0)
+  const saved = await controller.saveSessionOutput(spec)
+  assert.notEqual(saved.location, path.dirname(targetPath))
+  assert.equal(await fs.readFile(path.join(saved.location, saved.fileName), 'utf8'), content)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('does not publish or clean through a replaced managed save directory', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-save-swap-'))
+  const deliveryRoot = path.join(root, 'saved')
+  const content = '# Preserve ownership\n'
+  await fs.writeFile(path.join(root, 'report.md'), content)
+  const events: unknown[] = [
+    { seq: 1, type: 'tool/call', data: {
+      turn: 1, callId: 'write-report', name: 'write',
+      arguments: JSON.stringify({ file_path: 'report.md', content }),
+    } },
+    { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1,
+      message: { source: { callId: 'write-report' }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ]
+  let movedDirectory = ''
+  let replacementTarget = ''
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    deliveryRoot,
+    harness: {
+      ...testHarness(),
+      async inspectSession() { return { cwd: root, events } },
+    },
+    sessionOutputSaveInternals: {
+      async afterTargetOpen(paths) {
+        const directory = path.dirname(paths.pendingPath)
+        movedDirectory = `${directory}-original`
+        await fs.rename(directory, movedDirectory)
+        await fs.mkdir(directory)
+        replacementTarget = paths.targetPath
+        await fs.writeFile(replacementTarget, 'replacement target sentinel')
+      },
+    },
+  })
+
+  await assert.rejects(controller.saveSessionOutput({
+    sessionId: 'session-save-swap', turn: 1, throughSeq: 2, path: 'report.md',
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-output-save-failed')
+  assert.equal(await fs.readFile(replacementTarget, 'utf8'), 'replacement target sentinel')
+  assert.equal((await fs.stat(path.join(movedDirectory, 'report.md'))).size, 0)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
 test('protects the last valid Session output until a same-Session revision is validated', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-revision-'))
   const events: unknown[] = [

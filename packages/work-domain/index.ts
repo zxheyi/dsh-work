@@ -16,6 +16,7 @@ export type WorkErrorCode =
   | 'work/resource-invalid'
   | 'work/resource-limit'
   | 'work/session-output-invalid'
+  | 'work/session-output-save-failed'
   | 'work/session-resource-invalid'
   | 'work/turn-failed'
 
@@ -176,6 +177,27 @@ export interface SessionOutputRevisionFailure {
   readonly message: string
 }
 
+export interface SaveSessionOutputSpec extends ReadSessionOutputSpec {}
+
+export interface SessionOutputSave {
+  readonly sessionId: string
+  readonly turn: number
+  readonly name: string
+  readonly path: string
+  readonly bytes: number
+  readonly mediaType: string | null
+  readonly contentDigest: string
+  readonly saveId: string
+  readonly fileName: string
+  readonly location: string
+}
+
+export interface ShowSessionOutputSaveSpec {
+  readonly saveId: string
+  readonly fileName: string
+  readonly contentDigest: string
+}
+
 export interface WorkFileDeliverable {
   readonly kind: 'file'
   readonly path: string
@@ -209,6 +231,8 @@ export interface WorkController {
     spec: InspectSessionOutputsSpec,
     signal?: AbortSignal,
   ): Promise<SessionOutputRevisionFailure | null>
+  saveSessionOutput(spec: SaveSessionOutputSpec, signal?: AbortSignal): Promise<SessionOutputSave>
+  showSessionOutputSave(spec: ShowSessionOutputSaveSpec, signal?: AbortSignal): Promise<void>
   readSessionOutput(spec: ReadSessionOutputSpec, signal?: AbortSignal): Promise<SessionOutputContent>
   follow(signal?: AbortSignal): AsyncIterable<WorkFollowFrame>
   dispatch(request: DispatchWorkRequest, signal?: AbortSignal): Promise<WorkSnapshot>
@@ -297,6 +321,12 @@ export interface WorkControllerOptions {
     readonly afterSourceFirstStat?: (path: string) => void | Promise<void>
     readonly afterSourceWorkspaceRealpath?: () => void | Promise<void>
   }
+  readonly sessionOutputSaveInternals?: {
+    readonly afterTargetOpen?: (paths: {
+      readonly pendingPath: string
+      readonly targetPath: string
+    }) => void | Promise<void>
+  }
 }
 
 export interface WorkStore {
@@ -374,6 +404,7 @@ const MAX_WORK_FILE_RESOURCE_BASE64_CHARS = Math.ceil(MAX_WORK_FILE_RESOURCE_BYT
 const MAX_SESSION_OUTPUT_FILES = 64
 const MAX_SESSION_OUTPUT_SOURCES = 20
 const MAX_SESSION_OUTPUT_PREVIEW_BYTES = 5 * 1024 * 1024
+const MAX_SESSION_OUTPUT_SAVE_BYTES = 25 * 1024 * 1024
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u
 
 function isSafeResourceName(name: string): boolean {
@@ -1241,6 +1272,109 @@ async function readValidatedSessionOutput(
   }
 }
 
+interface CapturedSessionOutput {
+  readonly output: SessionOutputFile
+  readonly workspacePath: string
+  readonly normalizedPath: string
+  readonly data: Buffer
+  readonly contentDigest: string
+}
+
+async function captureValidatedSessionOutput(
+  inspected: { readonly cwd: string; readonly events: readonly unknown[] },
+  spec: SaveSessionOutputSpec,
+  signal?: AbortSignal,
+  internals?: WorkControllerOptions['sessionOutputInternals'],
+): Promise<CapturedSessionOutput> {
+  const outputs = await validatedSessionOutputs(inspected, spec, internals)
+  const output = outputs.find(candidate => candidate.path === spec.path)
+  if (!output) {
+    throw new WorkError('work/session-output-save-failed', 'The selected Session output is no longer valid.')
+  }
+  signal?.throwIfAborted()
+  let workspacePath: string
+  let workspaceStat: Awaited<ReturnType<typeof fs.stat>>
+  try {
+    workspacePath = await fs.realpath(inspected.cwd)
+    workspaceStat = await fs.stat(workspacePath, { bigint: true })
+  } catch (cause) {
+    throw new WorkError('work/session-output-save-failed', 'The Session Workspace is not readable.', { cause })
+  }
+  const normalizedPath = normalizedWorkspacePath(workspacePath, inspected.cwd, output.path)
+  if (!normalizedPath) {
+    throw new WorkError('work/session-output-save-failed', 'The selected output is outside its Session Workspace.')
+  }
+  const candidate = path.resolve(workspacePath, normalizedPath)
+  try {
+    const handle = await fs.open(
+      candidate,
+      fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK,
+    )
+    try {
+      const first = await handle.stat({ bigint: true })
+      if (!first.isFile()
+        || first.size < 1n
+        || first.size > BigInt(MAX_SESSION_OUTPUT_SAVE_BYTES)
+        || Number(first.size) !== output.bytes) {
+        throw new Error('output changed before save')
+      }
+      const resolved = await fs.realpath(candidate)
+      const relative = path.relative(workspacePath, resolved)
+      if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+        throw new Error('output resolves outside workspace')
+      }
+      const current = await fs.lstat(candidate, { bigint: true })
+      if (current.dev !== first.dev || current.ino !== first.ino || current.size !== first.size) {
+        throw new Error('output identity changed before save')
+      }
+      const data = Buffer.allocUnsafe(Number(first.size))
+      let offset = 0
+      while (offset < data.byteLength) {
+        signal?.throwIfAborted()
+        const { bytesRead } = await handle.read(data, offset, data.byteLength - offset, offset)
+        if (bytesRead === 0) break
+        offset += bytesRead
+      }
+      const second = await handle.stat({ bigint: true })
+      const finalPath = await fs.lstat(candidate, { bigint: true })
+      const finalWorkspace = await fs.stat(workspacePath, { bigint: true })
+      if (offset !== data.byteLength
+        || second.dev !== first.dev
+        || second.ino !== first.ino
+        || second.size !== first.size
+        || second.mtimeNs !== first.mtimeNs
+        || second.ctimeNs !== first.ctimeNs
+        || finalPath.dev !== second.dev
+        || finalPath.ino !== second.ino
+        || finalPath.size !== second.size
+        || !finalWorkspace.isDirectory()
+        || finalWorkspace.dev !== workspaceStat.dev
+        || finalWorkspace.ino !== workspaceStat.ino
+        || await fs.realpath(inspected.cwd) !== workspacePath) {
+        throw new Error('output changed during save capture')
+      }
+      signal?.throwIfAborted()
+      return Object.freeze({
+        output,
+        workspacePath,
+        normalizedPath,
+        data,
+        contentDigest: createHash('sha256').update(data).digest('hex'),
+      })
+    } finally {
+      await handle.close()
+    }
+  } catch (cause) {
+    if (signal?.aborted) throw cause
+    if (cause instanceof WorkError) throw cause
+    throw new WorkError(
+      'work/session-output-save-failed',
+      'The selected Session output could not be captured safely.',
+      { cause },
+    )
+  }
+}
+
 async function waitForSubmittedTurn(
   context: HarnessWorkContext,
   request: SubmitTurnRequest,
@@ -1520,6 +1654,229 @@ async function resolveDeliveryDirectory(work: WorkSnapshot, deliveryRoot: string
   const targetRelative = path.relative(directory, target)
   if (targetRelative !== location.fileName) {
     throw deliveryError('The exported deliverable resolved outside its delivery directory.')
+  }
+  return directory
+}
+
+function sessionOutputSaveFileName(name: string): string {
+  let safe = name.normalize('NFKC')
+    .replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/gu, '-')
+    .replace(/\s+/gu, ' ')
+    .replace(/^[. ]+|[. ]+$/gu, '')
+    .slice(0, 160)
+    .replace(/[. ]+$/gu, '')
+  if (!safe) safe = 'result'
+  const stem = path.parse(safe).name
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/iu.test(stem)) safe = `_${safe}`
+  return safe
+}
+
+function sessionOutputSaveId(
+  sessionId: string,
+  normalizedPath: string,
+  contentDigest: string,
+  attempt: number,
+): string {
+  return createHash('sha256')
+    .update(`session-output\0${sessionId}\0${normalizedPath}\0${contentDigest}\0${String(attempt)}`)
+    .digest('hex')
+    .slice(0, 32)
+}
+
+async function readManagedSaveDigest(target: string): Promise<string> {
+  const handle = await fs.open(
+    target,
+    fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK,
+  )
+  try {
+    const first = await handle.stat({ bigint: true })
+    if (!first.isFile() || first.size < 1n || first.size > BigInt(MAX_SESSION_OUTPUT_SAVE_BYTES)) {
+      throw new Error('managed save is not a bounded regular file')
+    }
+    const data = Buffer.allocUnsafe(Number(first.size))
+    let offset = 0
+    while (offset < data.byteLength) {
+      const { bytesRead } = await handle.read(data, offset, data.byteLength - offset, offset)
+      if (bytesRead === 0) break
+      offset += bytesRead
+    }
+    const second = await handle.stat({ bigint: true })
+    const current = await fs.lstat(target, { bigint: true })
+    if (offset !== data.byteLength
+      || second.dev !== first.dev
+      || second.ino !== first.ino
+      || second.size !== first.size
+      || second.mtimeNs !== first.mtimeNs
+      || second.ctimeNs !== first.ctimeNs
+      || current.dev !== second.dev
+      || current.ino !== second.ino
+      || current.size !== second.size) {
+      throw new Error('managed save changed while being verified')
+    }
+    return createHash('sha256').update(data).digest('hex')
+  } finally {
+    await handle.close()
+  }
+}
+
+async function persistSessionOutputSave(
+  captured: CapturedSessionOutput,
+  spec: SaveSessionOutputSpec,
+  deliveryRoot: string,
+  signal?: AbortSignal,
+  internals?: WorkControllerOptions['sessionOutputSaveInternals'],
+): Promise<SessionOutputSave> {
+  await ensureDeliveryDirectory(deliveryRoot, true)
+  const root = await fs.realpath(deliveryRoot)
+  const savesRoot = path.join(root, 'session-outputs')
+  await ensureDeliveryDirectory(savesRoot)
+  const fileName = sessionOutputSaveFileName(captured.output.name)
+  const rootIdentity = await fs.stat(root, { bigint: true })
+  const savesRootIdentity = await fs.stat(savesRoot, { bigint: true })
+  const assertParentIdentity = async (): Promise<void> => {
+    const [currentRoot, currentSavesRoot] = await Promise.all([
+      fs.stat(root, { bigint: true }),
+      fs.stat(savesRoot, { bigint: true }),
+    ])
+    if (!currentRoot.isDirectory()
+      || currentRoot.dev !== rootIdentity.dev
+      || currentRoot.ino !== rootIdentity.ino
+      || !currentSavesRoot.isDirectory()
+      || currentSavesRoot.dev !== savesRootIdentity.dev
+      || currentSavesRoot.ino !== savesRootIdentity.ino
+      || await fs.realpath(root) !== root
+      || await fs.realpath(savesRoot) !== savesRoot) {
+      throw new WorkError('work/session-output-save-failed', 'The managed save root changed during the copy.')
+    }
+  }
+  const result = (saveId: string, directory: string): SessionOutputSave => Object.freeze({
+    ...captured.output,
+    contentDigest: captured.contentDigest,
+    saveId,
+    fileName,
+    location: directory,
+  })
+  for (let attempt = 0; attempt < 32; attempt++) {
+    const saveId = sessionOutputSaveId(
+      spec.sessionId,
+      captured.normalizedPath,
+      captured.contentDigest,
+      attempt,
+    )
+    const directory = path.join(savesRoot, saveId)
+    const target = path.join(directory, fileName)
+    await assertParentIdentity()
+    try {
+      await fs.mkdir(directory)
+    } catch (cause) {
+      if (!(cause instanceof Error && 'code' in cause && cause.code === 'EEXIST')) {
+        throw new WorkError('work/session-output-save-failed', 'A managed save attempt could not be created.', {
+          cause,
+        })
+      }
+      try {
+        if (await fs.realpath(directory) === directory
+          && await fs.realpath(target) === target
+          && await readManagedSaveDigest(target) === captured.contentDigest) {
+          return result(saveId, directory)
+        }
+      } catch {
+        // An incomplete immutable attempt is retained and skipped without modifying its paths.
+      }
+      continue
+    }
+    const directoryIdentity = await fs.stat(directory, { bigint: true })
+    const assertAttemptIdentity = async (): Promise<void> => {
+      await assertParentIdentity()
+      const current = await fs.stat(directory, { bigint: true })
+      if (!current.isDirectory()
+        || current.dev !== directoryIdentity.dev
+        || current.ino !== directoryIdentity.ino
+        || await fs.realpath(directory) !== directory) {
+        throw new WorkError('work/session-output-save-failed', 'The managed save attempt changed during the copy.')
+      }
+    }
+    signal?.throwIfAborted()
+    try {
+      const handle = await fs.open(
+        target,
+        fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY | fsConstants.O_NOFOLLOW,
+        0o600,
+      )
+      try {
+        const targetIdentity = await handle.stat({ bigint: true })
+        await internals?.afterTargetOpen?.({ pendingPath: target, targetPath: target })
+        await assertAttemptIdentity()
+        const currentTarget = await fs.lstat(target, { bigint: true })
+        if (!currentTarget.isFile()
+          || currentTarget.dev !== targetIdentity.dev
+          || currentTarget.ino !== targetIdentity.ino) {
+          throw new WorkError('work/session-output-save-failed', 'The managed save file changed before copying.')
+        }
+        signal?.throwIfAborted()
+        await handle.writeFile(captured.data)
+        await handle.sync()
+        const written = await handle.stat({ bigint: true })
+        if (written.dev !== targetIdentity.dev
+          || written.ino !== targetIdentity.ino
+          || written.size !== BigInt(captured.data.byteLength)) {
+          throw new WorkError('work/session-output-save-failed', 'The managed save write was not complete.')
+        }
+      } finally {
+        await handle.close().catch(() => {})
+      }
+      await assertAttemptIdentity()
+      if (await fs.realpath(target) !== target
+        || await readManagedSaveDigest(target) !== captured.contentDigest) {
+        throw new WorkError('work/session-output-save-failed', 'The managed save bytes could not be verified.')
+      }
+      return result(saveId, directory)
+    } catch (cause) {
+      if (signal?.aborted) throw cause
+      if (cause instanceof WorkError) throw cause
+      throw new WorkError(
+        'work/session-output-save-failed',
+        'The managed save result could not be confirmed. Retry is safe.',
+        { cause },
+      )
+    }
+  }
+  throw new WorkError(
+    'work/session-output-save-failed',
+    'The managed save location contains too many incomplete or conflicting attempts.',
+  )
+}
+
+async function resolveSessionOutputSave(
+  spec: ShowSessionOutputSaveSpec,
+  deliveryRoot: string,
+): Promise<string> {
+  if (!/^[a-f0-9]{32}$/u.test(spec.saveId)
+    || !/^[a-f0-9]{64}$/u.test(spec.contentDigest)
+    || sessionOutputSaveFileName(spec.fileName) !== spec.fileName) {
+    throw new WorkError('work/session-output-save-failed', 'The saved output identity is invalid.')
+  }
+  let root: string
+  let directory: string
+  let target: string
+  try {
+    root = await fs.realpath(deliveryRoot)
+    directory = await fs.realpath(path.join(root, 'session-outputs', spec.saveId))
+    target = await fs.realpath(path.join(directory, spec.fileName))
+  } catch (cause) {
+    throw new WorkError('work/session-output-save-failed', 'The saved output is no longer available.', { cause })
+  }
+  const relative = path.relative(root, directory)
+  let digestMatches = false
+  try {
+    digestMatches = await readManagedSaveDigest(target) === spec.contentDigest
+  } catch {
+    digestMatches = false
+  }
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)
+    || path.dirname(target) !== directory
+    || !digestMatches) {
+    throw new WorkError('work/session-output-save-failed', 'The saved output could not be verified.')
   }
   return directory
 }
@@ -2098,6 +2455,81 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         )
       }
       return withRevisionLock(() => reconcileSessionRevision(inspected, spec, signal))
+    },
+
+    async saveSessionOutput(spec, signal) {
+      if (!options.harness.inspectSession) {
+        throw new WorkError(
+          'work/session-output-save-failed',
+          'This Host cannot inspect Session outputs for saving.',
+        )
+      }
+      let inspected: Awaited<ReturnType<NonNullable<HarnessWorkPort['inspectSession']>>>
+      try {
+        inspected = await options.harness.inspectSession(spec.sessionId, signal)
+      } catch (cause) {
+        throw new WorkError(
+          'work/session-output-save-failed',
+          'The selected Session output is not available for saving.',
+          { cause },
+        )
+      }
+      return withRevisionLock(async () => {
+        signal?.throwIfAborted()
+        const protection = matchingProtection(inspected, spec)
+        const captured: CapturedSessionOutput = protection
+          && protection.sourceTurn === spec.turn
+          && protection.throughSeq === spec.throughSeq
+          ? Object.freeze({
+            output: Object.freeze({
+              sessionId: protection.sessionId,
+              turn: protection.sourceTurn,
+              name: protection.name,
+              path: protection.path,
+              bytes: protection.bytes.byteLength,
+              mediaType: protection.mediaType,
+            }),
+            workspacePath: protection.workspacePath,
+            normalizedPath: protection.normalizedPath,
+            data: Buffer.from(protection.bytes),
+            contentDigest: protection.contentDigest,
+          })
+          : await captureValidatedSessionOutput(
+            inspected,
+            spec,
+            signal,
+            options.sessionOutputInternals,
+          )
+        return persistSessionOutputSave(
+          captured,
+          spec,
+          deliveryRoot,
+          signal,
+          options.sessionOutputSaveInternals,
+        )
+      })
+    },
+
+    async showSessionOutputSave(spec, signal) {
+      await ready()
+      if (!options.harness.openPath) {
+        throw new WorkError(
+          'work/session-output-save-failed',
+          'This Host cannot show managed save locations.',
+        )
+      }
+      const directory = await resolveSessionOutputSave(spec, deliveryRoot)
+      signal?.throwIfAborted()
+      try {
+        await options.harness.openPath(directory, signal)
+      } catch (cause) {
+        if (signal?.aborted) throw cause
+        throw new WorkError(
+          'work/session-output-save-failed',
+          'The managed save location could not be shown.',
+          { cause },
+        )
+      }
     },
 
     async readSessionOutput(spec, signal) {

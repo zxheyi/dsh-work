@@ -9,6 +9,8 @@ import type {
   WorkInspectSessionOutputSourcesSpec,
   WorkInspectSessionOutputsSpec,
   WorkPrepareSessionOutputRevisionSpec,
+  WorkSaveSessionOutputSpec,
+  WorkShowSessionOutputSaveSpec,
   WorkReadSessionOutputSpec,
   WorkListValue,
   WorkDeliverableContent,
@@ -21,6 +23,8 @@ import type {
   WorkSessionOutputSource,
   WorkSessionOutputRevision,
   WorkSessionOutputRevisionFailure,
+  WorkSessionOutputSave,
+  WorkShowSessionOutputSaveValue,
   WorkSessionOutputSourcesValue,
   WorkSessionOutputsValue,
   WorkRemoteFollowFrame,
@@ -170,6 +174,26 @@ const sessionOutputRevisionFailureSchema: z.ZodType<WorkSessionOutputRevisionFai
   reference: z.string().min(2).max(4099),
   status: z.literal('failed'),
   message: z.string().min(1).max(512),
+}).strict()
+const sessionOutputSaveSchema: z.ZodType<WorkSessionOutputSave> = z.object({
+  sessionId: z.string().min(1).max(256),
+  turn: z.number().int().nonnegative(),
+  name: z.string().min(1).max(512),
+  path: z.string().min(1).max(4096),
+  bytes: z.number().int().positive().max(25 * 1024 * 1024),
+  mediaType: z.string().min(1).max(128).nullable(),
+  contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+  saveId: z.string().regex(/^[a-f0-9]{32}$/u),
+  fileName: z.string().min(1).max(160),
+  location: z.string().min(1).max(4096),
+}).strict()
+const showSessionOutputSaveSchema: z.ZodType<WorkShowSessionOutputSaveSpec> = z.object({
+  saveId: z.string().regex(/^[a-f0-9]{32}$/u),
+  fileName: z.string().min(1).max(160),
+  contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+}).strict()
+const showSessionOutputSaveValueSchema: z.ZodType<WorkShowSessionOutputSaveValue> = z.object({
+  shown: z.literal(true),
 }).strict()
 const sessionOutputContentSchema: z.ZodType<WorkSessionOutputContent> = z.object({
   sessionId: z.string().min(1).max(256),
@@ -378,6 +402,39 @@ export const TYPERT_REMOTE: TypertRemoteContribution = Object.freeze({
       ),
     }),
     Object.freeze({
+      id: '@dsh-work/work-api#work/saveSessionOutput',
+      service: 'workApi',
+      namespace: 'work',
+      method: 'saveSessionOutput',
+      invocation: Object.freeze({ kind: 'direct' as const }),
+      parameters: Object.freeze([Object.freeze({
+        name: 'spec',
+        wire: 'spec',
+        source: 'json' as const,
+        codec: strict('@dsh-work/work-api#WorkSaveSessionOutputSpec', readSessionOutputSchema),
+      })]),
+      cancellation: Object.freeze({ parameter: 'signal' as const }),
+      result: strict('@dsh-work/work-api#WorkSessionOutputSave', sessionOutputSaveSchema),
+    }),
+    Object.freeze({
+      id: '@dsh-work/work-api#work/showSessionOutputSave',
+      service: 'workApi',
+      namespace: 'work',
+      method: 'showSessionOutputSave',
+      invocation: Object.freeze({ kind: 'direct' as const }),
+      parameters: Object.freeze([Object.freeze({
+        name: 'spec',
+        wire: 'spec',
+        source: 'json' as const,
+        codec: strict('@dsh-work/work-api#WorkShowSessionOutputSaveSpec', showSessionOutputSaveSchema),
+      })]),
+      cancellation: Object.freeze({ parameter: 'signal' as const }),
+      result: strict(
+        '@dsh-work/work-api#WorkShowSessionOutputSaveValue',
+        showSessionOutputSaveValueSchema,
+      ),
+    }),
+    Object.freeze({
       id: '@dsh-work/work-api#work/follow',
       service: 'workApi',
       namespace: 'work',
@@ -429,6 +486,14 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       spec: WorkInspectSessionOutputsSpec,
       signal?: AbortSignal,
     ) => Promise<RemoteResult<WorkSessionOutputRevisionFailure | null>>
+    'work/saveSessionOutput': (
+      spec: WorkSaveSessionOutputSpec,
+      signal?: AbortSignal,
+    ) => Promise<RemoteResult<WorkSessionOutputSave>>
+    'work/showSessionOutputSave': (
+      spec: WorkShowSessionOutputSaveSpec,
+      signal?: AbortSignal,
+    ) => Promise<RemoteResult<WorkShowSessionOutputSaveValue>>
     'work/readSessionOutput': (
       spec: WorkReadSessionOutputSpec,
       signal?: AbortSignal,
@@ -449,6 +514,8 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       inspectSessionOutputSources: TypertRemoteMap['work/inspectSessionOutputSources']
       prepareSessionOutputRevision: TypertRemoteMap['work/prepareSessionOutputRevision']
       inspectSessionRevision: TypertRemoteMap['work/inspectSessionRevision']
+      saveSessionOutput: TypertRemoteMap['work/saveSessionOutput']
+      showSessionOutputSave: TypertRemoteMap['work/showSessionOutputSave']
       readSessionOutput: TypertRemoteMap['work/readSessionOutput']
       list: TypertRemoteMap['work/list']
       follow: TypertRemoteMap['work/follow']

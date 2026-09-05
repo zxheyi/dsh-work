@@ -233,7 +233,7 @@
       "files": "packages/work-domain/index.ts；packages/work-api/remote.ts；packages/work-api/client-model.ts；packages/work-api/surface.ts",
       "verification": "字节/冲突/重连幂等集成、保存并继续修改 E2E",
       "limits": "首批受管保存不假装系统另存为；没有真实取消交互时不人为新增弹窗。",
-      "status": "pending"
+      "status": "verified"
     },
     {
       "id": "T13",

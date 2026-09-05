@@ -21,6 +21,7 @@ import type {
   WorkSessionOutputFile,
   WorkSessionOutputSource,
   WorkSessionOutputRevisionFailure,
+  WorkSessionOutputSave,
   WorkView,
 } from './index.ts'
 import type { WorkDeliverableContent } from './index.ts'
@@ -92,6 +93,16 @@ interface SessionOutputPreviewStore {
   readonly subscribe: (listener: () => void) => () => void
   readonly select: (selection: SessionOutputPreviewSelection) => void
   readonly clear: () => void
+}
+
+export function matchesSessionOutputSelection(
+  current: SessionOutputPreviewSelection | null,
+  expected: SessionOutputPreviewSelection,
+): boolean {
+  return current?.sessionId === expected.sessionId
+    && current.turn === expected.turn
+    && current.throughSeq === expected.throughSeq
+    && current.path === expected.path
 }
 
 interface NativeSessionOutputPreviewProps extends WorkSurfaceInjected {
@@ -1292,11 +1303,18 @@ function NativeSessionOutputPreview({
     | { readonly phase: 'ready'; readonly sources: readonly WorkSessionOutputSource[] }
   >({ phase: 'idle' })
   const [revisionPhase, setRevisionPhase] = useState<'idle' | 'preparing' | 'error'>('idle')
+  const [saveState, setSaveState] = useState<
+    | { readonly phase: 'idle' | 'saving' | 'error' }
+    | { readonly phase: 'saved'; readonly value: WorkSessionOutputSave }
+  >({ phase: 'idle' })
+  const [saveOpenError, setSaveOpenError] = useState(false)
 
   useEffect(() => {
     setTab('content')
     setRevisionPhase('idle')
-  }, [selection?.path, selection?.sessionId])
+    setSaveState({ phase: 'idle' })
+    setSaveOpenError(false)
+  }, [selection?.path, selection?.sessionId, selection?.throughSeq, selection?.turn])
 
   useEffect(() => {
     if (!selection || selection.sessionId !== sessionId || selection.mediaType !== 'text/markdown') {
@@ -1425,36 +1443,92 @@ function NativeSessionOutputPreview({
             h('p', null, '文件可能已移动、仍在写入或内容过大。'),
             h('button', { type: 'button', onClick: () => setRetry(value => value + 1) }, '重试'))
           : safeMarkdownContent(state.content)),
-  !unsupported ? h('footer', { className: 'dsh-work-output-preview-actions' },
-    revisionPhase === 'error'
-      ? h('span', { role: 'alert' }, '无法保护当前文件，请重新读取后再试。')
-      : h('span', null, '修改会继续使用当前会话'),
-    h('button', {
-      type: 'button',
-      disabled: state.phase !== 'ready' || revisionPhase === 'preparing',
-      onClick: () => {
-        const target = selection
-        setRevisionPhase('preparing')
-        void works.prepareSessionOutputRevision({
-          sessionId: target.sessionId,
-          turn: target.turn,
-          throughSeq: target.throughSeq,
-          path: target.path,
-        }).then(revision => {
-          if (preview.getSnapshot()?.sessionId !== target.sessionId
-            || preview.getSnapshot()?.path !== target.path
-            || sessionId !== target.sessionId) return
-          setRevisionPhase('idle')
-          window.dispatchEvent(new CustomEvent<SessionResourceReferenceDetail>(
-            'dsh-work:reference-session-resource',
-            { detail: Object.freeze({ sessionId: revision.sessionId, path: revision.path }) },
-          ))
-        }).catch(() => {
-          if (preview.getSnapshot()?.sessionId === target.sessionId
-            && preview.getSnapshot()?.path === target.path) setRevisionPhase('error')
-        })
-      },
-    }, revisionPhase === 'preparing' ? '正在准备…' : '要求修改')) : null)
+  h('footer', { className: 'dsh-work-output-preview-actions' },
+    h('span', {
+      role: saveState.phase === 'error' || saveOpenError || revisionPhase === 'error' ? 'alert' : undefined,
+      title: saveState.phase === 'saved' ? saveState.value.location : undefined,
+    }, saveState.phase === 'saved'
+      ? saveOpenError
+        ? `副本已保存到 ${saveState.value.location}，但暂时无法打开位置。`
+        : `已保存到 ${saveState.value.location}`
+      : saveState.phase === 'error'
+        ? '保存结果尚未确认，请重试。'
+        : revisionPhase === 'error'
+          ? '无法保护当前文件，请重新读取后再试。'
+          : unsupported
+            ? '保存会复制当前文件到受管位置'
+            : '保存和修改互不影响'),
+    h('div', { className: 'dsh-work-output-preview-action-buttons' },
+      saveState.phase === 'saved' ? h('button', {
+        type: 'button',
+        className: 'is-secondary',
+        onClick: () => {
+          const saved = saveState.value
+          const target = selection
+          setSaveOpenError(false)
+          void works.showSessionOutputSave({
+            saveId: saved.saveId,
+            fileName: saved.fileName,
+            contentDigest: saved.contentDigest,
+          }).catch(() => {
+            if (matchesSessionOutputSelection(preview.getSnapshot(), target)) setSaveOpenError(true)
+          })
+        },
+      }, '打开位置') : null,
+      h('button', {
+        type: 'button',
+        className: 'is-secondary',
+        disabled: saveState.phase === 'saving',
+        onClick: () => {
+          const target = selection
+          setSaveState({ phase: 'saving' })
+          void works.saveSessionOutput({
+            sessionId: target.sessionId,
+            turn: target.turn,
+            throughSeq: target.throughSeq,
+            path: target.path,
+          }).then(saved => {
+            if (matchesSessionOutputSelection(preview.getSnapshot(), target)
+              && sessionId === target.sessionId) {
+              setSaveOpenError(false)
+              setSaveState({ phase: 'saved', value: saved })
+            }
+          }).catch(() => {
+            if (matchesSessionOutputSelection(preview.getSnapshot(), target)) {
+              setSaveOpenError(false)
+              setSaveState({ phase: 'error' })
+            }
+          })
+        },
+      }, saveState.phase === 'saving'
+        ? '正在保存…'
+        : saveState.phase === 'error'
+          ? '重试保存'
+          : '保存副本'),
+      !unsupported ? h('button', {
+        type: 'button',
+        disabled: state.phase !== 'ready' || revisionPhase === 'preparing',
+        onClick: () => {
+          const target = selection
+          setRevisionPhase('preparing')
+          void works.prepareSessionOutputRevision({
+            sessionId: target.sessionId,
+            turn: target.turn,
+            throughSeq: target.throughSeq,
+            path: target.path,
+          }).then(revision => {
+            if (!matchesSessionOutputSelection(preview.getSnapshot(), target)
+              || sessionId !== target.sessionId) return
+            setRevisionPhase('idle')
+            window.dispatchEvent(new CustomEvent<SessionResourceReferenceDetail>(
+              'dsh-work:reference-session-resource',
+              { detail: Object.freeze({ sessionId: revision.sessionId, path: revision.path }) },
+            ))
+          }).catch(() => {
+            if (matchesSessionOutputSelection(preview.getSnapshot(), target)) setRevisionPhase('error')
+          })
+        },
+      }, revisionPhase === 'preparing' ? '正在准备…' : '要求修改') : null)))
 }
 
 const styles = `
@@ -1538,9 +1612,11 @@ body[data-ds-dark-theme] {
 .dsh-work-output-preview-meta { display: flex; justify-content: space-between; gap: 12px; padding: 14px 24px 0; color: var(--work-faint); font-size: 11px; }
 .dsh-work-output-preview-body { flex: 1; min-height: 0; padding: 18px 24px 96px; overflow-y: auto; }
 .dsh-work-output-preview-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 18px; border-top: 1px solid var(--work-border); background: var(--work-surface); }
-.dsh-work-output-preview-actions span { color: var(--work-muted); font-size: 11px; }
+.dsh-work-output-preview-actions > span { min-width: 0; overflow: hidden; color: var(--work-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .dsh-work-output-preview-actions span[role="alert"] { color: var(--work-danger); }
+.dsh-work-output-preview-action-buttons { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
 .dsh-work-output-preview-actions button { flex: 0 0 auto; padding: 8px 14px; border: 1px solid var(--work-accent); border-radius: 8px; color: white; background: var(--work-accent); cursor: pointer; font: 600 13px/18px var(--work-font); }
+.dsh-work-output-preview-actions button.is-secondary { border-color: var(--work-border-strong); color: var(--work-text); background: var(--work-surface); }
 .dsh-work-output-preview-actions button:disabled { cursor: default; opacity: .55; }
 .dsh-work-output-preview-sources { display: grid; gap: 12px; }
 .dsh-work-output-preview-source { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: 10px 12px; padding: 14px; border: 1px solid var(--work-border); border-radius: 10px; background: var(--work-surface-subtle); }

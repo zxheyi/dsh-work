@@ -81,6 +81,8 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
       async inspectSessionOutputSources() { throw new Error('not called') },
       async prepareSessionOutputRevision() { throw new Error('not called') },
       async inspectSessionRevision() { throw new Error('not called') },
+      async saveSessionOutput() { throw new Error('not called') },
+      async showSessionOutputSave() { throw new Error('not called') },
       async readSessionOutput() { throw new Error('not called') },
       async list() { return { ok: true, value: { items: [] } } },
       async *follow() {},
