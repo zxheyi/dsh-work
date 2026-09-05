@@ -25,9 +25,32 @@ import type {
   WorkView,
 } from './index.ts'
 import type { WorkDeliverableContent } from './index.ts'
+import {
+  matchesWorkRecoveryOutput,
+  parseWorkRecoveryContext,
+  recoverySessionDisposition,
+  recoveredDraftForSession,
+  serializeWorkRecoveryContext,
+  type WorkRecoveryContext,
+  type WorkRecoveryOutputSelection,
+} from './recovery-context.ts'
 
 interface WorkSurfaceInjected {
   readonly works: IWorks
+}
+
+interface WorkSessionNavigationContext {
+  readonly sessions: {
+    readonly list: {
+      readonly getSnapshot: () => {
+        readonly current: string | undefined
+        readonly byId: Readonly<Record<string, unknown>>
+        readonly phase: 'pending' | 'ready'
+      }
+      readonly subscribe: (listener: () => void) => () => void
+    }
+    readonly open: (sessionId: string) => void
+  }
 }
 
 interface WorkSidebarProps extends WorkSurfaceInjected {
@@ -124,6 +147,46 @@ export type SafeMarkdownRenderPlan =
 const sessionResourceEntries = new Map<string, readonly SessionResourceEntryState[]>()
 const sessionResourceDrafts = new Map<string, string>()
 const MAX_STRUCTURED_MARKDOWN_NODES = 2_000
+let activeRecoveryContext: WorkRecoveryContext | null = null
+let pendingRecoverySession: string | null = null
+let pendingRecoveryDraft: Pick<WorkRecoveryContext, 'sessionId' | 'draft'> | null = null
+let pendingRecoverySelection: WorkRecoveryOutputSelection | null = null
+
+function clearRecoveryContext(): void {
+  activeRecoveryContext = null
+  pendingRecoverySession = null
+  pendingRecoveryDraft = null
+  pendingRecoverySelection = null
+  window.name = ''
+  window.dshWorkRecovery?.update('')
+}
+
+function publishRecoveryContext(
+  sessionId: string,
+  draft: string,
+  selection: WorkRecoveryOutputSelection | null = activeRecoveryContext?.sessionId === sessionId
+    ? activeRecoveryContext.selection
+    : null,
+): void {
+  if (pendingRecoverySession && pendingRecoverySession !== sessionId) return
+  if (!pendingRecoverySession && pendingRecoverySelection?.sessionId !== sessionId) {
+    pendingRecoverySelection = null
+  }
+  const context: WorkRecoveryContext = Object.freeze({
+    schema: 'dsh-work.recovery-context.v1',
+    sessionId,
+    draft,
+    selection,
+  })
+  const serialized = serializeWorkRecoveryContext(context)
+  if (!serialized) {
+    clearRecoveryContext()
+    return
+  }
+  activeRecoveryContext = context
+  window.name = serialized
+  window.dshWorkRecovery?.update(serialized)
+}
 
 function createSessionOutputPreviewStore(): SessionOutputPreviewStore {
   let snapshot: SessionOutputPreviewSelection | null = null
@@ -437,6 +500,18 @@ function NativeSessionResourceEntry({
   const [dropActive, setDropActive] = useState(false)
   activeSessionId.current = session.sessionId
   sessionResourceDrafts.set(session.sessionId, input.draft)
+  publishRecoveryContext(session.sessionId, input.draft)
+
+  useEffect(() => {
+    if (pendingRecoveryDraft?.sessionId !== session.sessionId) return
+    const retained = pendingRecoveryDraft
+    pendingRecoveryDraft = null
+    pendingRecoverySession = null
+    const draft = recoveredDraftForSession(retained, session.sessionId, input.draft)
+    sessionResourceDrafts.set(session.sessionId, draft)
+    publishRecoveryContext(session.sessionId, draft)
+    if (draft !== input.draft) inputActions.setDraft(draft)
+  }, [input.draft, inputActions, session.sessionId])
 
   useEffect(() => {
     const prior = previousDraft.current
@@ -505,6 +580,7 @@ function NativeSessionResourceEntry({
       const separator = targetDraft.trim().length > 0 ? ' ' : ''
       const nextDraft = `${targetDraft}${separator}${mention} `
       sessionResourceDrafts.set(targetSessionId, nextDraft)
+      publishRecoveryContext(targetSessionId, nextDraft)
       inputActions.setDraft(nextDraft)
     } catch (error) {
       failed(resourceErrorMessage(error))
@@ -626,6 +702,7 @@ function NativeSessionResourceEntry({
       const separator = current.trim().length > 0 ? ' ' : ''
       const next = `${current}${separator}${mention} `
       sessionResourceDrafts.set(session.sessionId, next)
+      publishRecoveryContext(session.sessionId, next)
       inputActions.setDraft(next)
       requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-composer-input]')?.focus())
     }
@@ -640,6 +717,7 @@ function NativeSessionResourceEntry({
       const next = (sessionResourceDrafts.get(session.sessionId) ?? input.draft)
         .replace(entry.mention, '').replace(/ {2,}/gu, ' ').trimStart()
       sessionResourceDrafts.set(session.sessionId, next)
+      publishRecoveryContext(session.sessionId, next)
       inputActions.setDraft(next)
     }
   }
@@ -1175,6 +1253,30 @@ function NativeSessionOutputs({ matched, openFile, sessionId, works }: NativeSes
     return () => abort.abort()
   }, [matched.throughSeq, matched.turn, sessionId, works])
 
+  useEffect(() => {
+    const retained = pendingRecoverySelection
+    if (!retained || retained.sessionId !== sessionId || retained.turn !== matched.turn
+      || retained.throughSeq !== matched.throughSeq) return
+    const file = files.find(candidate => matchesWorkRecoveryOutput(retained, {
+      sessionId: candidate.sessionId,
+      turn: candidate.turn,
+      throughSeq: matched.throughSeq,
+      name: candidate.name,
+      path: candidate.path,
+      bytes: candidate.bytes,
+      mediaType: candidate.mediaType,
+    }))
+    if (!file) return
+    pendingRecoverySelection = null
+    setSelectedPath(file.path)
+    const selection = new CustomEvent<SessionOutputPreviewDetail>('dsh-work:select-session-output', {
+      cancelable: true,
+      detail: Object.freeze({ ...retained }),
+    }) as SessionOutputSelectionEvent
+    Object.defineProperty(selection, SESSION_OUTPUT_OPEN, { value: () => openFile(file.path) })
+    window.dispatchEvent(selection)
+  }, [files, matched.throughSeq, matched.turn, openFile, sessionId])
+
   if (files.length < 1 && !revisionFailure) return null
   const verifiedCount = sources.filter(source => source.status === 'verified').length
   const sourceSummary = verifiedCount > 0
@@ -1241,6 +1343,7 @@ function NativeSessionOutputs({ matched, openFile, sessionId, works }: NativeSes
       Object.defineProperty(selection, SESSION_OUTPUT_OPEN, {
         value: () => openFile(file.path),
       })
+      publishRecoveryContext(sessionId, sessionResourceDrafts.get(sessionId) ?? '', selection.detail)
       if (window.dispatchEvent(selection)) openFile(file.path)
     },
   },
@@ -1859,6 +1962,40 @@ function installStyles(): () => void {
 }
 
 export function registerWorkSurface(ctx: Context, works: IWorks): () => void {
+  const sessionNavigation = (ctx as Context & WorkSessionNavigationContext).sessions
+  let stopRecoveryNavigation: (() => void) | null = null
+  const openRetainedSession = (retained: WorkRecoveryContext): void => {
+    const settleWhenListed = (): boolean => {
+      const list = sessionNavigation.list.getSnapshot()
+      const disposition = recoverySessionDisposition(retained.sessionId, list)
+      if (disposition === 'wait') return false
+      if (disposition === 'discard') {
+        clearRecoveryContext()
+        return true
+      }
+      if (list.current !== retained.sessionId) sessionNavigation.open(retained.sessionId)
+      return true
+    }
+    stopRecoveryNavigation?.()
+    stopRecoveryNavigation = null
+    if (settleWhenListed()) return
+    const unsubscribe = sessionNavigation.list.subscribe(() => {
+      if (!settleWhenListed()) return
+      unsubscribe()
+      if (stopRecoveryNavigation === unsubscribe) stopRecoveryNavigation = null
+    })
+    stopRecoveryNavigation = unsubscribe
+  }
+  const restoreContext = (): void => {
+    const retained = parseWorkRecoveryContext(window.dshWorkRecovery?.read() || window.name)
+    if (!retained) return
+    activeRecoveryContext = retained
+    pendingRecoverySession = retained.sessionId
+    pendingRecoveryDraft = Object.freeze({ sessionId: retained.sessionId, draft: retained.draft })
+    pendingRecoverySelection = retained.selection
+    openRetainedSession(retained)
+  }
+  restoreContext()
   const removeStyles = installStyles()
   const preview = createSessionOutputPreviewStore()
   let removePreview: (() => void) | null = null
@@ -1871,6 +2008,9 @@ export function registerWorkSurface(ctx: Context, works: IWorks): () => void {
     const selected = preview.getSnapshot()
     ctx.layout.closeDetails()
     releasePreview()
+    if (selected && activeRecoveryContext?.sessionId === selected.sessionId) {
+      publishRecoveryContext(selected.sessionId, activeRecoveryContext.draft, null)
+    }
     if (selected) {
       requestAnimationFrame(() => {
         const rows = document.querySelectorAll<HTMLElement>(
@@ -1914,6 +2054,7 @@ export function registerWorkSurface(ctx: Context, works: IWorks): () => void {
     requestAnimationFrame(() => ctx.layout.openDetails())
   }
   window.addEventListener('dsh-work:select-session-output', selectOutput)
+  window.addEventListener('dsh-work:restore-context', restoreContext)
   window.addEventListener('click', handOverToNativeToolSurface)
   ctx.slots.inject('sidebar.brand.name', () => ctx.slots.register({
     name: 'sidebar.brand.name',
@@ -1958,9 +2099,11 @@ export function registerWorkSurface(ctx: Context, works: IWorks): () => void {
   }, LegacyDeliverableOverlay))
   return () => {
     window.removeEventListener('dsh-work:select-session-output', selectOutput)
+    window.removeEventListener('dsh-work:restore-context', restoreContext)
     window.removeEventListener('click', handOverToNativeToolSurface)
     removePreview?.()
     preview.clear()
+    stopRecoveryNavigation?.()
     removeStyles()
   }
 }

@@ -8,11 +8,17 @@ export type { RuntimeCode, RuntimeState } from '../../packages/runtime-contract/
 export type RuntimeStatus = RuntimeSnapshot
 
 export interface DesktopBridge {
+  readonly hasRetainedContext: boolean
   start(): Promise<RuntimeStatus>
   stop(): Promise<RuntimeStatus>
   recover(): Promise<RuntimeStatus>
   snapshot(): Promise<RuntimeStatus>
   subscribe(listener: (status: RuntimeStatus) => void): () => void
+}
+
+export interface DesktopRecoveryBridge {
+  read(): string
+  update(value: string): void
 }
 
 declare global {
@@ -22,5 +28,6 @@ declare global {
 
   interface Window {
     readonly dshWork: DesktopBridge
+    readonly dshWorkRecovery?: DesktopRecoveryBridge
   }
 }

@@ -67,6 +67,7 @@ test('a late initial snapshot cannot overwrite a newer live status', async () =>
     initial: ((status: RuntimeStatus) => void) | null
   } = { listener: null, initial: null }
   const window = { dshWork: {
+    hasRetainedContext: false,
     subscribe: (listener: (status: RuntimeStatus) => void) => { callbacks.listener = listener },
     snapshot: () => new Promise<RuntimeStatus>(resolve => { callbacks.initial = resolve }),
   } }
@@ -84,6 +85,7 @@ test('abnormal runtime failures require explicit isolated recovery after direct-
     const { document, elements } = createDocument()
     const callbacks: { listener: ((status: RuntimeStatus) => void) | null } = { listener: null }
     const window = { dshWork: {
+      hasRetainedContext: false,
       subscribe: (listener: (status: RuntimeStatus) => void) => { callbacks.listener = listener },
       snapshot: () => new Promise<RuntimeStatus>(() => {}),
     } }
@@ -100,12 +102,34 @@ test('abnormal runtime failures require explicit isolated recovery after direct-
   }
 })
 
+test('runtime failure page reports retained conversation context without enabling writes', async () => {
+  const { document, elements } = createDocument()
+  const callbacks: { listener: ((status: RuntimeStatus) => void) | null } = { listener: null }
+  const window = {
+    name: 'dsh-work-recovery:v1:{"bounded":true}',
+    dshWork: {
+      hasRetainedContext: true,
+      subscribe: (listener: (status: RuntimeStatus) => void) => { callbacks.listener = listener },
+      snapshot: () => new Promise<RuntimeStatus>(() => {}),
+      recover: async () => {}, start: async () => {}, stop: async () => {},
+    },
+  }
+  await withRenderer(document, window, () => {
+    callbacks.listener?.({ state: 'failed', code: 'unexpected-exit', canStart: false, canStop: false, canRecover: true })
+    assert.equal(elements.get('retained')?.hidden, false)
+    assert.equal(elements.get('start')?.disabled, true)
+    assert.equal(elements.get('stop')?.disabled, true)
+    assert.equal(elements.get('recover')?.disabled, false)
+  })
+})
+
 test('uncertain generation requires a distinct explicit recovery action', async () => {
   const actions = new Map<string, () => void>()
   const { document, elements } = createDocument(actions)
   const callbacks: { listener: ((status: RuntimeStatus) => void) | null } = { listener: null }
   let recoverCalls = 0
   const window = { dshWork: {
+    hasRetainedContext: false,
     subscribe: (listener: (status: RuntimeStatus) => void) => { callbacks.listener = listener },
     snapshot: () => new Promise<RuntimeStatus>(() => {}),
     recover: async () => { recoverCalls++ }, start: async () => {}, stop: async () => {},

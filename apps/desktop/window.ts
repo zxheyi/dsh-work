@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, protocol, session } from 'electron'
+import { BrowserWindow, ipcMain, protocol, session, type IpcMainEvent } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,6 +13,10 @@ import {
 } from './security.ts'
 import { validDesktopSurfaceUrl } from '../../packages/runtime-host/index.ts'
 import type { GuardianClient } from '../../packages/runtime-guardian/client.ts'
+import {
+  parseWorkRecoveryContext,
+  serializeWorkRecoveryContext,
+} from '../../packages/work-api/recovery-context.ts'
 
 interface StatusWindowOptions {
   readonly accepting?: () => boolean
@@ -74,9 +78,45 @@ export async function createDesktopWindow(
   let status = host.snapshot()
   let pendingSurface: string | null = null
   let surfaceOrigin: string | null = null
+  let retainedContext: string | null = null
   let navigation = 0
+  const captureContext = async (): Promise<void> => {
+    if (!surfaceOrigin || contents.isDestroyed()) return
+    try {
+      const candidate = await contents.executeJavaScript(
+        'typeof window.name === "string" ? window.name : ""',
+        true,
+      ) as unknown
+      const parsed = parseWorkRecoveryContext(candidate)
+      if (parsed) retainedContext = serializeWorkRecoveryContext(parsed)
+    } catch {}
+  }
+  const provideRecoveryContext = (event: IpcMainEvent, ...args: unknown[]): void => {
+    const frame = event.senderFrame
+    const url = frame?.url
+    const trusted = !args.length && !contents.isDestroyed() && event.sender === contents
+      && !!frame && !frame.parent
+      && (url === STATUS_URL || (!!url && isAllowedDesktopNavigation(url, surfaceOrigin)))
+    event.returnValue = trusted ? retainedContext ?? '' : ''
+  }
+  const updateRecoveryContext = (event: IpcMainEvent, candidate: unknown, ...extra: unknown[]): void => {
+    const frame = event.senderFrame
+    if (extra.length || contents.isDestroyed() || event.sender !== contents || !frame || frame.parent) return
+    const url = frame.url
+    if (!url || !isAllowedDesktopNavigation(url, surfaceOrigin)) return
+    if (candidate === '') {
+      retainedContext = null
+      return
+    }
+    const parsed = parseWorkRecoveryContext(candidate)
+    if (parsed) retainedContext = serializeWorkRecoveryContext(parsed)
+  }
+  ipcMain.on('dsh-work:recovery-context', provideRecoveryContext)
+  ipcMain.on('dsh-work:recovery-context-update', updateRecoveryContext)
   const showStatus = async (): Promise<void> => {
     const sequence = ++navigation
+    await captureContext()
+    if (sequence !== navigation) return
     surfaceOrigin = null
     if (contents.isDestroyed() || contents.getURL() === STATUS_URL) return
     try {
@@ -121,6 +161,8 @@ export async function createDesktopWindow(
     unsubscribeSurface()
     unsubscribeStatus()
     dispose()
+    ipcMain.removeListener('dsh-work:recovery-context', provideRecoveryContext)
+    ipcMain.removeListener('dsh-work:recovery-context-update', updateRecoveryContext)
     isolated.protocol.unhandle('dsh-work')
   })
   await window.loadURL(STATUS_URL)

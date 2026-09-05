@@ -253,7 +253,7 @@
       "files": "apps/desktop/renderer.ts；apps/desktop/main.ts；packages/runtime-guardian/；packages/work-api/client-model.ts",
       "verification": "进程故障注入、原上下文恢复 E2E、生命周期回归",
       "limits": "不把重启服务等同重新生成，不修改现有清理与隔离安全边界。",
-      "status": "pending"
+      "status": "verified"
     },
     {
       "id": "T14",

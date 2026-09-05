@@ -7,6 +7,57 @@ import {
   parseSafeMarkdown,
   planSafeMarkdownRender,
 } from '../packages/work-api/surface.ts'
+import {
+  matchesWorkRecoveryOutput,
+  parseWorkRecoveryContext,
+  recoverySessionDisposition,
+  recoveredDraftForSession,
+  serializeWorkRecoveryContext,
+  type WorkRecoveryContext,
+} from '../packages/work-api/recovery-context.ts'
+
+test('round trips only bounded exact recovery context without file content', () => {
+  const context: WorkRecoveryContext = {
+    schema: 'dsh-work.recovery-context.v1',
+    sessionId: 'session-1',
+    draft: '未发送草稿',
+    selection: {
+      sessionId: 'session-1', turn: 2, throughSeq: 9, name: 'report.md', path: 'report.md',
+      bytes: 9, mediaType: 'text/markdown',
+    },
+  }
+  const encoded = serializeWorkRecoveryContext(context)
+  assert.deepEqual(parseWorkRecoveryContext(encoded), context)
+  assert.equal(encoded.includes('content'), false)
+  assert.equal(parseWorkRecoveryContext(`${encoded.slice(0, -1)},"extra":true}`), null)
+  assert.equal(serializeWorkRecoveryContext({ ...context, draft: 'x'.repeat(21 * 1024) }), '')
+})
+
+test('restores a selected output only when the original immutable coordinates still match', () => {
+  const retained = {
+    sessionId: 'session-1', turn: 2, throughSeq: 9, name: 'report.md', path: 'report.md',
+    bytes: 9, mediaType: 'text/markdown',
+  }
+  assert.equal(matchesWorkRecoveryOutput(retained, retained), true)
+  assert.equal(matchesWorkRecoveryOutput(retained, { ...retained, sessionId: 'session-2' }), false)
+  assert.equal(matchesWorkRecoveryOutput(retained, { ...retained, bytes: 10 }), false)
+})
+
+test('never applies a retained draft to a different Session rendered first', () => {
+  const retained = { sessionId: 'session-a', draft: 'A 的未发送草稿' }
+
+  assert.equal(recoveredDraftForSession(retained, 'session-b', ''), '')
+  assert.equal(recoveredDraftForSession(retained, 'session-a', ''), retained.draft)
+  assert.equal(recoveredDraftForSession(retained, 'session-a', 'A 的新输入'), 'A 的新输入')
+})
+
+test('discards recovery context only after a complete Session list proves it stale', () => {
+  assert.equal(recoverySessionDisposition('session-a', { phase: 'pending', byId: {} }), 'wait')
+  assert.equal(recoverySessionDisposition('session-a', {
+    phase: 'ready', byId: { 'session-a': {} },
+  }), 'open')
+  assert.equal(recoverySessionDisposition('session-a', { phase: 'ready', byId: {} }), 'discard')
+})
 
 test('binds asynchronous file actions to the exact Session output Turn', () => {
   const oldSelection = {

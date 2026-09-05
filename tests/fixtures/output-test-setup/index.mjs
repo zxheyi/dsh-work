@@ -149,6 +149,15 @@ export const inject = ['dshHomePath', 'llm', 'workspaceRegistry', 'sessionContro
 export async function apply(context) {
   const registration = context.llm.registerAdapter([PROVIDER], new OutputAdapter())
   context.effect(() => registration)
+  const baselinePath = context.dshHomePath('t08-output-baseline.json')
+  try {
+    await fs.readFile(baselinePath, 'utf8')
+    await waitForPrompt(context, SESSION_A, '成果夹具甲已准备')
+    await waitForPrompt(context, SESSION_B, '成果夹具乙已准备')
+    return
+  } catch (error) {
+    if (!error || typeof error !== 'object' || error.code !== 'ENOENT') throw error
+  }
   const workspacePath = context.dshHomePath('t08-output-workspace')
   await fs.mkdir(workspacePath, { recursive: true })
   const workspace = await context.workspaceRegistry.create(workspacePath, '成果工作区')
@@ -167,7 +176,7 @@ export async function apply(context) {
     await waitForPrompt(context, sessionId, prompt)
     await context.sessionController.rename({ sessionId, title })
   }
-  await fs.writeFile(context.dshHomePath('t08-output-baseline.json'), JSON.stringify({
+  await fs.writeFile(baselinePath, JSON.stringify({
     sessionA: SESSION_A,
     sessionB: SESSION_B,
     ordinaryPrompt: ORDINARY_PROMPT,

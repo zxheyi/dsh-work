@@ -283,6 +283,12 @@ export class ClientWorkModel implements WorkSource {
     return this.snapshot
   }
 
+  assertRuntimeWritable(): void {
+    if (this.phase !== 'ready' || this.state !== 'idle') {
+      throw new Error('Work runtime is unavailable for writes.')
+    }
+  }
+
   private buildSnapshot(): WorkClientSnapshot {
     return Object.freeze({
       items: this.items,
@@ -315,6 +321,7 @@ export class WorksController extends Service implements IWorks {
   }
 
   async create(spec: WorkCreateSpec): Promise<WorkView> {
+    this.model.assertRuntimeWritable()
     const result = await this.model.create(spec)
     if (!result.ok) throw result.error
     return result.value
@@ -324,12 +331,14 @@ export class WorksController extends Service implements IWorks {
     spec: WorkImportConversationSpec,
     signal?: AbortSignal,
   ): Promise<WorkView> {
+    this.model.assertRuntimeWritable()
     const result = await this.model.importConversation(spec, signal)
     if (!result.ok) throw result.error
     return result.value
   }
 
   async dispatch(request: WorkClientDispatchRequest, signal?: AbortSignal): Promise<WorkView> {
+    this.model.assertRuntimeWritable()
     const current = this.model.getSnapshot().items.find(work => work.workId === request.workId)
     if (!current) throw new Error('Work is not available for mutation.')
     const result = await this.model.dispatch({
@@ -348,6 +357,7 @@ export class WorksController extends Service implements IWorks {
   }
 
   async showDelivery(workId: string, signal?: AbortSignal): Promise<void> {
+    this.model.assertRuntimeWritable()
     const result = await this.model.showDelivery(workId, signal)
     if (!result.ok) throw result.error
   }
@@ -356,6 +366,7 @@ export class WorksController extends Service implements IWorks {
     spec: WorkImportSessionResourceSpec,
     signal?: AbortSignal,
   ): Promise<WorkSessionFileResource> {
+    this.model.assertRuntimeWritable()
     const result = await this.model.importSessionResource(spec, signal)
     if (!result.ok) throw result.error
     return result.value
@@ -383,6 +394,7 @@ export class WorksController extends Service implements IWorks {
     spec: WorkPrepareSessionOutputRevisionSpec,
     signal?: AbortSignal,
   ): Promise<WorkSessionOutputRevision> {
+    this.model.assertRuntimeWritable()
     const result = await this.model.prepareSessionOutputRevision(spec, signal)
     if (!result.ok) throw result.error
     return result.value
@@ -401,6 +413,7 @@ export class WorksController extends Service implements IWorks {
     spec: WorkSaveSessionOutputSpec,
     signal?: AbortSignal,
   ): Promise<WorkSessionOutputSave> {
+    this.model.assertRuntimeWritable()
     const result = await this.model.saveSessionOutput(spec, signal)
     if (!result.ok) throw result.error
     return result.value
@@ -410,6 +423,7 @@ export class WorksController extends Service implements IWorks {
     spec: WorkShowSessionOutputSaveSpec,
     signal?: AbortSignal,
   ): Promise<void> {
+    this.model.assertRuntimeWritable()
     const result = await this.model.showSessionOutputSave(spec, signal)
     if (!result.ok) throw result.error
   }

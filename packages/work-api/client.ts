@@ -44,11 +44,11 @@ export function createWorkStateStream(
   })
 }
 
-export const inject = ['remote', 'slots', 'layout']
+export const inject = ['remote', 'slots', 'layout', 'sessions']
 
 export async function apply(ctx: Context): Promise<() => Promise<void>> {
   const disposeRemote = await ctx.remote.$mount(TYPERT_REMOTE)
-  const workScope = ctx.inject(['remote.work', 'layout'], workCtx => {
+  const workScope = ctx.inject(['remote.work', 'layout', 'sessions'], workCtx => {
     const model = new ClientWorkModel(workCtx.remote.work)
     const works = new WorksController(workCtx, model)
     const disposeSurface = registerWorkSurface(workCtx, works)

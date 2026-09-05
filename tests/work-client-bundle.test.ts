@@ -64,7 +64,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
     inject?: unknown
   }
   assert.equal(typeof exports.apply, 'function')
-  assert.deepEqual(Array.from(exports.inject as string[]), ['remote', 'slots', 'layout'])
+  assert.deepEqual(Array.from(exports.inject as string[]), ['remote', 'slots', 'layout', 'sessions'])
 
   const injectedSlots: string[] = []
   const injectedServices: string[][] = []
@@ -115,7 +115,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
     },
   }
   const dispose = await exports.apply!(clientContext)
-  assert.deepEqual(injectedServices.map(value => Array.from(value)), [['remote.work', 'layout']])
+  assert.deepEqual(injectedServices.map(value => Array.from(value)), [['remote.work', 'layout', 'sessions']])
   assert.deepEqual(injectedSlots, [
     'sidebar.brand.name',
     'conversation.input.left',

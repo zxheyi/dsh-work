@@ -30,6 +30,10 @@ const element = <T extends HTMLElement>(id: string): T => {
 const start = element<HTMLButtonElement>('start')
 const stop = element<HTMLButtonElement>('stop')
 const recover = element<HTMLButtonElement>('recover')
+const retained = element<HTMLElement>('retained')
+retained.hidden = !(window.dshWork.hasRetainedContext
+  || (typeof window.name === 'string' && window.name.startsWith('dsh-work-recovery:v1:')
+    && window.name.length <= 32 * 1024))
 
 const render = (value: PresentationStatus): void => {
   const [label, detail] = labels[value.state]

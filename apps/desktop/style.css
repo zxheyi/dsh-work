@@ -17,6 +17,7 @@ h1 { font-size: 30px; font-weight: 650; letter-spacing: -.7px; margin: 0 0 12px;
 h2 { font-size: 18px; margin: 0; font-weight: 600; }
 #detail { font-size: 13px; color: #697386; line-height: 1.8; margin: 13px 0 20px; min-height: 24px; }
 .diagnostic { font: 11px monospace; color: #b84a3a; overflow-wrap: anywhere; margin: -7px 0 15px; }
+.retained { margin: -5px 0 18px; padding: 11px 13px; border-radius: 9px; background: #eef2ff; color: #43506a; font-size: 12px; line-height: 1.6; }
 .actions { display: flex; gap: 10px; }
 button { font: inherit; font-size: 13px; border: 1px solid #315cf4; border-radius: 9px; padding: 10px 19px; background: #315cf4; color: #fff; cursor: pointer; }
 button.secondary { background: transparent; color: #697386; border-color: #dde1e7; }

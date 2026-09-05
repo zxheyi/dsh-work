@@ -183,6 +183,37 @@ test('keeps the last complete Work state while reconnecting and exposes terminal
   })
 })
 
+test('rejects runtime-dependent writes while reconnecting without replaying them after recovery', async () => {
+  const calls: string[] = []
+  const model = new ClientWorkModel(successfulRemote({
+    async create() { calls.push('create'); return { ok: true, value: view(2) } },
+    async importSessionResource() {
+      calls.push('import')
+      return {
+        ok: true,
+        value: {
+          sessionId: 'session-client', name: 'notes.md', path: 'notes.md', bytes: 4,
+          mediaType: 'text/markdown', contentDigest: 'c'.repeat(64),
+        },
+      }
+    },
+  }))
+  model.replaceBaseline({ items: [view(1)] })
+  model.handleCarrierFailure()
+  const works = new WorksController(new Context(), model)
+
+  await assert.rejects(() => works.create({ title: 'Do not replay', goal: 'Wait for recovery.' }), /unavailable/)
+  await assert.rejects(() => works.importSessionResource({
+    sessionId: 'session-client', name: 'notes.md', dataBase64: 'dGVzdA==',
+  }), /unavailable/)
+  assert.deepEqual(calls, [])
+
+  model.replaceBaseline({ items: [view(1)] })
+  assert.deepEqual(calls, [])
+  await works.create({ title: 'Explicit retry', goal: 'Run only after recovery.' })
+  assert.deepEqual(calls, ['create'])
+})
+
 test('provides ctx.works commands and throws typed Remote failures', async () => {
   const failure = new RemoteError('gateway/internal', 'Work create failed.', {})
   const model = new ClientWorkModel(successfulRemote({
@@ -190,6 +221,7 @@ test('provides ctx.works commands and throws typed Remote failures', async () =>
       return { ok: false, error: failure }
     },
   }))
+  model.replaceBaseline({ items: [] })
   const ctx = new Context()
   const works = new WorksController(ctx, model)
 
