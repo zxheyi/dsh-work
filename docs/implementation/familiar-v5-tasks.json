@@ -335,7 +335,7 @@
       "files": "packages/work-api/surface.ts；文件差异模块（位置待实现确定）",
       "verification": "确定性差异用例、安全负向、版本比较 E2E/截图",
       "limits": "先做 Markdown 文本差异，不承诺 Office 结构或语义差异。",
-      "status": "pending"
+      "status": "verified"
     },
     {
       "id": "T18",

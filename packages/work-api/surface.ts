@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ChangeEvent,
   type FormEvent,
   type KeyboardEvent,
   type ReactNode,
@@ -36,6 +37,7 @@ import {
   type WorkRecoveryContext,
   type WorkRecoveryOutputSelection,
 } from './recovery-context.ts'
+import { planTextDiff, type TextDiffPlan } from './text-diff.ts'
 
 interface WorkSurfaceInjected {
   readonly works: IWorks
@@ -1461,6 +1463,10 @@ function sessionOutputVersionTime(createdAt: string): string {
   }).format(instant).replaceAll('/', '-')
 }
 
+function boundedDiffLineLabel(lines: number): string {
+  return lines > 2_000 ? '超过 2,000 行' : `${String(lines)} 行`
+}
+
 function NativeSessionOutputPreview({
   closePreview,
   preview,
@@ -1474,6 +1480,7 @@ function NativeSessionOutputPreview({
   const [retry, setRetry] = useState(0)
   const request = useMemo(() => new LatestPreviewRequest(), [])
   const versionRequest = useMemo(() => new LatestPreviewRequest(), [])
+  const compareRequest = useMemo(() => new LatestPreviewRequest(), [])
   const revisionRequest = useMemo(() => new LatestPreviewRequest(), [])
   const revisionAbort = useRef<AbortController | null>(null)
   const [state, setState] = useState<
@@ -1495,6 +1502,17 @@ function NativeSessionOutputPreview({
     | { readonly phase: 'idle' | 'loading' | 'error' }
     | { readonly phase: 'ready'; readonly content: WorkSessionOutputVersionContent }
   >({ phase: 'idle' })
+  const [compareFromId, setCompareFromId] = useState<string | null>(null)
+  const [compareToId, setCompareToId] = useState<string | null>(null)
+  const [compareState, setCompareState] = useState<
+    | { readonly phase: 'idle' | 'loading' | 'error' }
+    | {
+      readonly phase: 'ready'
+      readonly fromVersionId: string
+      readonly toVersionId: string
+      readonly plan: TextDiffPlan
+    }
+  >({ phase: 'idle' })
   const [versionRetry, setVersionRetry] = useState(0)
   const [revisionPhase, setRevisionPhase] = useState<'idle' | 'preparing' | 'error'>('idle')
   const [saveState, setSaveState] = useState<
@@ -1514,6 +1532,9 @@ function NativeSessionOutputPreview({
     setVersionState({ phase: 'idle' })
     setSelectedVersionId(null)
     setVersionContentState({ phase: 'idle' })
+    setCompareFromId(null)
+    setCompareToId(null)
+    setCompareState({ phase: 'idle' })
   }, [revisionRequest, selection?.path, selection?.sessionId, selection?.throughSeq, selection?.turn])
 
   useEffect(() => () => revisionAbort.current?.abort(), [])
@@ -1591,6 +1612,12 @@ function NativeSessionOutputPreview({
       setSelectedVersionId(current => versions.some(version => version.versionId === current)
         ? current
         : versions.at(-1)?.versionId ?? null)
+      setCompareFromId(current => versions.some(version => version.versionId === current)
+        ? current
+        : versions.at(-2)?.versionId ?? versions[0]?.versionId ?? null)
+      setCompareToId(current => versions.some(version => version.versionId === current)
+        ? current
+        : versions.at(-1)?.versionId ?? null)
     }).catch(() => {
       if (!abort.signal.aborted) setVersionState({ phase: 'error' })
     })
@@ -1625,6 +1652,46 @@ function NativeSessionOutputPreview({
   }, [selectedVersionId, tab, versionRequest, versionRetry, versionState, works])
 
   useEffect(() => {
+    if (tab !== 'versions' || versionState.phase !== 'ready' || !compareFromId || !compareToId) {
+      setCompareState({ phase: 'idle' })
+      compareRequest.invalidate()
+      return
+    }
+    const from = versionState.versions.find(version => version.versionId === compareFromId)
+    const to = versionState.versions.find(version => version.versionId === compareToId)
+    if (!from || !to) {
+      setCompareState({ phase: 'idle' })
+      return
+    }
+    const abort = new AbortController()
+    setCompareState({ phase: 'loading' })
+    void compareRequest.run(
+      async () => Promise.all([
+        works.readSessionOutputVersion({ fileId: from.fileId, versionId: from.versionId }, abort.signal),
+        works.readSessionOutputVersion({ fileId: to.fileId, versionId: to.versionId }, abort.signal),
+      ]),
+      ([fromContent, toContent]) => {
+        if (!matchesSessionOutputVersionSelection(from, fromContent)
+          || !matchesSessionOutputVersionSelection(to, toContent)) {
+          setCompareState({ phase: 'error' })
+          return
+        }
+        setCompareState({
+          phase: 'ready',
+          fromVersionId: fromContent.versionId,
+          toVersionId: toContent.versionId,
+          plan: planTextDiff(fromContent.content, toContent.content),
+        })
+      },
+      () => setCompareState({ phase: 'error' }),
+    )
+    return () => {
+      compareRequest.invalidate()
+      abort.abort()
+    }
+  }, [compareFromId, compareRequest, compareToId, tab, versionState, works])
+
+  useEffect(() => {
     if (selection && selection.sessionId !== sessionId) closePreview()
   }, [closePreview, selection, sessionId])
 
@@ -1639,6 +1706,48 @@ function NativeSessionOutputPreview({
     && matchesSessionOutputVersionSelection(selectedVersion, versionContentState.content)
     ? versionContentState.content
     : null
+  const selectedComparePlan = compareState.phase === 'ready'
+    && compareState.fromVersionId === compareFromId
+    && compareState.toVersionId === compareToId
+    ? compareState.plan
+    : null
+  const comparisonPanel = versions.length < 2
+    ? null
+    : h('section', { className: 'dsh-work-output-preview-comparison', 'aria-label': '比较版本' },
+      h('div', { className: 'dsh-work-output-preview-compare-controls' },
+        h('strong', null, '比较版本'),
+        h('select', {
+          'aria-label': '比较起点版本',
+          value: compareFromId ?? '',
+          onChange: (event: ChangeEvent<HTMLSelectElement>) => setCompareFromId(event.currentTarget.value),
+        }, ...versions.map(version => h('option', { key: version.versionId, value: version.versionId },
+          `v${String(version.ordinal)}`))),
+        h('span', { 'aria-hidden': 'true' }, '→'),
+        h('select', {
+          'aria-label': '比较终点版本',
+          value: compareToId ?? '',
+          onChange: (event: ChangeEvent<HTMLSelectElement>) => setCompareToId(event.currentTarget.value),
+        }, ...versions.map(version => h('option', { key: version.versionId, value: version.versionId },
+          `v${String(version.ordinal)}`)))),
+      compareState.phase === 'error'
+        ? h('div', { className: 'dsh-work-output-preview-compare-empty', role: 'alert' }, '暂时无法比较所选版本。')
+        : !selectedComparePlan
+          ? h('div', { className: 'dsh-work-output-preview-compare-empty', role: 'status', 'aria-live': 'polite' }, '正在比较版本…')
+          : selectedComparePlan.mode === 'unchanged'
+            ? h('div', { className: 'dsh-work-output-preview-compare-empty', 'data-work-output-diff': 'unchanged' }, '两个版本内容相同，没有变化。')
+            : selectedComparePlan.mode === 'bounded'
+              ? h('div', { className: 'dsh-work-output-preview-compare-empty', 'data-work-output-diff': 'bounded' },
+                `文件较大，已停止逐行比较（起点 ${boundedDiffLineLabel(selectedComparePlan.fromLines)}，终点 ${boundedDiffLineLabel(selectedComparePlan.toLines)}）。`)
+              : h('div', { className: 'dsh-work-output-preview-diff' },
+                ...selectedComparePlan.blocks.filter(block => block.kind !== 'equal').map((block, index) => h('article', {
+                  key: index,
+                  className: `is-${block.kind}`,
+                  'data-work-output-diff': block.kind,
+                },
+                h('strong', null, block.kind === 'removed'
+                  ? `− v${String(versions.find(version => version.versionId === compareFromId)?.ordinal ?? '')} 删除`
+                  : `+ v${String(versions.find(version => version.versionId === compareToId)?.ordinal ?? '')} 新增`),
+                h('pre', null, block.lines.join('\n'))))))
   const changeTab = (next: 'content' | 'sources' | 'versions'): void => {
     revisionAbort.current?.abort()
     revisionAbort.current = null
@@ -1702,6 +1811,7 @@ function NativeSessionOutputPreview({
                     selectedVersionContent.sources.length > 0
                       ? `${String(selectedVersionContent.sources.length)} 个来源`
                       : '无明确来源')),
+                comparisonPanel,
                 safeMarkdownContent(selectedVersionContent))))
   return h('section', {
     className: 'dsh-work-output-preview',
@@ -1717,8 +1827,8 @@ function NativeSessionOutputPreview({
         return
       }
       if (event.key !== 'Tab') return
-      const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>(
-        'button:not(:disabled)',
+      const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), select:not(:disabled)',
       )).filter(button => button.tabIndex >= 0)
       const first = focusable[0]
       const last = focusable.at(-1)
@@ -2031,8 +2141,8 @@ body[data-ds-dark-theme] {
 .dsh-work-output-preview-actions button { flex: 0 0 auto; padding: 8px 14px; border: 1px solid var(--work-accent); border-radius: 8px; color: white; background: var(--work-accent); cursor: pointer; font: 600 13px/18px var(--work-font); }
 .dsh-work-output-preview-actions button.is-secondary { border-color: var(--work-border-strong); color: var(--work-text); background: var(--work-surface); }
 .dsh-work-output-preview-actions button:disabled { cursor: default; opacity: .55; }
-.dsh-work-output-preview-versions { display: grid; grid-template-columns: 160px minmax(0, 1fr); min-height: 100%; border: 1px solid var(--work-border); border-radius: 10px; overflow: hidden; }
-.dsh-work-output-preview-version-list { display: flex; flex-direction: column; gap: 4px; padding: 8px; border-right: 1px solid var(--work-border); background: var(--work-surface-subtle); }
+.dsh-work-output-preview-versions { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 100%; border: 1px solid var(--work-border); border-radius: 10px; overflow: hidden; }
+.dsh-work-output-preview-version-list { display: flex; flex-direction: column; gap: 4px; padding: 8px; border-bottom: 1px solid var(--work-border); background: var(--work-surface-subtle); }
 .dsh-work-output-preview-version-list > button { display: grid; gap: 4px; padding: 10px; border: 1px solid transparent; border-radius: 8px; color: var(--work-text); background: transparent; text-align: left; cursor: pointer; font-family: var(--work-font); }
 .dsh-work-output-preview-version-list > button:hover { background: var(--work-surface); }
 .dsh-work-output-preview-version-list > button.is-selected { border-color: var(--work-accent); background: var(--work-surface); box-shadow: inset 0 0 0 1px var(--work-accent); }
@@ -2045,6 +2155,19 @@ body[data-ds-dark-theme] {
 .dsh-work-output-preview-version-summary span { color: var(--work-faint); font-size: 10px; font-weight: 700; }
 .dsh-work-output-preview-version-summary strong { font-size: 12px; line-height: 18px; }
 .dsh-work-output-preview-version-summary small { color: var(--work-faint); font-size: 10px; }
+.dsh-work-output-preview-comparison { display: grid; gap: 12px; margin-bottom: 20px; padding: 14px; border: 1px solid var(--work-border); border-radius: 9px; }
+.dsh-work-output-preview-compare-controls { display: grid; grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr); align-items: center; gap: 8px; }
+.dsh-work-output-preview-compare-controls strong { grid-column: 1 / -1; font-size: 12px; }
+.dsh-work-output-preview-compare-controls select { width: 100%; min-width: 0; height: 32px; padding: 0 8px; border: 1px solid var(--work-border-strong); border-radius: 7px; color: var(--work-text); background: var(--work-surface); font: 600 12px/1 var(--work-font); }
+.dsh-work-output-preview-compare-empty { padding: 12px; border-radius: 7px; color: var(--work-muted); background: var(--work-surface-subtle); font-size: 11px; line-height: 17px; }
+.dsh-work-output-preview-diff { display: grid; gap: 8px; }
+.dsh-work-output-preview-diff article { overflow: hidden; border: 1px solid var(--work-border); border-radius: 7px; }
+.dsh-work-output-preview-diff article.is-removed { border-color: color-mix(in srgb, var(--work-danger) 34%, var(--work-border)); background: color-mix(in srgb, var(--work-danger) 7%, var(--work-surface)); }
+.dsh-work-output-preview-diff article.is-added { border-color: color-mix(in srgb, var(--work-accent) 34%, var(--work-border)); background: color-mix(in srgb, var(--work-accent) 7%, var(--work-surface)); }
+.dsh-work-output-preview-diff strong { display: block; padding: 7px 10px; font-size: 10px; }
+.dsh-work-output-preview-diff article.is-removed strong { color: var(--work-danger); }
+.dsh-work-output-preview-diff article.is-added strong { color: var(--work-accent); }
+.dsh-work-output-preview-diff pre { margin: 0; padding: 8px 10px; overflow-x: auto; color: var(--work-text); background: transparent; font: 11px/18px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .dsh-work-output-preview-sources { display: grid; gap: 12px; }
 .dsh-work-output-preview-source { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: 10px 12px; padding: 14px; border: 1px solid var(--work-border); border-radius: 10px; background: var(--work-surface-subtle); }
 .dsh-work-output-preview-source-main { display: flex; min-width: 0; align-items: center; gap: 10px; }
@@ -2094,9 +2217,9 @@ body[data-ds-dark-theme] {
   .dsh-work-output-preview-actions > span { white-space: normal; }
   .dsh-work-output-preview-action-buttons { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dsh-work-output-preview-actions button { min-width: 0; padding-inline: 8px; }
-  .dsh-work-output-preview-versions { grid-template-columns: 1fr; }
-  .dsh-work-output-preview-version-list { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--work-border); }
-  .dsh-work-output-preview-version-list > button { min-width: 132px; }
+  .dsh-work-output-preview-compare-controls { grid-template-columns: 1fr 1fr; }
+  .dsh-work-output-preview-compare-controls > strong { grid-column: 1 / -1; }
+  .dsh-work-output-preview-compare-controls > span { display: none; }
   .dsh-work-output-preview-source { grid-template-columns: 1fr; }
   .dsh-work-output-preview-source > button { justify-self: start; }
 }

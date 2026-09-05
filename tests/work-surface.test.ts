@@ -17,6 +17,7 @@ import {
   serializeWorkRecoveryContext,
   type WorkRecoveryContext,
 } from '../packages/work-api/recovery-context.ts'
+import { planTextDiff } from '../packages/work-api/text-diff.ts'
 
 test('round trips only bounded exact recovery context without file content', () => {
   const context: WorkRecoveryContext = {
@@ -179,4 +180,31 @@ test('switching versions invalidates a late revision success before it can updat
   await pending
 
   assert.deepEqual(commits, [])
+})
+
+test('compares Markdown lines in the requested old-to-new direction', () => {
+  const plan = planTextDiff('# Report\nold line\nkept', '# Report\nnew line\nkept\nadded')
+  assert.deepEqual(plan, {
+    mode: 'diff',
+    blocks: [
+      { kind: 'equal', lines: ['# Report'] },
+      { kind: 'removed', lines: ['old line'] },
+      { kind: 'added', lines: ['new line'] },
+      { kind: 'equal', lines: ['kept'] },
+      { kind: 'added', lines: ['added'] },
+    ],
+  })
+})
+
+test('reports identical content and bounds large or dense comparisons', () => {
+  assert.deepEqual(planTextDiff('same\n', 'same\n'), { mode: 'unchanged' })
+  assert.deepEqual(planTextDiff('<script>safe text only</script>', '<b>still text</b>'), {
+    mode: 'diff',
+    blocks: [
+      { kind: 'removed', lines: ['<script>safe text only</script>'] },
+      { kind: 'added', lines: ['<b>still text</b>'] },
+    ],
+  })
+  assert.equal(planTextDiff('a\n'.repeat(2_001), 'b\n').mode, 'bounded')
+  assert.equal(planTextDiff('a'.repeat(512 * 1024 + 1), 'b').mode, 'bounded')
 })

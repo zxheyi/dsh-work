@@ -582,15 +582,69 @@ async function run(): Promise<void> {
       values => values.length === 2 && values.includes('v1') && values.includes('v2'),
       'Version tab did not show both immutable report versions',
     )
+    const selectComparison = async (from: string, to: string): Promise<void> => {
+      assert.equal(await js<boolean>(`(() => {
+        const fromSelect = document.querySelector('[aria-label="比较起点版本"]')
+        const toSelect = document.querySelector('[aria-label="比较终点版本"]')
+        if (!(fromSelect instanceof HTMLSelectElement) || !(toSelect instanceof HTMLSelectElement)) return false
+        const optionValue = (select, label) => Array.from(select.options).find(option => option.textContent?.trim() === label)?.value
+        const fromValue = optionValue(fromSelect, ${JSON.stringify(from)})
+        const toValue = optionValue(toSelect, ${JSON.stringify(to)})
+        if (!fromValue || !toValue) return false
+        fromSelect.value = fromValue
+        fromSelect.dispatchEvent(new Event('change', { bubbles: true }))
+        toSelect.value = toValue
+        toSelect.dispatchEvent(new Event('change', { bubbles: true }))
+        return true
+      })()`), true)
+    }
+    const initialDiff = await waitFor(
+      () => js<{ from: string; to: string; removed: string; added: string }>(`(() => ({
+        from: document.querySelector('[aria-label="比较起点版本"] option:checked')?.textContent?.trim() ?? '',
+        to: document.querySelector('[aria-label="比较终点版本"] option:checked')?.textContent?.trim() ?? '',
+        removed: Array.from(document.querySelectorAll('[data-work-output-diff="removed"]')).map(item => item.textContent ?? '').join('\\n'),
+        added: Array.from(document.querySelectorAll('[data-work-output-diff="added"]')).map(item => item.textContent ?? '').join('\\n'),
+      }))()`),
+      value => value.removed.length > 0 && value.added.length > 0,
+      'Default v1 to v2 comparison did not match the stored snapshots',
+    )
+    assert.equal(initialDiff.from, 'v1')
+    assert.equal(initialDiff.to, 'v2')
+    assert.match(initialDiff.removed, /本周结论已经整理完成。/u)
+    assert.match(initialDiff.added, /修改成功。/u)
+    assert.match(initialDiff.removed, /− v1 删除/u)
+    assert.match(initialDiff.added, /\+ v2 新增/u)
+    await selectComparison('v1', 'v1')
+    await waitFor(
+      () => js<string>("document.querySelector('[data-work-output-diff=\"unchanged\"]')?.textContent ?? ''"),
+      text => text.includes('内容相同') && text.includes('没有变化'),
+      'Comparing the same immutable version did not report no changes',
+    )
+    await selectComparison('v2', 'v1')
+    await waitFor(
+      () => js<{ removed: string; added: string }>(`({
+        removed: Array.from(document.querySelectorAll('[data-work-output-diff="removed"]')).map(item => item.textContent ?? '').join('\\n'),
+        added: Array.from(document.querySelectorAll('[data-work-output-diff="added"]')).map(item => item.textContent ?? '').join('\\n'),
+      })`),
+      value => value.removed.includes('修改成功。') && value.added.includes('本周结论已经整理完成。'),
+      'Reversing comparison direction did not reverse removed and added content',
+    )
+    await selectComparison('v1', 'v2')
     assert.match(await js<string>("document.querySelector('[data-work-output-version=\"v2\"]')?.textContent ?? ''"), /当前/u)
     assert.equal(await js<boolean>("(() => { const button = document.querySelector('[data-work-output-version=\"v1\"]'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
     const historicalPanel = await waitFor(
-      () => js<string>("document.querySelector('[data-work-output-version-detail=\"v1\"]')?.textContent ?? ''"),
-      text => text.includes('甲报告') && text.includes('本周结论已经整理完成。')
-        && text.includes('内容摘要') && !text.includes('修改成功'),
+      () => js<{ summary: string; body: string }>(`(() => {
+        const detail = document.querySelector('[data-work-output-version-detail="v1"]')
+        return {
+          summary: detail?.querySelector('.dsh-work-output-preview-version-summary')?.textContent ?? '',
+          body: detail?.querySelector('[data-work-output-preview-markdown]')?.textContent ?? '',
+        }
+      })()`),
+      value => value.summary.includes('内容摘要') && value.summary.includes('甲报告')
+        && value.body.includes('本周结论已经整理完成。') && !value.body.includes('修改成功'),
       'Selecting v1 did not render its exact historical content and derived summary',
     )
-    assert.match(historicalPanel, /SHA-256 [a-f0-9]{12}/u)
+    assert.match(historicalPanel.summary, /SHA-256 [a-f0-9]{12}/u)
     assert.equal(fs.readFileSync(reportAPath, 'utf8'), '# 甲报告（已修改）\n\n修改成功。\n')
     assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] button')).find(item => item.textContent?.trim() === '基于 v1 修改'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true })()"), true)
     const historicalDraft = await waitFor(
