@@ -6,6 +6,7 @@ import {
 } from '@deepseek-ai/dsh-typert-protocol'
 
 import type {
+  WorkAdoptSessionOutputVersionSpec,
   WorkCreateSpec,
   WorkClientDispatchRequest,
   WorkDispatchRequest,
@@ -25,6 +26,7 @@ import type {
   WorkView,
   WorkShowDeliveryValue,
   WorkSessionFileResource,
+  WorkSessionOutputAdoption,
   WorkSessionOutputFile,
   WorkSessionOutputContent,
   WorkSessionOutputSource,
@@ -88,6 +90,10 @@ export interface WorkClientRemote {
     spec: WorkReadSessionOutputVersionSpec,
     signal?: AbortSignal,
   ): Promise<RemoteResult<WorkSessionOutputVersionContent>>
+  adoptSessionOutputVersion(
+    spec: WorkAdoptSessionOutputVersionSpec,
+    signal?: AbortSignal,
+  ): Promise<RemoteResult<WorkSessionOutputAdoption>>
   list(): Promise<RemoteResult<WorkListValue>>
   follow(signal?: AbortSignal): AsyncIterable<WorkRemoteFollowFrame>
 }
@@ -151,6 +157,10 @@ export interface IWorks {
     spec: WorkReadSessionOutputVersionSpec,
     signal?: AbortSignal,
   ): Promise<WorkSessionOutputVersionContent>
+  adoptSessionOutputVersion(
+    spec: WorkAdoptSessionOutputVersionSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkSessionOutputAdoption>
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -272,6 +282,13 @@ export class ClientWorkModel implements WorkSource {
     signal?: AbortSignal,
   ): Promise<RemoteResult<WorkSessionOutputVersionContent>> {
     return this.remote.readSessionOutputVersion(spec, signal)
+  }
+
+  adoptSessionOutputVersion(
+    spec: WorkAdoptSessionOutputVersionSpec,
+    signal?: AbortSignal,
+  ): Promise<RemoteResult<WorkSessionOutputAdoption>> {
+    return this.remote.adoptSessionOutputVersion(spec, signal)
   }
 
   replaceBaseline(value: WorkListValue): void {
@@ -486,6 +503,16 @@ export class WorksController extends Service implements IWorks {
     signal?: AbortSignal,
   ): Promise<WorkSessionOutputVersionContent> {
     const result = await this.model.readSessionOutputVersion(spec, signal)
+    if (!result.ok) throw result.error
+    return result.value
+  }
+
+  async adoptSessionOutputVersion(
+    spec: WorkAdoptSessionOutputVersionSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkSessionOutputAdoption> {
+    this.model.assertRuntimeWritable()
+    const result = await this.model.adoptSessionOutputVersion(spec, signal)
     if (!result.ok) throw result.error
     return result.value
   }

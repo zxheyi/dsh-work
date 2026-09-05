@@ -62,6 +62,7 @@ test('exports the narrow Work surface through public Typert markers', () => {
     { method: 'showSessionOutputSave', mode: 'unary' },
     { method: 'listSessionOutputVersions', mode: 'unary' },
     { method: 'readSessionOutputVersion', mode: 'unary' },
+    { method: 'adoptSessionOutputVersion', mode: 'unary' },
     { method: 'readSessionOutput', mode: 'unary' },
     { method: 'list', mode: 'unary' },
     { method: 'follow', mode: 'stream' },
@@ -87,6 +88,7 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
     'work/showSessionOutputSave',
     'work/listSessionOutputVersions',
     'work/readSessionOutputVersion',
+    'work/adoptSessionOutputVersion',
     'work/follow',
   ])
   const dispatch = TYPERT_REMOTE.descriptors.find(descriptor => descriptor.method === 'dispatch')
@@ -309,14 +311,24 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
   const readVersion = TYPERT_REMOTE.descriptors.find(
     descriptor => descriptor.method === 'readSessionOutputVersion',
   )
+  const adoptVersion = TYPERT_REMOTE.descriptors.find(
+    descriptor => descriptor.method === 'adoptSessionOutputVersion',
+  )
   assert.ok(listVersions)
   assert.ok(readVersion)
+  assert.ok(adoptVersion)
   const listVersionsCodec = listVersions.parameters[0]?.codec
   const readVersionCodec = readVersion.parameters[0]?.codec
+  const adoptVersionCodec = adoptVersion.parameters[0]?.codec
+  const adoptVersionResultCodec = adoptVersion.result
   assert.equal(listVersionsCodec?.mode, 'strict')
   assert.equal(readVersionCodec?.mode, 'strict')
+  assert.equal(adoptVersionCodec?.mode, 'strict')
+  assert.equal(adoptVersionResultCodec.mode, 'strict')
   if (!listVersionsCodec || listVersionsCodec.mode !== 'strict'
-    || !readVersionCodec || readVersionCodec.mode !== 'strict') {
+    || !readVersionCodec || readVersionCodec.mode !== 'strict'
+    || !adoptVersionCodec || adoptVersionCodec.mode !== 'strict'
+    || adoptVersionResultCodec.mode !== 'strict') {
     throw new Error('Session output versions must publish strict request codecs')
   }
   assert.deepEqual(listVersionsCodec.schema.parse({
@@ -330,6 +342,14 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
   }), { fileId: 'a'.repeat(32), versionId: 'b'.repeat(32) })
   assert.throws(() => readVersionCodec.schema.parse({
     fileId: '../escape', versionId: 'b'.repeat(32),
+  }))
+  assert.deepEqual(adoptVersionCodec.schema.parse({
+    fileId: 'a'.repeat(32), versionId: 'b'.repeat(32),
+  }), { fileId: 'a'.repeat(32), versionId: 'b'.repeat(32) })
+  assert.throws(() => adoptVersionResultCodec.schema.parse({
+    fileId: 'a'.repeat(32), versionId: 'b'.repeat(32), sessionId: 'session-remote',
+    path: 'report.md', contentDigest: 'c'.repeat(64), summary: '',
+    adoptedAt: '2026-09-06T00:00:00.000Z',
   }))
 })
 

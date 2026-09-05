@@ -47,6 +47,15 @@ interface OutputVersionRecord {
   }[]
 }
 
+interface OutputAdoptionRecord {
+  readonly fileId: string
+  readonly versionId: string
+  readonly sessionId: string
+  readonly path: string
+  readonly contentDigest: string
+  readonly summary: string
+}
+
 function readOutputVersionRecords(): readonly OutputVersionRecord[] {
   const recordsRoot = path.join(versionRoot, 'records')
   if (!fs.existsSync(recordsRoot)) return []
@@ -79,6 +88,18 @@ function readOutputVersionRecords(): readonly OutputVersionRecord[] {
 
 function readOutputVersionBlob(record: OutputVersionRecord): Buffer {
   return fs.readFileSync(path.join(versionRoot, 'blobs', record.contentDigest))
+}
+
+function readOutputAdoptionRecords(): readonly OutputAdoptionRecord[] {
+  const adoptionsRoot = path.join(versionRoot, 'adoptions')
+  if (!fs.existsSync(adoptionsRoot)) return []
+  return fs.readdirSync(adoptionsRoot, { withFileTypes: true })
+    .filter(entry => entry.isDirectory())
+    .flatMap(entry => fs.readdirSync(path.join(adoptionsRoot, entry.name))
+      .filter(name => /^[a-f0-9]{32}\.json$/u.test(name))
+      .map(name => JSON.parse(fs.readFileSync(
+        path.join(adoptionsRoot, entry.name, name), 'utf8',
+      )) as OutputAdoptionRecord))
 }
 
 async function reserveLoopbackPort(): Promise<number> {
@@ -650,6 +671,22 @@ async function run(): Promise<void> {
     assert.equal(readOutputVersionRecords().filter(record =>
       record.sessionId === baseline.sessionA && record.path === 'report-a.md').length, 2)
 
+    step = 'adopt-historical-version'; report('fail')
+    assert.equal(await js<boolean>("(() => { const button = document.querySelector('[data-work-output-adopt=\"v1\"]'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true })()"), true)
+    await waitFor(
+      () => js<string>("document.querySelector('[data-work-output-version=\"v1\"]')?.textContent ?? ''"),
+      text => text.includes('已采用'),
+      'Adopting v1 did not mark that exact historical version',
+    )
+    assert.doesNotMatch(await js<string>("document.querySelector('[data-work-output-version=\"v2\"]')?.textContent ?? ''"), /已采用/u)
+    const [adoption] = readOutputAdoptionRecords()
+    assert.ok(adoption)
+    assert.equal(adoption.fileId, revisedReportAVersions[0]?.fileId)
+    assert.equal(adoption.versionId, revisedReportAVersions[0]?.versionId)
+    assert.equal(adoption.contentDigest, revisedReportAVersions[0]?.contentDigest)
+    assert.match(adoption.summary, /甲报告/u)
+    assert.equal(fs.readFileSync(reportAPath, 'utf8'), '# 甲报告（已修改）\n\n修改成功。\n')
+
     step = 'restore-historical-version'; report('fail')
     assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] button')).find(item => item.textContent?.trim() === '恢复 v1'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true })()"), true)
     await js("new Promise(resolve => setTimeout(resolve, 500))")
@@ -709,6 +746,8 @@ async function run(): Promise<void> {
       text => text.includes('当前'),
       'The restored v3 did not become current after completion',
     )
+    assert.match(await js<string>("document.querySelector('[data-work-output-version=\"v1\"]')?.textContent ?? ''"), /已采用/u)
+    assert.doesNotMatch(await js<string>("document.querySelector('[data-work-output-version=\"v3\"]')?.textContent ?? ''"), /已采用/u)
     assert.equal(await js<boolean>("(() => { const button = document.querySelector('[data-work-output-version=\"v2\"]'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
     await waitFor(
       () => js<boolean>("Boolean(document.querySelector('[data-work-output-version-detail=\"v2\"] [data-work-output-preview-markdown]'))"),

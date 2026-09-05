@@ -1491,6 +1491,7 @@ function NativeSessionOutputPreview({
   const versionRequest = useMemo(() => new LatestPreviewRequest(), [])
   const compareRequest = useMemo(() => new LatestPreviewRequest(), [])
   const revisionRequest = useMemo(() => new LatestPreviewRequest(), [])
+  const adoptionRequest = useMemo(() => new LatestPreviewRequest(), [])
   const revisionAbort = useRef<AbortController | null>(null)
   const [state, setState] = useState<
     | { readonly phase: 'idle' }
@@ -1530,23 +1531,26 @@ function NativeSessionOutputPreview({
     | { readonly phase: 'saved'; readonly value: WorkSessionOutputSave }
   >({ phase: 'idle' })
   const [saveOpenError, setSaveOpenError] = useState(false)
+  const [adoptionPhase, setAdoptionPhase] = useState<'idle' | 'adopting' | 'error'>('idle')
 
   useEffect(() => {
     revisionAbort.current?.abort()
     revisionAbort.current = null
     revisionRequest.invalidate()
+    adoptionRequest.invalidate()
     setTab('content')
     setRevisionPhase('idle')
     setRevisionError(null)
     setSaveState({ phase: 'idle' })
     setSaveOpenError(false)
+    setAdoptionPhase('idle')
     setVersionState({ phase: 'idle' })
     setSelectedVersionId(null)
     setVersionContentState({ phase: 'idle' })
     setCompareFromId(null)
     setCompareToId(null)
     setCompareState({ phase: 'idle' })
-  }, [revisionRequest, selection?.path, selection?.sessionId, selection?.throughSeq, selection?.turn])
+  }, [adoptionRequest, revisionRequest, selection?.path, selection?.sessionId, selection?.throughSeq, selection?.turn])
 
   useEffect(() => () => revisionAbort.current?.abort(), [])
 
@@ -1554,9 +1558,11 @@ function NativeSessionOutputPreview({
     revisionAbort.current?.abort()
     revisionAbort.current = null
     revisionRequest.invalidate()
+    adoptionRequest.invalidate()
     setRevisionPhase('idle')
     setRevisionError(null)
-  }, [revisionRequest, selectedVersionId, tab])
+    setAdoptionPhase('idle')
+  }, [adoptionRequest, revisionRequest, selectedVersionId, tab])
 
   useEffect(() => {
     if (!selection || !narrow) return
@@ -1854,7 +1860,10 @@ function NativeSessionOutputPreview({
             h('span', { className: 'dsh-work-output-preview-version-title' },
               h('strong', null, `v${String(version.ordinal)}`),
               version.versionId === newestVersionId
-                ? h('small', { className: 'is-current' }, '当前')
+                ? h('small', { className: 'is-current' }, '当前版')
+                : null,
+              version.adoption
+                ? h('small', { className: 'is-adopted', 'data-work-output-adopted': true }, '已采用')
                 : null),
             h('span', { className: 'dsh-work-output-preview-version-meta', title: version.createdAt },
               version.turn === null ? '既有成果基线' : `第 ${String(version.turn)} 回合`,
@@ -2003,11 +2012,14 @@ function NativeSessionOutputPreview({
           : safeMarkdownContent(state.content)),
   h('footer', { className: 'dsh-work-output-preview-actions' },
     h('span', {
-      role: saveState.phase === 'error' || saveOpenError || revisionPhase === 'error' ? 'alert' : 'status',
+      role: saveState.phase === 'error' || saveOpenError || revisionPhase === 'error'
+        || adoptionPhase === 'error' ? 'alert' : 'status',
       'aria-live': 'polite',
       'aria-atomic': 'true',
       title: saveState.phase === 'saved' ? saveState.value.location : undefined,
-    }, revisionPhase === 'error'
+    }, adoptionPhase === 'error'
+      ? '采用结果尚未确认，请重试。'
+      : revisionPhase === 'error'
       ? revisionError ?? '无法保护当前文件，请重新读取后再试。'
       : saveState.phase === 'saved'
       ? saveOpenError
@@ -2018,7 +2030,9 @@ function NativeSessionOutputPreview({
         : unsupported
             ? '保存会复制当前文件到受管位置'
             : tab === 'versions'
-              ? '查看历史版本不会改变当前文件'
+              ? selectedVersion?.adoption
+                ? `已采用 v${String(selectedVersion.ordinal)}：${selectedVersion.adoption.summary}`
+                : '查看历史版本不会改变当前文件'
               : '保存和修改互不影响'),
     h('div', { className: 'dsh-work-output-preview-action-buttons' },
       saveState.phase === 'saved' ? h('button', {
@@ -2069,6 +2083,46 @@ function NativeSessionOutputPreview({
           : tab === 'versions'
             ? '保存当前版副本'
             : '保存副本'),
+      !unsupported && revisionBase ? h('button', {
+        type: 'button',
+        className: 'is-secondary',
+        disabled: adoptionPhase === 'adopting' || !selectedVersionContent || Boolean(revisionBase.adoption),
+        'data-work-output-adopt': `v${String(revisionBase.ordinal)}`,
+        onClick: () => {
+          const target = revisionBase
+          setAdoptionPhase('adopting')
+          void adoptionRequest.run(
+            () => works.adoptSessionOutputVersion({
+              fileId: target.fileId,
+              versionId: target.versionId,
+            }),
+            adoption => {
+              if (!matchesSessionOutputVersionSelection(target, adoption)
+                || !matchesSessionOutputSelection(preview.getSnapshot(), selection)) return
+              setVersionState(current => current.phase === 'ready'
+                ? { phase: 'ready', versions: Object.freeze(current.versions.map(version =>
+                  version.fileId === adoption.fileId && version.versionId === adoption.versionId
+                    ? Object.freeze({ ...version, adoption })
+                    : version)) }
+                : current)
+              setVersionContentState(current => current.phase === 'ready'
+                && matchesSessionOutputVersionSelection(target, current.content)
+                ? { phase: 'ready', content: Object.freeze({ ...current.content, adoption }) }
+                : current)
+              setAdoptionPhase('idle')
+            },
+            () => {
+              if (matchesSessionOutputSelection(preview.getSnapshot(), selection)) {
+                setAdoptionPhase('error')
+              }
+            },
+          )
+        },
+      }, revisionBase.adoption
+        ? `已采用 v${String(revisionBase.ordinal)}`
+        : adoptionPhase === 'adopting'
+          ? '正在采用…'
+          : `采用 v${String(revisionBase.ordinal)}`) : null,
       !unsupported && revisionBase ? h('button', {
         type: 'button',
         className: 'is-secondary',
@@ -2184,9 +2238,10 @@ body[data-ds-dark-theme] {
 .dsh-work-output-preview-version-list > button { display: grid; gap: 4px; padding: 10px; border: 1px solid transparent; border-radius: 8px; color: var(--work-text); background: transparent; text-align: left; cursor: pointer; font-family: var(--work-font); }
 .dsh-work-output-preview-version-list > button:hover { background: var(--work-surface); }
 .dsh-work-output-preview-version-list > button.is-selected { border-color: var(--work-accent); background: var(--work-surface); box-shadow: inset 0 0 0 1px var(--work-accent); }
-.dsh-work-output-preview-version-title { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.dsh-work-output-preview-version-title strong { font-size: 13px; }
+.dsh-work-output-preview-version-title { display: flex; align-items: center; gap: 6px; }
+.dsh-work-output-preview-version-title strong { margin-right: auto; font-size: 13px; }
 .dsh-work-output-preview-version-title small.is-current { padding: 2px 5px; border-radius: 999px; color: var(--work-accent); background: var(--work-accent-subtle); font-size: 9px; font-weight: 700; }
+.dsh-work-output-preview-version-title small.is-adopted { padding: 2px 5px; border-radius: 999px; color: var(--work-success); background: color-mix(in srgb, var(--work-success) 12%, transparent); font-size: 9px; font-weight: 700; }
 .dsh-work-output-preview-version-meta { color: var(--work-faint); font-size: 10px; line-height: 15px; }
 .dsh-work-output-preview-version-detail { min-width: 0; padding: 18px; }
 .dsh-work-output-preview-version-summary { display: grid; gap: 5px; margin-bottom: 18px; padding: 12px 14px; border: 1px solid var(--work-border); border-radius: 8px; background: var(--work-surface-subtle); }

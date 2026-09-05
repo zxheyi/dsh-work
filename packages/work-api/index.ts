@@ -3,6 +3,7 @@ import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typer
 
 import {
   WorkError,
+  type AdoptSessionOutputVersionSpec,
   type CreateWorkSpec,
   type DispatchWorkRequest,
   type InspectSessionOutputsSpec,
@@ -14,6 +15,7 @@ import {
   type ImportSessionResourceSpec,
   type ImportConversationSpec,
   type SessionFileResource,
+  type SessionOutputAdoption,
   type SessionOutputFile,
   type SessionOutputContent,
   type SessionOutputSource,
@@ -40,6 +42,8 @@ export type WorkClientDispatchRequest = Omit<WorkDispatchRequest, 'mutationId' |
 export type WorkDeliverableContent = DomainWorkDeliverableContent
 export type WorkImportSessionResourceSpec = ImportSessionResourceSpec
 export type WorkSessionFileResource = SessionFileResource
+export type WorkAdoptSessionOutputVersionSpec = AdoptSessionOutputVersionSpec
+export type WorkSessionOutputAdoption = SessionOutputAdoption
 export type WorkInspectSessionOutputsSpec = InspectSessionOutputsSpec
 export type WorkInspectSessionOutputSourcesSpec = InspectSessionOutputSourcesSpec
 export type WorkListSessionOutputVersionsSpec = ListSessionOutputVersionsSpec
@@ -112,6 +116,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'work/resource-invalid': Record<string, never>
     'work/resource-limit': Record<string, never>
     'work/session-output-invalid': Record<string, never>
+    'work/session-output-adoption-failed': Record<string, never>
     'work/session-output-conflict': Record<string, never>
     'work/session-output-save-failed': Record<string, never>
     'work/session-output-version-failed': Record<string, never>
@@ -267,6 +272,13 @@ export class WorkRemoteController extends TypertRemoteService {
     return workResult(() => this.controller.readSessionOutputVersion(spec, signal))
   }
 
+  adoptSessionOutputVersion(
+    spec: WorkAdoptSessionOutputVersionSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkSessionOutputAdoption> {
+    return workResult(() => this.controller.adoptSessionOutputVersion(spec, signal))
+  }
+
   readSessionOutput(
     spec: WorkReadSessionOutputSpec,
     signal?: AbortSignal,
@@ -285,7 +297,7 @@ export class WorkRemoteController extends TypertRemoteService {
   }
 }
 
-type RemoteMethodName = 'create' | 'importConversation' | 'dispatch' | 'readDeliverable' | 'showDelivery' | 'importSessionResource' | 'inspectSessionOutputs' | 'inspectSessionOutputSources' | 'prepareSessionOutputRevision' | 'inspectSessionRevision' | 'saveSessionOutput' | 'showSessionOutputSave' | 'listSessionOutputVersions' | 'readSessionOutputVersion' | 'readSessionOutput' | 'list' | 'follow'
+type RemoteMethodName = 'create' | 'importConversation' | 'dispatch' | 'readDeliverable' | 'showDelivery' | 'importSessionResource' | 'inspectSessionOutputs' | 'inspectSessionOutputSources' | 'prepareSessionOutputRevision' | 'inspectSessionRevision' | 'saveSessionOutput' | 'showSessionOutputSave' | 'listSessionOutputVersions' | 'readSessionOutputVersion' | 'adoptSessionOutputVersion' | 'readSessionOutput' | 'list' | 'follow'
 type RemoteMethod = (this: WorkRemoteController, ...args: unknown[]) => unknown
 type RemoteDecorator = (
   method: RemoteMethod,
@@ -324,6 +336,7 @@ installRemoteMarker('saveSessionOutput', Remote as RemoteDecorator)
 installRemoteMarker('showSessionOutputSave', Remote as RemoteDecorator)
 installRemoteMarker('listSessionOutputVersions', Remote as RemoteDecorator)
 installRemoteMarker('readSessionOutputVersion', Remote as RemoteDecorator)
+installRemoteMarker('adoptSessionOutputVersion', Remote as RemoteDecorator)
 installRemoteMarker('readSessionOutput', Remote as RemoteDecorator)
 installRemoteMarker('list', Remote as RemoteDecorator)
 installRemoteMarker('follow', Remote({ mode: 'stream' }) as RemoteDecorator)

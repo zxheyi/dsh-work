@@ -16,6 +16,7 @@ export type WorkErrorCode =
   | 'work/resource-invalid'
   | 'work/resource-limit'
   | 'work/session-output-invalid'
+  | 'work/session-output-adoption-failed'
   | 'work/session-output-conflict'
   | 'work/session-output-save-failed'
   | 'work/session-output-version-failed'
@@ -224,6 +225,18 @@ export interface ReadSessionOutputVersionSpec {
   readonly versionId: string
 }
 
+export type AdoptSessionOutputVersionSpec = ReadSessionOutputVersionSpec
+
+export interface SessionOutputAdoption {
+  readonly fileId: string
+  readonly versionId: string
+  readonly sessionId: string
+  readonly path: string
+  readonly contentDigest: string
+  readonly summary: string
+  readonly adoptedAt: string
+}
+
 export interface SessionOutputVersion {
   readonly fileId: string
   readonly versionId: string
@@ -239,6 +252,7 @@ export interface SessionOutputVersion {
   readonly contentDigest: string
   readonly createdAt: string
   readonly sources: readonly SessionOutputSource[]
+  readonly adoption?: SessionOutputAdoption | undefined
 }
 
 export interface SessionOutputVersionContent extends SessionOutputVersion {
@@ -288,6 +302,10 @@ export interface WorkController {
     spec: ReadSessionOutputVersionSpec,
     signal?: AbortSignal,
   ): Promise<SessionOutputVersionContent>
+  adoptSessionOutputVersion(
+    spec: AdoptSessionOutputVersionSpec,
+    signal?: AbortSignal,
+  ): Promise<SessionOutputAdoption>
   readSessionOutput(spec: ReadSessionOutputSpec, signal?: AbortSignal): Promise<SessionOutputContent>
   follow(signal?: AbortSignal): AsyncIterable<WorkFollowFrame>
   dispatch(request: DispatchWorkRequest, signal?: AbortSignal): Promise<WorkSnapshot>
@@ -402,6 +420,22 @@ export interface WorkControllerOptions {
     readonly afterIntentPublish?: () => void | Promise<void>
     readonly afterBlobPublish?: () => void | Promise<void>
     readonly afterRecordPublish?: () => void | Promise<void>
+  }
+  readonly sessionOutputAdoptionInternals?: {
+    readonly afterPendingOpen?: (paths: {
+      readonly pendingPath: string
+      readonly targetPath: string
+    }) => void | Promise<void>
+    readonly afterPendingWrite?: (paths: {
+      readonly pendingPath: string
+      readonly targetPath: string
+    }) => void | Promise<void>
+    readonly beforePendingLink?: (paths: {
+      readonly pendingPath: string
+      readonly targetPath: string
+    }) => void | Promise<void>
+    readonly afterRecordPublish?: () => void | Promise<void>
+    readonly afterConfirmationPublish?: () => void | Promise<void>
   }
 }
 
@@ -2114,6 +2148,7 @@ function freezeSessionOutputVersion(version: SessionOutputVersion): SessionOutpu
   return Object.freeze({
     ...version,
     sources: Object.freeze(version.sources.map(freezeSessionOutputSource)),
+    ...(version.adoption ? { adoption: Object.freeze({ ...version.adoption }) } : {}),
   })
 }
 
@@ -2384,6 +2419,17 @@ const VERSION_INTENT_PENDING_NAME = new RegExp(
   `^\\.[a-f0-9]{32}\\.json\\.${VERSION_PENDING_UUID}\\.pending$`,
   'u',
 )
+const VERSION_ADOPTION_BYTES = 8 * 1024
+const VERSION_ADOPTION_NAME = /^[a-f0-9]{32}\.json$/u
+const VERSION_ADOPTION_PENDING_NAME = new RegExp(
+  `^\\.[a-f0-9]{32}\\.json\\.${VERSION_PENDING_UUID}\\.pending$`,
+  'u',
+)
+const VERSION_ADOPTION_CONFIRMATION_NAME = new RegExp(
+  `^[a-f0-9]{32}\\.json\\.${VERSION_PENDING_UUID}\\.commit$`,
+  'u',
+)
+const MAX_SESSION_OUTPUT_ADOPTION_ARTIFACTS = MAX_SESSION_OUTPUT_VERSIONS * 2
 
 interface SessionOutputVersionConfirmation {
   readonly protocol: 1
@@ -2391,11 +2437,14 @@ interface SessionOutputVersionConfirmation {
   readonly recordDigest: string
 }
 
-function parseVersionConfirmation(value: unknown): SessionOutputVersionConfirmation | null {
+function parseVersionConfirmation(
+  value: unknown,
+  recordNamePattern: RegExp = VERSION_RECORD_NAME,
+): SessionOutputVersionConfirmation | null {
   const confirmation = recordData(value)
   if (!confirmation || Object.keys(confirmation).sort().join(',') !== 'protocol,recordDigest,recordName'
     || confirmation.protocol !== SESSION_OUTPUT_VERSION_PROTOCOL
-    || typeof confirmation.recordName !== 'string' || !VERSION_RECORD_NAME.test(confirmation.recordName)
+    || typeof confirmation.recordName !== 'string' || !recordNamePattern.test(confirmation.recordName)
     || typeof confirmation.recordDigest !== 'string'
     || !/^[a-f0-9]{64}$/u.test(confirmation.recordDigest)) return null
   return Object.freeze({
@@ -2462,14 +2511,142 @@ async function openVersionJournal(versionRoot: string): Promise<{
   readonly intents: string
   readonly blobs: string
   readonly records: string
+  readonly adoptions: string
 }> {
   await ensureVersionDirectory(versionRoot, true)
   const root = await fs.realpath(versionRoot)
   const intents = path.join(root, 'intents')
   const blobs = path.join(root, 'blobs')
   const records = path.join(root, 'records')
-  for (const directory of [intents, blobs, records]) await ensureVersionDirectory(directory)
-  return Object.freeze({ root, intents, blobs, records })
+  const adoptions = path.join(root, 'adoptions')
+  for (const directory of [intents, blobs, records, adoptions]) await ensureVersionDirectory(directory)
+  return Object.freeze({ root, intents, blobs, records, adoptions })
+}
+
+function parseSessionOutputAdoption(value: unknown): SessionOutputAdoption | null {
+  const adoption = recordData(value)
+  if (!adoption || Object.keys(adoption).sort().join(',') !== [
+    'adoptedAt', 'contentDigest', 'fileId', 'path', 'sessionId', 'summary', 'versionId',
+  ].sort().join(',')) return null
+  if (typeof adoption.fileId !== 'string' || !/^[a-f0-9]{32}$/u.test(adoption.fileId)
+    || typeof adoption.versionId !== 'string' || !/^[a-f0-9]{32}$/u.test(adoption.versionId)
+    || typeof adoption.sessionId !== 'string' || adoption.sessionId.length < 1 || adoption.sessionId.length > 256
+    || typeof adoption.path !== 'string' || adoption.path.length < 1 || adoption.path.length > 4096
+    || typeof adoption.contentDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(adoption.contentDigest)
+    || typeof adoption.summary !== 'string' || adoption.summary.length < 1 || adoption.summary.length > 101
+    || typeof adoption.adoptedAt !== 'string' || !Number.isFinite(Date.parse(adoption.adoptedAt))) return null
+  return Object.freeze(adoption as unknown as SessionOutputAdoption)
+}
+
+async function listSessionOutputAdoptions(
+  journal: Awaited<ReturnType<typeof openVersionJournal>>,
+  fileId: string,
+): Promise<ReadonlyMap<string, SessionOutputAdoption>> {
+  const directory = path.join(journal.adoptions, fileId)
+  await ensureVersionDirectory(directory)
+  const entries = await fs.readdir(directory)
+  const names = entries.filter(name => VERSION_ADOPTION_NAME.test(name))
+  const pending = entries.filter(name => VERSION_ADOPTION_PENDING_NAME.test(name))
+  const confirmations = entries.filter(name => VERSION_ADOPTION_CONFIRMATION_NAME.test(name)).sort()
+  if (names.length > MAX_SESSION_OUTPUT_VERSIONS
+    || pending.length > MAX_SESSION_OUTPUT_ADOPTION_ARTIFACTS
+    || confirmations.length > MAX_SESSION_OUTPUT_ADOPTION_ARTIFACTS
+    || entries.some(name => !VERSION_ADOPTION_NAME.test(name)
+      && !VERSION_ADOPTION_PENDING_NAME.test(name)
+      && !VERSION_ADOPTION_CONFIRMATION_NAME.test(name))) {
+    throw versionError('The Session output adoption record set is invalid.')
+  }
+  const adoptions = new Map<string, SessionOutputAdoption>()
+  for (const confirmationName of confirmations) {
+    let confirmation: SessionOutputVersionConfirmation | null = null
+    try {
+      confirmation = parseVersionConfirmation(JSON.parse(
+        (await readVersionFile(
+          path.join(directory, confirmationName), VERSION_CONFIRMATION_BYTES,
+        )).toString('utf8'),
+      ) as unknown, VERSION_ADOPTION_NAME)
+    } catch {
+      // A process can stop while writing a randomized confirmation attempt.
+    }
+    if (!confirmation || !confirmationName.startsWith(`${confirmation.recordName}.`)) continue
+    const name = confirmation.recordName
+    let adoption: SessionOutputAdoption | null = null
+    try {
+      const recordBytes = await readVersionFile(path.join(directory, name), VERSION_ADOPTION_BYTES)
+      if (createHash('sha256').update(recordBytes).digest('hex') !== confirmation.recordDigest) continue
+      adoption = parseSessionOutputAdoption(JSON.parse(recordBytes.toString('utf8')) as unknown)
+    } catch (cause) {
+      throw versionError('A Session output adoption record is unreadable.', { cause })
+    }
+    if (!adoption || adoption.fileId !== fileId || `${adoption.versionId}.json` !== name) {
+      throw versionError('A Session output adoption record is invalid.')
+    }
+    const existing = adoptions.get(adoption.versionId)
+    if (existing && (existing.contentDigest !== adoption.contentDigest
+      || existing.summary !== adoption.summary || existing.adoptedAt !== adoption.adoptedAt)) {
+      throw versionError('Session output adoption confirmations conflict.')
+    }
+    adoptions.set(adoption.versionId, adoption)
+  }
+  return adoptions
+}
+
+async function readSessionOutputAdoption(
+  journal: Awaited<ReturnType<typeof openVersionJournal>>,
+  fileId: string,
+  versionId: string,
+): Promise<SessionOutputAdoption | null> {
+  return (await listSessionOutputAdoptions(journal, fileId)).get(versionId) ?? null
+}
+
+async function attachSessionOutputAdoptions(
+  journal: Awaited<ReturnType<typeof openVersionJournal>>,
+  versions: readonly SessionOutputVersion[],
+): Promise<readonly SessionOutputVersion[]> {
+  const fileId = versions[0]?.fileId
+  if (!fileId) return Object.freeze([])
+  if (versions.some(version => version.fileId !== fileId)) {
+    throw versionError('Session output versions do not share one file identity.')
+  }
+  const adoptions = await listSessionOutputAdoptions(journal, fileId)
+  return Object.freeze(versions.map(version => {
+    const adoption = adoptions.get(version.versionId)
+    if (adoption && (adoption.sessionId !== version.sessionId || adoption.path !== version.path
+      || adoption.contentDigest !== version.contentDigest)) {
+      throw versionError('A Session output adoption does not match its immutable version.')
+    }
+    return freezeSessionOutputVersion({ ...version, ...(adoption ? { adoption } : {}) })
+  }))
+}
+
+function sessionOutputAdoptionSummary(data: Buffer): string {
+  let content: string
+  try {
+    content = new TextDecoder('utf-8', { fatal: true }).decode(data)
+  } catch (cause) {
+    throw versionError('The selected Session output version cannot be summarized.', { cause })
+  }
+  let offset = 0
+  while (offset <= content.length) {
+    const newline = content.indexOf('\n', offset)
+    const end = newline < 0 ? content.length : newline
+    let start = offset
+    while (start < end) {
+      const character = content[start]
+      if (character !== ' ' && character !== '\t' && character !== '\r') break
+      start++
+    }
+    const sample = content.slice(start, Math.min(end, start + 256))
+      .replace(/^#{1,6}\s+/u, '')
+      .replace(/^[-*+]\s+/u, '')
+      .replace(/^\d+[.)]\s+/u, '')
+      .replace(/^>\s*/u, '')
+      .trim()
+    if (sample.length > 0) return sample.length > 100 ? `${sample.slice(0, 100)}…` : sample
+    if (newline < 0) break
+    offset = newline + 1
+  }
+  return '该版本没有可显示的文字摘要'
 }
 
 async function versionDirectoryGuard(directories: readonly string[]): Promise<() => Promise<void>> {
@@ -3913,7 +4090,10 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         try {
           const journal = await openVersionJournal(versionRoot)
           await recoverVersionIntentsForFile(journal, fileId, signal, options.sessionOutputVersionInternals)
-          return await listVersionRecordsByFileId(journal, fileId)
+          return await attachSessionOutputAdoptions(
+            journal,
+            await listVersionRecordsByFileId(journal, fileId),
+          )
         } catch (cause) {
           if (signal?.aborted || cause instanceof WorkError) throw cause
           throw versionError('The Session output version history could not be recovered safely.', { cause })
@@ -3949,7 +4129,119 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         } catch (cause) {
           throw versionError('The Session output version is not readable UTF-8 text.', { cause })
         }
-        return Object.freeze({ ...captured.version, content })
+        const journal = await openVersionJournal(versionRoot)
+        const [version] = await attachSessionOutputAdoptions(journal, [captured.version])
+        return Object.freeze({ ...version!, content })
+      })
+    },
+
+    async adoptSessionOutputVersion(spec, signal) {
+      await ready()
+      if (!versionRoot || !/^[a-f0-9]{32}$/u.test(spec.fileId)
+        || !/^[a-f0-9]{32}$/u.test(spec.versionId)) {
+        throw new WorkError(
+          'work/session-output-adoption-failed',
+          'The selected Session output version is not available for adoption.',
+        )
+      }
+      return withVersionLock(async () => {
+        signal?.throwIfAborted()
+        let captured: Awaited<ReturnType<typeof readSessionOutputVersionRecord>>
+        let journal: Awaited<ReturnType<typeof openVersionJournal>>
+        try {
+          journal = await openVersionJournal(versionRoot)
+          await recoverVersionIntentsForFile(
+            journal, spec.fileId, signal, options.sessionOutputVersionInternals,
+          )
+          captured = await readSessionOutputVersionRecord(versionRoot, spec)
+          const existing = await readSessionOutputAdoption(journal, spec.fileId, spec.versionId)
+          if (existing) {
+            if (existing.sessionId !== captured.version.sessionId
+              || existing.path !== captured.version.path
+              || existing.contentDigest !== captured.version.contentDigest
+              || existing.summary !== sessionOutputAdoptionSummary(captured.data)) {
+              throw versionError('The Session output adoption conflicts with its immutable version.')
+            }
+            return existing
+          }
+        } catch (cause) {
+          if (signal?.aborted) throw cause
+          if (cause instanceof WorkError && cause.code === 'work/session-output-adoption-failed') throw cause
+          throw new WorkError(
+            'work/session-output-adoption-failed',
+            'The selected Session output version could not be verified for adoption.',
+            { cause },
+          )
+        }
+        const expectedSummary = sessionOutputAdoptionSummary(captured.data)
+        let adoption: SessionOutputAdoption = Object.freeze({
+          fileId: captured.version.fileId,
+          versionId: captured.version.versionId,
+          sessionId: captured.version.sessionId,
+          path: captured.version.path,
+          contentDigest: captured.version.contentDigest,
+          summary: expectedSummary,
+          adoptedAt: now(),
+        })
+        const directory = path.join(journal.adoptions, adoption.fileId)
+        try {
+          await ensureVersionDirectory(directory)
+          const assertDirectories = await versionDirectoryGuard([
+            journal.root, journal.adoptions, directory,
+          ])
+          const entries = await fs.readdir(directory)
+          if (entries.filter(name => VERSION_ADOPTION_PENDING_NAME.test(name)).length
+              >= MAX_SESSION_OUTPUT_ADOPTION_ARTIFACTS
+            || entries.filter(name => VERSION_ADOPTION_CONFIRMATION_NAME.test(name)).length
+              >= MAX_SESSION_OUTPUT_ADOPTION_ARTIFACTS) {
+            throw new Error('adoption attempts have reached their bounded limit')
+          }
+          const recordName = `${adoption.versionId}.json`
+          const recordPath = path.join(directory, recordName)
+          let recordBytes: Buffer
+          try {
+            recordBytes = await readVersionFile(recordPath, VERSION_ADOPTION_BYTES)
+            const retained = parseSessionOutputAdoption(JSON.parse(recordBytes.toString('utf8')) as unknown)
+            if (!retained || retained.fileId !== captured.version.fileId
+              || retained.versionId !== captured.version.versionId
+              || retained.sessionId !== captured.version.sessionId
+              || retained.path !== captured.version.path
+              || retained.contentDigest !== captured.version.contentDigest
+              || retained.summary !== expectedSummary) {
+              throw new Error('unconfirmed adoption conflicts with its immutable version')
+            }
+            adoption = retained
+          } catch (cause) {
+            if (!(cause instanceof Error && 'code' in cause && cause.code === 'ENOENT')) throw cause
+            recordBytes = Buffer.from(JSON.stringify(adoption), 'utf8')
+          }
+          await assertDirectories()
+          signal?.throwIfAborted()
+          await publishExclusiveVersionFile(
+            recordPath,
+            recordBytes,
+            VERSION_ADOPTION_BYTES,
+            options.sessionOutputAdoptionInternals,
+          )
+          await options.sessionOutputAdoptionInternals?.afterRecordPublish?.()
+          await assertDirectories()
+          signal?.throwIfAborted()
+          await publishVersionConfirmation(directory, recordName, recordBytes)
+          await options.sessionOutputAdoptionInternals?.afterConfirmationPublish?.()
+          await assertDirectories()
+          signal?.throwIfAborted()
+          const confirmed = await readSessionOutputAdoption(journal, adoption.fileId, adoption.versionId)
+          if (!confirmed || confirmed.contentDigest !== adoption.contentDigest
+            || confirmed.summary !== adoption.summary) throw new Error('adoption confirmation failed')
+          return confirmed
+        } catch (cause) {
+          if (signal?.aborted) throw cause
+          throw new WorkError(
+            'work/session-output-adoption-failed',
+            'The selected Session output version could not be adopted safely.',
+            { cause },
+          )
+        }
       })
     },
 

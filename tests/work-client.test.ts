@@ -117,6 +117,16 @@ function successfulRemote(overrides: Partial<WorkClientRemote> = {}): WorkClient
         },
       }
     },
+    async adoptSessionOutputVersion() {
+      return {
+        ok: true as const,
+        value: {
+          fileId: 'f'.repeat(32), versionId: 'e'.repeat(32), sessionId: 'session-client',
+          path: 'report.md', contentDigest: 'd'.repeat(64), summary: 'Report',
+          adoptedAt: '2026-09-06T00:00:00.000Z',
+        },
+      }
+    },
     async readSessionOutput() {
       return {
         ok: true as const,
@@ -558,6 +568,11 @@ test('lists and reads immutable Session output versions without changing Work st
     name: 'report.md', path: 'report.md', bytes: 9, mediaType: 'text/markdown',
     contentDigest: 'c'.repeat(64), createdAt: '2026-09-06T00:00:00.000Z', sources: [],
   }
+  const adoption = {
+    fileId: version.fileId, versionId: version.versionId, sessionId: version.sessionId,
+    path: version.path, contentDigest: version.contentDigest, summary: 'Report',
+    adoptedAt: '2026-09-06T00:01:00.000Z',
+  }
   const model = new ClientWorkModel(successfulRemote({
     async listSessionOutputVersions(spec) {
       received.push(['list', spec])
@@ -566,6 +581,10 @@ test('lists and reads immutable Session output versions without changing Work st
     async readSessionOutputVersion(spec) {
       received.push(['read', spec])
       return { ok: true, value: { ...version, content: '# Report\n' } }
+    },
+    async adoptSessionOutputVersion(spec) {
+      received.push(['adopt', spec])
+      return { ok: true, value: adoption }
     },
   }))
   model.replaceBaseline({ items: [view(1)] })
@@ -577,9 +596,13 @@ test('lists and reads immutable Session output versions without changing Work st
   assert.equal((await works.readSessionOutputVersion({
     fileId: version.fileId, versionId: version.versionId,
   })).content, '# Report\n')
+  assert.deepEqual(await works.adoptSessionOutputVersion({
+    fileId: version.fileId, versionId: version.versionId,
+  }), adoption)
   assert.deepEqual(received, [
     ['list', { sessionId: 'session-version', path: 'report.md' }],
     ['read', { fileId: version.fileId, versionId: version.versionId }],
+    ['adopt', { fileId: version.fileId, versionId: version.versionId }],
   ])
   assert.deepEqual(model.getSnapshot().items, [view(1)])
 })

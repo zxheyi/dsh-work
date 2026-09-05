@@ -2,6 +2,7 @@ import type { RemoteResult, TypertRemoteContribution } from '@deepseek-ai/dsh-ty
 import z from 'zod'
 
 import type {
+  WorkAdoptSessionOutputVersionSpec,
   WorkCreateSpec,
   WorkDispatchRequest,
   WorkImportConversationSpec,
@@ -20,6 +21,7 @@ import type {
   WorkShowDeliveryRequest,
   WorkShowDeliveryValue,
   WorkSessionFileResource,
+  WorkSessionOutputAdoption,
   WorkSessionOutputFile,
   WorkSessionOutputContent,
   WorkSessionOutputSource,
@@ -241,6 +243,17 @@ const readSessionOutputVersionSchema: z.ZodType<WorkReadSessionOutputVersionSpec
   fileId: sessionOutputVersionIdentitySchema.shape.fileId,
   versionId: sessionOutputVersionIdentitySchema.shape.versionId,
 }).strict()
+const adoptSessionOutputVersionSchema: z.ZodType<WorkAdoptSessionOutputVersionSpec> =
+  readSessionOutputVersionSchema
+const sessionOutputAdoptionSchema: z.ZodType<WorkSessionOutputAdoption> = z.object({
+  fileId: z.string().regex(/^[a-f0-9]{32}$/u),
+  versionId: z.string().regex(/^[a-f0-9]{32}$/u),
+  sessionId: z.string().min(1).max(256),
+  path: z.string().min(1).max(4096),
+  contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+  summary: z.string().min(1).max(101),
+  adoptedAt: z.iso.datetime(),
+}).strict()
 const sessionOutputVersionObjectSchema = z.object({
   fileId: z.string().regex(/^[a-f0-9]{32}$/u),
   versionId: z.string().regex(/^[a-f0-9]{32}$/u),
@@ -256,6 +269,7 @@ const sessionOutputVersionObjectSchema = z.object({
   contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
   createdAt: z.iso.datetime(),
   sources: z.array(sessionOutputSourceSchema).max(20),
+  adoption: sessionOutputAdoptionSchema.optional(),
 }).strict()
 const sessionOutputVersionSchema: z.ZodType<WorkSessionOutputVersion> = sessionOutputVersionObjectSchema
   .refine(value => (value.turn === null) === (value.throughSeq === null))
@@ -536,6 +550,24 @@ export const TYPERT_REMOTE: TypertRemoteContribution = Object.freeze({
       ),
     }),
     Object.freeze({
+      id: '@dsh-work/work-api#work/adoptSessionOutputVersion',
+      service: 'workApi',
+      namespace: 'work',
+      method: 'adoptSessionOutputVersion',
+      invocation: Object.freeze({ kind: 'direct' as const }),
+      parameters: Object.freeze([Object.freeze({
+        name: 'spec',
+        wire: 'spec',
+        source: 'json' as const,
+        codec: strict(
+          '@dsh-work/work-api#WorkAdoptSessionOutputVersionSpec',
+          adoptSessionOutputVersionSchema,
+        ),
+      })]),
+      cancellation: Object.freeze({ parameter: 'signal' as const }),
+      result: strict('@dsh-work/work-api#WorkSessionOutputAdoption', sessionOutputAdoptionSchema),
+    }),
+    Object.freeze({
       id: '@dsh-work/work-api#work/follow',
       service: 'workApi',
       namespace: 'work',
@@ -603,6 +635,10 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       spec: WorkReadSessionOutputVersionSpec,
       signal?: AbortSignal,
     ) => Promise<RemoteResult<WorkSessionOutputVersionContent>>
+    'work/adoptSessionOutputVersion': (
+      spec: WorkAdoptSessionOutputVersionSpec,
+      signal?: AbortSignal,
+    ) => Promise<RemoteResult<WorkSessionOutputAdoption>>
     'work/readSessionOutput': (
       spec: WorkReadSessionOutputSpec,
       signal?: AbortSignal,
@@ -627,6 +663,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       showSessionOutputSave: TypertRemoteMap['work/showSessionOutputSave']
       listSessionOutputVersions: TypertRemoteMap['work/listSessionOutputVersions']
       readSessionOutputVersion: TypertRemoteMap['work/readSessionOutputVersion']
+      adoptSessionOutputVersion: TypertRemoteMap['work/adoptSessionOutputVersion']
       readSessionOutput: TypertRemoteMap['work/readSessionOutput']
       list: TypertRemoteMap['work/list']
       follow: TypertRemoteMap['work/follow']

@@ -1269,6 +1269,292 @@ test('publishes immutable Session output versions and reads historical bytes aft
   await fs.rm(root, { recursive: true, force: true })
 })
 
+test('adopts one immutable file version without closing its Session or adopting later versions', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-adoption-'))
+  const versionRoot = path.join(root, 'versions')
+  const workspace = path.join(root, 'workspace')
+  const otherWorkspace = path.join(root, 'other-workspace')
+  await fs.mkdir(workspace)
+  await fs.mkdir(otherWorkspace)
+  const events: unknown[] = []
+  const otherEvents: unknown[] = []
+  const completedWrite = (
+    target: unknown[],
+    turn: number,
+    firstSeq: number,
+    content: string,
+  ): void => {
+    const callId = `write-${String(turn)}-${String(firstSeq)}`
+    target.push(
+      { seq: firstSeq, type: 'tool/call', data: {
+        turn, callId, name: 'write', arguments: JSON.stringify({ file_path: 'report.md', content }),
+      } },
+      { seq: firstSeq + 1, type: 'tool/result', surfaceOp: 'append', data: {
+        turn, message: { source: { callId }, content: [{ type: 'tool-result', isError: false }] },
+      } },
+      { seq: firstSeq + 2, type: 'turn/end', data: { turn, reason: { kind: 'completed' } } },
+    )
+  }
+  const harness: HarnessWorkPort = {
+    ...testHarness(),
+    async inspectSession(sessionId) {
+      return sessionId === 'session-adoption'
+        ? { cwd: workspace, events }
+        : { cwd: otherWorkspace, events: otherEvents }
+    },
+    async inspectSessionWorkspace(sessionId) {
+      return sessionId === 'session-adoption' ? workspace : otherWorkspace
+    },
+  }
+  const times = [
+    '2026-09-06T02:00:00.000Z',
+    '2026-09-06T02:00:10.000Z',
+    '2026-09-06T02:00:20.000Z',
+    '2026-09-06T02:00:30.000Z',
+  ]
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    sessionOutputVersionRoot: versionRoot, now: () => times.shift()!, harness,
+  })
+
+  await fs.writeFile(path.join(workspace, 'report.md'), '# Adopt this version\nBody\n')
+  completedWrite(events, 1, 1, '# Adopt this version\nBody\n')
+  await controller.inspectSessionOutputs({ sessionId: 'session-adoption', turn: 1, throughSeq: 3 })
+  const [first] = await controller.listSessionOutputVersions({
+    sessionId: 'session-adoption', path: 'report.md',
+  })
+  const adopted = await controller.adoptSessionOutputVersion({
+    fileId: first!.fileId, versionId: first!.versionId,
+  })
+  assert.equal(adopted.summary, 'Adopt this version')
+  assert.equal(adopted.contentDigest, first!.contentDigest)
+  assert.deepEqual(await controller.adoptSessionOutputVersion({
+    fileId: first!.fileId, versionId: first!.versionId,
+  }), adopted)
+
+  events.push(
+    { seq: 4, type: 'user/message', data: {
+      source: { kind: 'user' }, content: [{ type: 'text', text: '解释一下结论。' }],
+    } },
+    { seq: 5, type: 'turn/start', data: { turn: 2 } },
+    { seq: 6, type: 'assistant/message', data: {
+      turn: 2, message: { content: [{ type: 'text', text: '这是解释。' }] },
+    } },
+    { seq: 7, type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } },
+  )
+  assert.deepEqual(await controller.inspectSessionOutputs({
+    sessionId: 'session-adoption', turn: 2, throughSeq: 7,
+  }), [])
+  assert.deepEqual((await controller.listSessionOutputVersions({
+    sessionId: 'session-adoption', path: 'report.md',
+  }))[0]?.adoption, adopted)
+
+  await controller.prepareSessionOutputRevision({
+    sessionId: 'session-adoption', turn: 1, throughSeq: 3, path: 'report.md',
+    baseVersion: { fileId: first!.fileId, versionId: first!.versionId },
+  })
+  await fs.writeFile(path.join(workspace, 'report.md'), '# Later version\n')
+  completedWrite(events, 3, 8, '# Later version\n')
+  await controller.inspectSessionOutputs({ sessionId: 'session-adoption', turn: 3, throughSeq: 10 })
+  const versions = await controller.listSessionOutputVersions({
+    sessionId: 'session-adoption', path: 'report.md',
+  })
+  assert.equal(versions.length, 2)
+  assert.deepEqual(versions[0]?.adoption, adopted)
+  assert.equal(versions[1]?.adoption, undefined)
+
+  await fs.writeFile(path.join(otherWorkspace, 'report.md'), '# Other file\n')
+  completedWrite(otherEvents, 1, 1, '# Other file\n')
+  await controller.inspectSessionOutputs({ sessionId: 'other-session', turn: 1, throughSeq: 3 })
+  assert.equal((await controller.listSessionOutputVersions({
+    sessionId: 'other-session', path: 'report.md',
+  }))[0]?.adoption, undefined)
+
+  const restarted = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot, harness,
+  })
+  assert.deepEqual((await restarted.listSessionOutputVersions({
+    sessionId: 'session-adoption', path: 'report.md',
+  }))[0]?.adoption, adopted)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('does not expose an adoption published through a replaced record directory', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-adoption-replaced-'))
+  const workspace = path.join(root, 'workspace')
+  const versionRoot = path.join(root, 'versions')
+  await fs.mkdir(workspace)
+  const content = '# Verified version\n'
+  const events: unknown[] = [
+    { seq: 1, type: 'tool/call', data: {
+      turn: 1, callId: 'write-1', name: 'write',
+      arguments: JSON.stringify({ file_path: 'report.md', content }),
+    } },
+    { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1, message: { source: { callId: 'write-1' }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ]
+  const harness: HarnessWorkPort = {
+    ...testHarness(),
+    async inspectSession() { return { cwd: workspace, events } },
+    async inspectSessionWorkspace() { return workspace },
+  }
+  const publisher = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot, harness,
+  })
+  await fs.writeFile(path.join(workspace, 'report.md'), content)
+  await publisher.inspectSessionOutputs({ sessionId: 'session-adoption-race', turn: 1, throughSeq: 3 })
+  const [version] = await publisher.listSessionOutputVersions({
+    sessionId: 'session-adoption-race', path: 'report.md',
+  })
+  let replaced = false
+  const racing = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot, harness,
+    sessionOutputAdoptionInternals: {
+      async beforePendingLink({ pendingPath, targetPath }) {
+        if (replaced) return
+        replaced = true
+        const directory = path.dirname(targetPath)
+        const displaced = `${directory}-displaced`
+        await fs.rename(directory, displaced)
+        await fs.mkdir(directory)
+        const oldPending = path.join(displaced, path.basename(pendingPath))
+        await fs.writeFile(oldPending, JSON.stringify({
+          fileId: version!.fileId,
+          versionId: version!.versionId,
+          sessionId: version!.sessionId,
+          path: version!.path,
+          contentDigest: version!.contentDigest,
+          summary: 'Forged summary',
+          adoptedAt: '2026-09-06T03:00:00.000Z',
+        }))
+        await fs.link(oldPending, pendingPath)
+      },
+    },
+  })
+  await assert.rejects(racing.adoptSessionOutputVersion({
+    fileId: version!.fileId, versionId: version!.versionId,
+  }), (error: unknown) => error instanceof WorkError
+    && error.code === 'work/session-output-adoption-failed')
+  const [retained] = await racing.listSessionOutputVersions({
+    sessionId: 'session-adoption-race', path: 'report.md',
+  })
+  assert.equal(retained?.adoption, undefined)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('recovers an unconfirmed adoption and derives its summary without splitting dense content', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-adoption-recovery-'))
+  const workspace = path.join(root, 'workspace')
+  const versionRoot = path.join(root, 'versions')
+  await fs.mkdir(workspace)
+  const content = `${'\n'.repeat(100_000)}# Dense summary\n`
+  const events: unknown[] = [
+    { seq: 1, type: 'tool/call', data: {
+      turn: 1, callId: 'write-1', name: 'write',
+      arguments: JSON.stringify({ file_path: 'report.md', content }),
+    } },
+    { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1, message: { source: { callId: 'write-1' }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ]
+  const harness: HarnessWorkPort = {
+    ...testHarness(),
+    async inspectSession() { return { cwd: workspace, events } },
+    async inspectSessionWorkspace() { return workspace },
+  }
+  await fs.writeFile(path.join(workspace, 'report.md'), content)
+  const publisher = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot, harness,
+  })
+  await publisher.inspectSessionOutputs({ sessionId: 'session-adoption-recovery', turn: 1, throughSeq: 3 })
+  const [version] = await publisher.listSessionOutputVersions({
+    sessionId: 'session-adoption-recovery', path: 'report.md',
+  })
+  const interrupted = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot, harness,
+    now: () => '2026-09-06T03:10:00.000Z',
+    sessionOutputAdoptionInternals: {
+      afterRecordPublish() { throw new Error('stop before adoption confirmation') },
+    },
+  })
+  await assert.rejects(interrupted.adoptSessionOutputVersion({
+    fileId: version!.fileId, versionId: version!.versionId,
+  }), (error: unknown) => error instanceof WorkError
+    && error.code === 'work/session-output-adoption-failed')
+  assert.equal((await interrupted.listSessionOutputVersions({
+    sessionId: 'session-adoption-recovery', path: 'report.md',
+  }))[0]?.adoption, undefined)
+  const recovered = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot,
+    now: () => '2026-09-06T03:20:00.000Z', harness,
+  })
+  const adoption = await recovered.adoptSessionOutputVersion({
+    fileId: version!.fileId, versionId: version!.versionId,
+  })
+  assert.equal(adoption.summary, 'Dense summary')
+  assert.equal(adoption.adoptedAt, '2026-09-06T03:10:00.000Z')
+  assert.deepEqual((await recovered.listSessionOutputVersions({
+    sessionId: 'session-adoption-recovery', path: 'report.md',
+  }))[0]?.adoption, adoption)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('rejects a new adoption attempt before bounded pending artifacts hide readable history', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-adoption-limit-'))
+  const workspace = path.join(root, 'workspace')
+  const versionRoot = path.join(root, 'versions')
+  await fs.mkdir(workspace)
+  const content = '# Bounded adoption\n'
+  const events: unknown[] = [
+    { seq: 1, type: 'tool/call', data: {
+      turn: 1, callId: 'write-1', name: 'write',
+      arguments: JSON.stringify({ file_path: 'report.md', content }),
+    } },
+    { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1, message: { source: { callId: 'write-1' }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ]
+  const harness: HarnessWorkPort = {
+    ...testHarness(),
+    async inspectSession() { return { cwd: workspace, events } },
+    async inspectSessionWorkspace() { return workspace },
+  }
+  await fs.writeFile(path.join(workspace, 'report.md'), content)
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot, harness,
+  })
+  await controller.inspectSessionOutputs({ sessionId: 'session-adoption-limit', turn: 1, throughSeq: 3 })
+  const [version] = await controller.listSessionOutputVersions({
+    sessionId: 'session-adoption-limit', path: 'report.md',
+  })
+  const directory = path.join(versionRoot, 'adoptions', version!.fileId)
+  await fs.mkdir(directory, { recursive: true })
+  for (let offset = 0; offset < 1_024; offset += 128) {
+    await Promise.all(Array.from({ length: 128 }, (_, index) => {
+      const suffix = (offset + index).toString(16).padStart(12, '0')
+      return fs.writeFile(path.join(
+        directory,
+        `.${version!.versionId}.json.00000000-0000-4000-8000-${suffix}.pending`,
+      ), '')
+    }))
+  }
+  assert.equal((await controller.listSessionOutputVersions({
+    sessionId: 'session-adoption-limit', path: 'report.md',
+  }))[0]?.adoption, undefined)
+  await assert.rejects(controller.adoptSessionOutputVersion({
+    fileId: version!.fileId, versionId: version!.versionId,
+  }), (error: unknown) => error instanceof WorkError
+    && error.code === 'work/session-output-adoption-failed')
+  assert.equal((await controller.listSessionOutputVersions({
+    sessionId: 'session-adoption-limit', path: 'report.md',
+  }))[0]?.versionId, version!.versionId)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
 test('rejects invalid revision version identities before inspecting Session or journal paths', async () => {
   let inspections = 0
   const controller = createWorkController({

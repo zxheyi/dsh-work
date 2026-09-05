@@ -373,7 +373,7 @@
       "files": "packages/work-domain/index.ts；packages/work-api/index.ts；packages/work-api/surface.ts",
       "verification": "采用状态域集成、采用后修改 E2E、版本行标识截图",
       "limits": "不再用 Work completed 表示所有文件都已采用。",
-      "status": "pending"
+      "status": "verified"
     },
     {
       "id": "T20",
