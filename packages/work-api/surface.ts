@@ -951,6 +951,8 @@ body[data-ds-dark-theme] {
 }
 .dsh-work-sidebar, .dsh-work-home { font-family: var(--work-font); color: var(--work-text); }
 .dsh-work-native-brand-mark { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: white; background: #365eca; font: 700 13px/1 var(--work-font); }
+[data-approval-key] { font-family: var(--work-font); }
+[data-approval-key] > div { border-color: color-mix(in srgb, var(--work-warning) 46%, var(--work-border)) !important; border-radius: 14px !important; box-shadow: var(--work-shadow) !important; }
 .dsh-work-legacy-deliverable-open { min-width: 30px; height: 30px; padding: 0 9px; border: 1px solid var(--work-border); border-radius: 6px; color: var(--work-muted); background: var(--work-surface); cursor: pointer; font: 550 12px/1 var(--work-font); white-space: nowrap; }
 .dsh-work-legacy-deliverable-open:hover { color: var(--work-accent); border-color: var(--work-accent); }
 .dsh-work-legacy-deliverable-overlay { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 28px; background: rgb(20 24 32 / .28); pointer-events: auto; }

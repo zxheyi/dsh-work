@@ -138,7 +138,7 @@
       "files": "packages/work-api/surface.ts；Harness 原生授权贡献与公共事件",
       "verification": "授权正负集成、拒绝后继续聊天 E2E、权限图截图",
       "limits": "不自建授权状态机，不用产品完成状态扩权。",
-      "status": "pending"
+      "status": "verified"
     },
     {
       "id": "T08",
