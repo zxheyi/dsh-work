@@ -30,6 +30,8 @@
     "test:session-resource": "node scripts/run-session-resource-test.mjs",
     "pretest:session-permission": "pnpm build",
     "test:session-permission": "node scripts/run-session-permission-test.mjs",
+    "pretest:session-output": "pnpm build",
+    "test:session-output": "node scripts/run-session-output-test.mjs",
     "predesktop": "pnpm build",
     "desktop": "electron dist/apps/desktop/main.js",
     "verify:local": "node scripts/verify-local.mjs artifacts/runtime/context.json --desktop"

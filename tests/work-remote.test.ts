@@ -54,6 +54,7 @@ test('exports the narrow Work surface through public Typert markers', () => {
     { method: 'readDeliverable', mode: 'unary' },
     { method: 'showDelivery', mode: 'unary' },
     { method: 'importSessionResource', mode: 'unary' },
+    { method: 'inspectSessionOutputs', mode: 'unary' },
     { method: 'list', mode: 'unary' },
     { method: 'follow', mode: 'stream' },
   ])
@@ -69,6 +70,7 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
     'work/showDelivery',
     'work/importSessionResource',
     'work/list',
+    'work/inspectSessionOutputs',
     'work/follow',
   ])
   const dispatch = TYPERT_REMOTE.descriptors.find(descriptor => descriptor.method === 'dispatch')
@@ -157,6 +159,22 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
     title: 'Too large',
     goal: 'Reject oversized context.',
     source: { sourceSystem: 'other', content: 'x'.repeat(100_001) },
+  }))
+
+  const inspectOutputs = TYPERT_REMOTE.descriptors.find(
+    descriptor => descriptor.method === 'inspectSessionOutputs',
+  )
+  assert.ok(inspectOutputs)
+  const outputCodec = inspectOutputs.parameters[0]?.codec
+  assert.equal(outputCodec?.mode, 'strict')
+  if (!outputCodec || outputCodec.mode !== 'strict') {
+    throw new Error('Session output inspection must publish a strict request codec')
+  }
+  assert.deepEqual(outputCodec.schema.parse({
+    sessionId: 'session-remote', turn: 2, throughSeq: 12,
+  }), { sessionId: 'session-remote', turn: 2, throughSeq: 12 })
+  assert.throws(() => outputCodec.schema.parse({
+    sessionId: 'session-remote', turn: 2, throughSeq: 12, staleTurn: 1,
   }))
 })
 

@@ -6,12 +6,15 @@ import type {
   WorkDispatchRequest,
   WorkImportConversationSpec,
   WorkImportSessionResourceSpec,
+  WorkInspectSessionOutputsSpec,
   WorkListValue,
   WorkDeliverableContent,
   WorkReadDeliverableRequest,
   WorkShowDeliveryRequest,
   WorkShowDeliveryValue,
   WorkSessionFileResource,
+  WorkSessionOutputFile,
+  WorkSessionOutputsValue,
   WorkRemoteFollowFrame,
   WorkView,
 } from './index.ts'
@@ -106,6 +109,22 @@ const sessionFileResourceSchema: z.ZodType<WorkSessionFileResource> = z.object({
   bytes: z.number().int().positive().max(25 * 1024 * 1024),
   mediaType: z.string().min(1).max(128).nullable(),
   contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+}).strict()
+const inspectSessionOutputsSchema: z.ZodType<WorkInspectSessionOutputsSpec> = z.object({
+  sessionId: z.string().min(1).max(256),
+  turn: z.number().int().nonnegative(),
+  throughSeq: z.number().int().nonnegative(),
+}).strict()
+const sessionOutputFileSchema: z.ZodType<WorkSessionOutputFile> = z.object({
+  sessionId: z.string().min(1).max(256),
+  turn: z.number().int().nonnegative(),
+  name: z.string().min(1).max(512),
+  path: z.string().min(1).max(4096),
+  bytes: z.number().int().positive(),
+  mediaType: z.string().min(1).max(128).nullable(),
+}).strict()
+const sessionOutputsValueSchema: z.ZodType<WorkSessionOutputsValue> = z.object({
+  items: z.array(sessionOutputFileSchema).max(64),
 }).strict()
 const listSchema: z.ZodType<WorkListValue> = z.object({
   items: z.array(workViewSchema).max(1),
@@ -225,6 +244,21 @@ export const TYPERT_REMOTE: TypertRemoteContribution = Object.freeze({
       result: strict('@dsh-work/work-api#WorkListValue', listSchema),
     }),
     Object.freeze({
+      id: '@dsh-work/work-api#work/inspectSessionOutputs',
+      service: 'workApi',
+      namespace: 'work',
+      method: 'inspectSessionOutputs',
+      invocation: Object.freeze({ kind: 'direct' as const }),
+      parameters: Object.freeze([Object.freeze({
+        name: 'spec',
+        wire: 'spec',
+        source: 'json' as const,
+        codec: strict('@dsh-work/work-api#WorkInspectSessionOutputsSpec', inspectSessionOutputsSchema),
+      })]),
+      cancellation: Object.freeze({ parameter: 'signal' as const }),
+      result: strict('@dsh-work/work-api#WorkSessionOutputsValue', sessionOutputsValueSchema),
+    }),
+    Object.freeze({
       id: '@dsh-work/work-api#work/follow',
       service: 'workApi',
       namespace: 'work',
@@ -260,6 +294,10 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       spec: WorkImportSessionResourceSpec,
       signal?: AbortSignal,
     ) => Promise<RemoteResult<WorkSessionFileResource>>
+    'work/inspectSessionOutputs': (
+      spec: WorkInspectSessionOutputsSpec,
+      signal?: AbortSignal,
+    ) => Promise<RemoteResult<WorkSessionOutputsValue>>
     'work/list': () => Promise<RemoteResult<WorkListValue>>
     'work/follow': (signal?: AbortSignal) => AsyncIterable<WorkRemoteFollowFrame>
   }
@@ -272,6 +310,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       readDeliverable: TypertRemoteMap['work/readDeliverable']
       showDelivery: TypertRemoteMap['work/showDelivery']
       importSessionResource: TypertRemoteMap['work/importSessionResource']
+      inspectSessionOutputs: TypertRemoteMap['work/inspectSessionOutputs']
       list: TypertRemoteMap['work/list']
       follow: TypertRemoteMap['work/follow']
     }

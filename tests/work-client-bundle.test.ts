@@ -75,6 +75,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
       async importConversation() { throw new Error('not called') },
       async dispatch() { throw new Error('not called') },
       async importSessionResource() { throw new Error('not called') },
+      async inspectSessionOutputs() { throw new Error('not called') },
       async list() { return { ok: true, value: { items: [] } } },
       async *follow() {},
     },
@@ -109,6 +110,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   assert.deepEqual(injectedSlots, [
     'sidebar.brand.name',
     'conversation.input.left',
+    'conversation.chat.turnTail',
     'sidebar.brand.mark',
     'sidebar.footer.action',
     'shell.overlay',
@@ -116,6 +118,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   assert.deepEqual(registeredSlots, [
     { name: 'sidebar.brand.name', priority: -100 },
     { name: 'conversation.input.left' },
+    { name: 'conversation.chat.turnTail', priority: -100 },
     { name: 'sidebar.brand.mark', priority: -100 },
     { name: 'sidebar.footer.action' },
     { name: 'shell.overlay' },
@@ -124,6 +127,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   assert.match(source, /data-work-legacy-deliverable-open/)
   assert.match(source, /data-work-legacy-deliverable-preview/)
   assert.match(source, /data-work-session-resource/)
+  assert.match(source, /data-work-session-outputs/)
   assert.equal(source.includes('data-work-legacy-open'), false)
   assert.equal(source.includes('data-work-legacy-surface'), false)
   assert.equal(source.includes('你想完成什么？'), false)

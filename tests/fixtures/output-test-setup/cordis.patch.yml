@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-work-output-test-setup
+      name: '@dsh-work/output-test-setup'

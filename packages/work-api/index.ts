@@ -5,9 +5,11 @@ import {
   WorkError,
   type CreateWorkSpec,
   type DispatchWorkRequest,
+  type InspectSessionOutputsSpec,
   type ImportSessionResourceSpec,
   type ImportConversationSpec,
   type SessionFileResource,
+  type SessionOutputFile,
   type WorkController,
   type WorkDeliverableContent as DomainWorkDeliverableContent,
   type WorkFollowFrame,
@@ -24,6 +26,8 @@ export type WorkClientDispatchRequest = Omit<WorkDispatchRequest, 'mutationId' |
 export type WorkDeliverableContent = DomainWorkDeliverableContent
 export type WorkImportSessionResourceSpec = ImportSessionResourceSpec
 export type WorkSessionFileResource = SessionFileResource
+export type WorkInspectSessionOutputsSpec = InspectSessionOutputsSpec
+export type WorkSessionOutputFile = SessionOutputFile
 
 export interface WorkReadDeliverableRequest {
   readonly workId: string
@@ -31,6 +35,7 @@ export interface WorkReadDeliverableRequest {
 
 export type WorkShowDeliveryRequest = WorkReadDeliverableRequest
 export interface WorkShowDeliveryValue { readonly shown: true }
+export interface WorkSessionOutputsValue { readonly items: readonly WorkSessionOutputFile[] }
 
 export interface WorkView {
   readonly workId: string
@@ -75,6 +80,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'work/recovery-conflict': Record<string, never>
     'work/resource-invalid': Record<string, never>
     'work/resource-limit': Record<string, never>
+    'work/session-output-invalid': Record<string, never>
     'work/session-resource-invalid': Record<string, never>
     'work/turn-failed': Record<string, never>
   }
@@ -162,6 +168,15 @@ export class WorkRemoteController extends TypertRemoteService {
     return workResult(() => this.controller.importSessionResource(spec, signal))
   }
 
+  inspectSessionOutputs(
+    spec: WorkInspectSessionOutputsSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkSessionOutputsValue> {
+    return workResult(async () => Object.freeze({
+      items: await this.controller.inspectSessionOutputs(spec, signal),
+    }))
+  }
+
   async list(): Promise<WorkListValue> {
     return Object.freeze({
       items: Object.freeze((await this.controller.list()).map(projectWork)),
@@ -173,7 +188,7 @@ export class WorkRemoteController extends TypertRemoteService {
   }
 }
 
-type RemoteMethodName = 'create' | 'importConversation' | 'dispatch' | 'readDeliverable' | 'showDelivery' | 'importSessionResource' | 'list' | 'follow'
+type RemoteMethodName = 'create' | 'importConversation' | 'dispatch' | 'readDeliverable' | 'showDelivery' | 'importSessionResource' | 'inspectSessionOutputs' | 'list' | 'follow'
 type RemoteMethod = (this: WorkRemoteController, ...args: unknown[]) => unknown
 type RemoteDecorator = (
   method: RemoteMethod,
@@ -204,6 +219,7 @@ installRemoteMarker('dispatch', Remote as RemoteDecorator)
 installRemoteMarker('readDeliverable', Remote as RemoteDecorator)
 installRemoteMarker('showDelivery', Remote as RemoteDecorator)
 installRemoteMarker('importSessionResource', Remote as RemoteDecorator)
+installRemoteMarker('inspectSessionOutputs', Remote as RemoteDecorator)
 installRemoteMarker('list', Remote as RemoteDecorator)
 installRemoteMarker('follow', Remote({ mode: 'stream' }) as RemoteDecorator)
 

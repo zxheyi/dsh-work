@@ -1174,3 +1174,211 @@ test('does not delete a same-name file from a replaced Workspace root during fai
   await assert.rejects(fs.stat(path.join(movedWorkspace, targetName)), { code: 'ENOENT' })
   await fs.rm(root, { recursive: true, force: true })
 })
+
+test('reports only real nonempty files produced by the addressed completed Session Turn', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-outputs-'))
+  const workspaceA = path.join(root, 'session-a')
+  const workspaceB = path.join(root, 'session-b')
+  const outside = path.join(root, 'outside.md')
+  await fs.mkdir(path.join(workspaceA, 'reports'), { recursive: true })
+  await fs.mkdir(workspaceB)
+  await fs.writeFile(path.join(workspaceA, 'reports', 'report-a.md'), '# A\n')
+  await fs.writeFile(path.join(workspaceA, 'report-b.csv'), 'name,value\na,1\n')
+  await fs.writeFile(path.join(workspaceA, 'empty.md'), '')
+  await fs.writeFile(path.join(workspaceA, 'partial.md'), 'still being written')
+  await fs.writeFile(path.join(workspaceA, 'racy.md'), 'truncate during inspection')
+  await fs.writeFile(path.join(workspaceA, 'swapped.md'), 'replace during inspection')
+  await fs.mkdir(path.join(workspaceA, 'folder.md'))
+  await fs.writeFile(path.join(workspaceA, 'old.md'), '# Old turn\n')
+  await fs.writeFile(path.join(workspaceB, 'other.md'), '# Other session\n')
+  await fs.writeFile(outside, '# Outside\n')
+  await fs.symlink(outside, path.join(workspaceA, 'linked.md'))
+
+  const call = (seq: number, turn: number, callId: string, name: string, args: object) => ({
+    seq,
+    type: 'tool/call',
+    data: { turn, callId, name, arguments: JSON.stringify(args) },
+  })
+  const result = (seq: number, turn: number, callId: string, isError = false) => ({
+    seq,
+    type: 'tool/result',
+    surfaceOp: 'append',
+    data: {
+      turn,
+      message: {
+        source: { callId },
+        content: [{ type: 'tool-result', isError }],
+      },
+    },
+  })
+  const eventsA = [
+    call(2, 4, 'old', 'write', { file_path: 'old.md', content: '# Old turn\n' }),
+    result(3, 4, 'old'),
+    { seq: 4, type: 'turn/end', data: { turn: 4, reason: { kind: 'completed' } } },
+    call(10, 7, 'a', 'write', { file_path: 'reports/report-a.md', content: '# A\n' }),
+    result(11, 7, 'a'),
+    call(12, 7, 'b', 'edit', { file_path: 'report-b.csv', old_string: '0', new_string: '1' }),
+    result(13, 7, 'b'),
+    call(14, 7, 'duplicate', 'str_replace_editor', {
+      command: 'insert', path: 'reports/report-a.md', insert_line: 1, new_str: 'More',
+    }),
+    result(15, 7, 'duplicate'),
+    call(16, 7, 'empty', 'write', { file_path: 'empty.md', content: '' }),
+    result(17, 7, 'empty'),
+    call(18, 7, 'missing', 'write', { file_path: 'missing.md', content: 'missing now' }),
+    result(19, 7, 'missing'),
+    call(20, 7, 'folder', 'write', { file_path: 'folder.md', content: 'not a file now' }),
+    result(21, 7, 'folder'),
+    call(22, 7, 'linked', 'write', { file_path: 'linked.md', content: 'linked out' }),
+    result(23, 7, 'linked'),
+    call(24, 7, 'outside', 'write', { file_path: outside, content: '# Outside\n' }),
+    result(25, 7, 'outside'),
+    call(26, 7, 'failed', 'write', { file_path: 'failed.md', content: 'failed' }),
+    result(27, 7, 'failed', true),
+    call(28, 7, 'racy', 'write', { file_path: 'racy.md', content: 'truncate during inspection' }),
+    result(29, 7, 'racy'),
+    call(30, 7, 'swapped', 'write', { file_path: 'swapped.md', content: 'replace during inspection' }),
+    result(31, 7, 'swapped'),
+    call(40, 7, 'partial', 'write', { file_path: 'partial.md', content: 'later' }),
+    result(41, 7, 'partial'),
+    { seq: 42, type: 'turn/end', data: { turn: 7, reason: { kind: 'completed' } } },
+  ]
+  const eventsB = [
+    call(10, 7, 'other', 'write', { file_path: 'other.md', content: '# Other session\n' }),
+    result(11, 7, 'other'),
+    { seq: 12, type: 'turn/end', data: { turn: 7, reason: { kind: 'completed' } } },
+  ]
+  const raced = new Set<string>()
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    harness: {
+      ...testHarness(),
+      async inspectSession(sessionId) {
+        return sessionId === 'session-b'
+          ? { cwd: workspaceB, events: eventsB }
+          : { cwd: workspaceA, events: eventsA }
+      },
+    },
+    sessionOutputInternals: {
+      async afterFirstStat({ candidatePath, producedPath }) {
+        if (raced.has(producedPath)) return
+        raced.add(producedPath)
+        if (producedPath === 'racy.md') {
+          await fs.truncate(candidatePath, 0)
+        }
+        if (producedPath === 'swapped.md') {
+          await fs.rename(candidatePath, path.join(workspaceA, 'swapped-original.md'))
+          await fs.symlink(outside, candidatePath)
+        }
+      },
+    },
+  })
+
+  assert.deepEqual(await controller.inspectSessionOutputs({
+    sessionId: 'session-a',
+    turn: 7,
+    throughSeq: 35,
+  }), [
+    {
+      sessionId: 'session-a',
+      turn: 7,
+      name: 'report-a.md',
+      path: 'reports/report-a.md',
+      bytes: 4,
+      mediaType: 'text/markdown',
+    },
+    {
+      sessionId: 'session-a',
+      turn: 7,
+      name: 'report-b.csv',
+      path: 'report-b.csv',
+      bytes: 15,
+      mediaType: 'text/csv',
+    },
+  ])
+  assert.deepEqual(await controller.inspectSessionOutputs({
+    sessionId: 'session-a', turn: 6, throughSeq: 35,
+  }), [])
+  assert.deepEqual(await controller.inspectSessionOutputs({
+    sessionId: 'session-b', turn: 7, throughSeq: 30,
+  }), [{
+    sessionId: 'session-b',
+    turn: 7,
+    name: 'other.md',
+    path: 'other.md',
+    bytes: 16,
+    mediaType: 'text/markdown',
+  }])
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('bounds validated Session outputs to the remote contract maximum', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-output-limit-'))
+  const events: unknown[] = []
+  for (let index = 0; index < 65; index++) {
+    const name = `output-${String(index).padStart(2, '0')}.txt`
+    await fs.writeFile(path.join(root, name), String(index))
+    const callId = `output-${String(index)}`
+    events.push({
+      seq: index * 2 + 1,
+      type: 'tool/call',
+      data: {
+        turn: 1,
+        callId,
+        name: 'write',
+        arguments: JSON.stringify({ file_path: name, content: String(index) }),
+      },
+    }, {
+      seq: index * 2 + 2,
+      type: 'tool/result',
+      surfaceOp: 'append',
+      data: {
+        turn: 1,
+        message: {
+          source: { callId },
+          content: [{ type: 'tool-result', isError: false }],
+        },
+      },
+    })
+  }
+  events.push({ seq: 131, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    harness: {
+      ...testHarness(),
+      async inspectSession() { return { cwd: root, events } },
+    },
+  })
+
+  const outputs = await controller.inspectSessionOutputs({
+    sessionId: 'bounded-session',
+    turn: 1,
+    throughSeq: 130,
+  })
+
+  assert.equal(outputs.length, 64)
+  assert.equal(outputs[0]?.path, 'output-00.txt')
+  assert.equal(outputs.at(-1)?.path, 'output-63.txt')
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('rejects invalid Session output coordinates and unavailable inspection', async () => {
+  const withoutInspection = createWorkController({
+    workspaceRoot: '/managed',
+    harness: testHarness(),
+  })
+  await assert.rejects(withoutInspection.inspectSessionOutputs({
+    sessionId: 'session-a', turn: 1, throughSeq: 1,
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-output-invalid')
+
+  const withInspection = createWorkController({
+    workspaceRoot: '/managed',
+    harness: {
+      ...testHarness(),
+      async inspectSession() { return { cwd: '/managed', events: [] } },
+    },
+  })
+  await assert.rejects(withInspection.inspectSessionOutputs({
+    sessionId: 'session-a', turn: -1, throughSeq: 1,
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-output-invalid')
+})

@@ -15,6 +15,7 @@ export type WorkErrorCode =
   | 'work/recovery-conflict'
   | 'work/resource-invalid'
   | 'work/resource-limit'
+  | 'work/session-output-invalid'
   | 'work/session-resource-invalid'
   | 'work/turn-failed'
 
@@ -115,6 +116,21 @@ export interface SessionFileResource {
   readonly contentDigest: string
 }
 
+export interface InspectSessionOutputsSpec {
+  readonly sessionId: string
+  readonly turn: number
+  readonly throughSeq: number
+}
+
+export interface SessionOutputFile {
+  readonly sessionId: string
+  readonly turn: number
+  readonly name: string
+  readonly path: string
+  readonly bytes: number
+  readonly mediaType: string | null
+}
+
 export interface WorkFileDeliverable {
   readonly kind: 'file'
   readonly path: string
@@ -135,6 +151,7 @@ export interface WorkController {
   readDeliverable(workId: string): Promise<WorkDeliverableContent>
   showDelivery(workId: string, signal?: AbortSignal): Promise<void>
   importSessionResource(spec: ImportSessionResourceSpec, signal?: AbortSignal): Promise<SessionFileResource>
+  inspectSessionOutputs(spec: InspectSessionOutputsSpec, signal?: AbortSignal): Promise<readonly SessionOutputFile[]>
   follow(signal?: AbortSignal): AsyncIterable<WorkFollowFrame>
   dispatch(request: DispatchWorkRequest, signal?: AbortSignal): Promise<WorkSnapshot>
 }
@@ -213,6 +230,12 @@ export interface WorkControllerOptions {
       readonly targetPath: string
     }) => void | Promise<void>
   }
+  readonly sessionOutputInternals?: {
+    readonly afterFirstStat?: (paths: {
+      readonly candidatePath: string
+      readonly producedPath: string
+    }) => void | Promise<void>
+  }
 }
 
 export interface WorkStore {
@@ -263,6 +286,10 @@ export interface HarnessWorkPort {
   submitTurn(request: SubmitTurnRequest, signal?: AbortSignal): Promise<void>
   openPath?(path: string, signal?: AbortSignal): Promise<void>
   inspectSessionWorkspace?(sessionId: string, signal?: AbortSignal): Promise<string>
+  inspectSession?(sessionId: string, signal?: AbortSignal): Promise<{
+    readonly cwd: string
+    readonly events: readonly unknown[]
+  }>
 }
 
 export interface EnsurePrimarySessionRequest {
@@ -283,6 +310,7 @@ export const WORK_MARKDOWN_DELIVERABLE_PATH = 'deliverables/result.md'
 export const MAX_WORK_MARKDOWN_DELIVERABLE_BYTES = 5 * 1024 * 1024
 
 const MAX_WORK_FILE_RESOURCE_BASE64_CHARS = Math.ceil(MAX_WORK_FILE_RESOURCE_BYTES / 3) * 4
+const MAX_SESSION_OUTPUT_FILES = 64
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u
 
 function resourceError(message: string, options?: ErrorOptions): WorkError {
@@ -604,6 +632,164 @@ function recordData(value: unknown): Record<string, unknown> | null {
     : null
 }
 
+function sessionMutationPath(name: unknown, argumentsRaw: unknown): string | null {
+  if (typeof name !== 'string' || typeof argumentsRaw !== 'string') return null
+  let args: Record<string, unknown>
+  try {
+    const decoded = JSON.parse(argumentsRaw) as unknown
+    const record = recordData(decoded)
+    if (!record) return null
+    args = record
+  } catch {
+    return null
+  }
+  const pathValue = (value: unknown): string | null =>
+    typeof value === 'string' && value.trim().length > 0 ? value : null
+  if (name === 'write') {
+    return typeof args.content === 'string' ? pathValue(args.file_path) : null
+  }
+  if (name === 'edit') {
+    return typeof args.old_string === 'string'
+      && args.old_string.length > 0
+      && typeof args.new_string === 'string'
+      && args.old_string !== args.new_string
+      && (args.replace_all === undefined || typeof args.replace_all === 'boolean')
+      ? pathValue(args.file_path)
+      : null
+  }
+  if (name !== 'str_replace_editor') return null
+  const target = pathValue(args.path)
+  if (!target) return null
+  if (args.command === 'create') return typeof args.file_text === 'string' ? target : null
+  if (args.command === 'str_replace') {
+    return typeof args.old_str === 'string'
+      && args.old_str.length > 0
+      && (args.new_str === undefined || typeof args.new_str === 'string')
+      ? target
+      : null
+  }
+  return args.command === 'insert'
+    && typeof args.insert_line === 'number'
+    && Number.isInteger(args.insert_line)
+    && args.insert_line >= 0
+    && typeof args.new_str === 'string'
+    ? target
+    : null
+}
+
+function sessionOutputMediaType(filePath: string): string | null {
+  const extension = path.extname(filePath).toLowerCase()
+  if (extension === '.md' || extension === '.markdown') return 'text/markdown'
+  if (extension === '.txt') return 'text/plain'
+  if (extension === '.csv') return 'text/csv'
+  if (extension === '.json') return 'application/json'
+  if (extension === '.html' || extension === '.htm') return 'text/html'
+  return null
+}
+
+async function validatedSessionOutputs(
+  inspected: { readonly cwd: string; readonly events: readonly unknown[] },
+  spec: InspectSessionOutputsSpec,
+  internals?: WorkControllerOptions['sessionOutputInternals'],
+): Promise<readonly SessionOutputFile[]> {
+  if (!Number.isSafeInteger(spec.turn) || spec.turn < 0
+    || !Number.isSafeInteger(spec.throughSeq) || spec.throughSeq < 0) {
+    throw new WorkError('work/session-output-invalid', 'Session output coordinates are invalid.')
+  }
+  const ended = inspected.events.some(value => {
+    const event = recordData(value)
+    const data = recordData(event?.data)
+    const reason = recordData(data?.reason)
+    return event?.type === 'turn/end' && data?.turn === spec.turn && reason?.kind === 'completed'
+  })
+  if (!ended) return Object.freeze([])
+  const calls = new Map<string, string | null>()
+  const paths: string[] = []
+  const seen = new Set<string>()
+  for (const value of inspected.events) {
+    const event = recordData(value)
+    const data = recordData(event?.data)
+    if (!event || !data || data.turn !== spec.turn) continue
+    const seq = typeof event.seq === 'number' ? event.seq : Number.POSITIVE_INFINITY
+    if (seq > spec.throughSeq) continue
+    if (event.type === 'tool/call' && typeof data.callId === 'string') {
+      calls.set(data.callId, sessionMutationPath(data.name, data.arguments))
+      continue
+    }
+    if (event.type !== 'tool/result' || event.surfaceOp !== 'append') continue
+    const message = recordData(data.message)
+    const source = recordData(message?.source)
+    const content = Array.isArray(message?.content) ? message.content : []
+    const result = recordData(content[0])
+    if (typeof source?.callId !== 'string' || result?.type !== 'tool-result' || result.isError === true) continue
+    const producedPath = calls.get(source.callId)
+    if (!producedPath || seen.has(producedPath)) continue
+    seen.add(producedPath)
+    paths.push(producedPath)
+  }
+  let workspacePath: string
+  try {
+    workspacePath = await fs.realpath(inspected.cwd)
+  } catch (cause) {
+    throw new WorkError('work/session-output-invalid', 'The Session Workspace is not readable.', { cause })
+  }
+  const outputs: SessionOutputFile[] = []
+  for (const producedPath of paths) {
+    if (outputs.length >= MAX_SESSION_OUTPUT_FILES) break
+    try {
+      const candidate = path.isAbsolute(producedPath)
+        ? producedPath
+        : path.resolve(workspacePath, producedPath)
+      const lexicalRelative = path.relative(workspacePath, candidate)
+      if (lexicalRelative === '..'
+        || lexicalRelative.startsWith(`..${path.sep}`)
+        || path.isAbsolute(lexicalRelative)) continue
+      const handle = await fs.open(
+        candidate,
+        fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK,
+      )
+      try {
+        const first = await handle.stat({ bigint: true })
+        if (!first.isFile() || first.size < 1n || first.size > BigInt(Number.MAX_SAFE_INTEGER)) continue
+        await internals?.afterFirstStat?.({
+          candidatePath: candidate,
+          producedPath,
+        })
+        const resolved = await fs.realpath(candidate)
+        const relative = path.relative(workspacePath, resolved)
+        if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) continue
+        const second = await handle.stat({ bigint: true })
+        const current = await fs.lstat(candidate, { bigint: true })
+        if (!second.isFile()
+          || second.size < 1n
+          || second.size > BigInt(Number.MAX_SAFE_INTEGER)
+          || second.dev !== first.dev
+          || second.ino !== first.ino
+          || second.size !== first.size
+          || second.mtimeNs !== first.mtimeNs
+          || second.ctimeNs !== first.ctimeNs
+          || current.dev !== second.dev
+          || current.ino !== second.ino
+          || current.size !== second.size) continue
+        const name = producedPath.split(/[\\/]/u).at(-1) ?? producedPath
+        outputs.push(Object.freeze({
+          sessionId: spec.sessionId,
+          turn: spec.turn,
+          name,
+          path: producedPath,
+          bytes: Number(second.size),
+          mediaType: sessionOutputMediaType(producedPath),
+        }))
+      } finally {
+        await handle.close()
+      }
+    } catch {
+      // A missing, transient, linked-out, or non-file path is not a product output.
+    }
+  }
+  return Object.freeze(outputs)
+}
+
 async function waitForSubmittedTurn(
   context: HarnessWorkContext,
   request: SubmitTurnRequest,
@@ -700,6 +886,14 @@ export function createHarnessWorkPort(context: HarnessWorkContext): HarnessWorkP
       const inspected = await context.sessionController.inspect(sessionId, signal)
       if (!inspected.meta.cwd) throw new Error('The current Session has no Workspace directory.')
       return inspected.meta.cwd
+    },
+    async inspectSession(sessionId, signal = new AbortController().signal) {
+      if (!context.sessionController.inspect) {
+        throw new Error('Native Session inspection is unavailable.')
+      }
+      const inspected = await context.sessionController.inspect(sessionId, signal)
+      if (!inspected.meta.cwd) throw new Error('The current Session has no Workspace directory.')
+      return Object.freeze({ cwd: inspected.meta.cwd, events: inspected.events })
     },
   }
 }
@@ -1144,6 +1338,26 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         )
       }
       return persistSessionResource(workspacePath, spec, signal, options.sessionResourceInternals)
+    },
+
+    async inspectSessionOutputs(spec, signal) {
+      if (!options.harness.inspectSession) {
+        throw new WorkError(
+          'work/session-output-invalid',
+          'This Host cannot inspect Session output events.',
+        )
+      }
+      let inspected: Awaited<ReturnType<NonNullable<HarnessWorkPort['inspectSession']>>>
+      try {
+        inspected = await options.harness.inspectSession(spec.sessionId, signal)
+      } catch (cause) {
+        throw new WorkError(
+          'work/session-output-invalid',
+          'The current Session output events are not readable.',
+          { cause },
+        )
+      }
+      return validatedSessionOutputs(inspected, spec, options.sessionOutputInternals)
     },
 
     async *follow(signal = new AbortController().signal) {

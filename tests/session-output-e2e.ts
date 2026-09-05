@@ -1,0 +1,241 @@
+import { app, BrowserWindow } from 'electron'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import net from 'node:net'
+import path from 'node:path'
+
+import { createOfficialLauncher, prepareDevelopmentProfile } from '../packages/runtime-host/official-launcher.ts'
+import { createRuntimeHost, type RuntimeHost } from '../packages/runtime-host/index.ts'
+import { installOutputTestProfile, OUTPUT_TEST_BASELINE_FILE } from './support/output-test-profile.ts'
+
+const requestedHome = process.env.DSH_WORK_E2E_HOME
+if (!requestedHome) throw new Error('explicit Session output test home is required')
+const home = requestedHome
+const requestedNode = process.env.DSH_WORK_NODE
+if (!requestedNode) throw new Error('explicit standalone Node is required; no global fallback')
+const node = requestedNode
+const output = path.resolve('artifacts/session-output')
+const reportPath = path.join(output, 'result.json')
+fs.mkdirSync(output, { recursive: true })
+app.setPath('userData', path.join(home, 'electron'))
+app.commandLine.appendSwitch('disable-background-networking')
+app.commandLine.appendSwitch('force-device-scale-factor', '1')
+
+let step = 'boot'
+let host: RuntimeHost | null = null
+let window: BrowserWindow | null = null
+const report = (status: 'pass' | 'fail', detail?: string): void => {
+  fs.writeFileSync(reportPath, JSON.stringify({ status, step, detail }, null, 2))
+}
+report('fail')
+
+async function reserveLoopbackPort(): Promise<number> {
+  const server = net.createServer()
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  const address = server.address()
+  assert.ok(address && typeof address === 'object')
+  await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+  return address.port
+}
+
+async function waitFor<T>(
+  read: () => Promise<T>,
+  accept: (value: T) => boolean,
+  message: string,
+  timeoutMs = 12_000,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      const value = await read()
+      if (accept(value)) return value
+    } catch {}
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+  throw new Error(message)
+}
+
+async function run(): Promise<void> {
+  await app.whenReady()
+  try {
+    step = 'prepare-profile'; report('fail')
+    prepareDevelopmentProfile(home)
+    installOutputTestProfile(home)
+    const patchPath = path.join(home, 'profiles/dsh-work/cordis.patch.yml')
+    const patch = JSON.parse(fs.readFileSync(patchPath, 'utf8')) as Array<{
+      id?: string
+      config?: { printUrl?: boolean }
+    }>
+    const webRuntime = patch.find(row => row.id === 'web-runtime')
+    assert.ok(webRuntime?.config)
+    webRuntime.config.printUrl = true
+    fs.writeFileSync(patchPath, JSON.stringify(patch))
+
+    step = 'launch-runtime'; report('fail')
+    const port = await reserveLoopbackPort()
+    const origin = `http://127.0.0.1:${String(port)}`
+    const launch = createOfficialLauncher({ node, home, port })
+    let resolveUrl!: (url: string) => void
+    const announcedUrl = new Promise<string>(resolve => { resolveUrl = resolve })
+    host = createRuntimeHost({ launch: () => {
+      const child = launch()
+      let stdout = ''
+      child.stdout.on('data', bytes => {
+        stdout = (stdout + bytes.toString('utf8')).slice(-4_096)
+        const match = stdout.match(/dsh web: (http:\/\/[^\s]+)/)
+        if (match?.[1]) resolveUrl(match[1])
+      })
+      return child
+    } })
+    assert.equal((await host.start()).state, 'ready')
+    const authenticated = await Promise.race([
+      announcedUrl,
+      new Promise<never>((_, reject) => setTimeout(
+        () => reject(new Error('Harness did not announce its authenticated URL')),
+        5_000,
+      )),
+    ])
+
+    step = 'open-native-shell'; report('fail')
+    window = new BrowserWindow({
+      width: 1440,
+      height: 900,
+      useContentSize: true,
+      show: false,
+      backgroundColor: '#f5f6f4',
+      webPreferences: {
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+        webSecurity: true,
+        backgroundThrottling: false,
+      },
+    })
+    window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    window.webContents.on('will-navigate', (event, url) => {
+      if (new URL(url).origin !== origin) event.preventDefault()
+    })
+    await window.loadURL(authenticated)
+    const js = <T = unknown>(source: string): Promise<T> =>
+      window!.webContents.executeJavaScript(source) as Promise<T>
+    await waitFor(
+      () => js<boolean>("(() => { for (const label of ['继续', '稍后配置']) { const button = Array.from(document.querySelectorAll('button')).find(item => item.textContent?.trim() === label); if (button instanceof HTMLButtonElement) button.click() } return Boolean(document.querySelector('[data-composer-input]')) && document.body.innerText.includes('成果会话甲') && document.body.innerText.includes('成果会话乙') })()"),
+      value => value,
+      'Output fixture did not become ready',
+    )
+    const baseline = JSON.parse(fs.readFileSync(path.join(home, OUTPUT_TEST_BASELINE_FILE), 'utf8')) as {
+      ordinaryPrompt: string
+      generateAPrompt: string
+      generateBPrompt: string
+      workspacePath: string
+    }
+    const clickSession = async (title: string): Promise<void> => {
+      const source = "(() => { const row = Array.from(document.querySelectorAll('[role=treeitem]')).find(item => item.textContent?.includes(" + JSON.stringify(title) + ")); if (!(row instanceof HTMLElement)) return false; row.click(); return true })()"
+      assert.equal(await js<boolean>(source), true)
+    }
+    const setDraft = async (text: string): Promise<string> => {
+      const source = "(async () => { const input = document.querySelector('[data-composer-input]'); if (!(input instanceof HTMLElement)) return ''; input.focus(); input.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: " + JSON.stringify(text) + ", bubbles: true, cancelable: true })); await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); return input.textContent ?? '' })()"
+      return js<string>(source)
+    }
+    const send = async (text: string): Promise<void> => {
+      assert.equal(await setDraft(text), text)
+      const clicked = await js<boolean>("(() => { const input = document.querySelector('[data-composer-input]'); const card = input?.closest('[data-composer-card]'); const buttons = card?.querySelectorAll('button'); const button = buttons?.item((buttons?.length ?? 0) - 1); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()")
+      assert.equal(clicked, true)
+    }
+
+    step = 'ordinary-reply'; report('fail')
+    await clickSession('成果会话甲')
+    await send(baseline.ordinaryPrompt)
+    await waitFor(
+      () => js<string>('document.body.innerText'),
+      text => text.includes('这是没有文件的普通回复。'),
+      'Ordinary reply did not complete',
+    )
+    assert.equal(await js<number>("document.querySelectorAll('[data-work-session-outputs]').length"), 0)
+    assert.equal(await js<number>("document.querySelectorAll('[data-produced-files-row]').length"), 0)
+
+    step = 'other-session-output'; report('fail')
+    await clickSession('成果会话乙')
+    await send(baseline.generateBPrompt)
+    await waitFor(
+      () => js<string[]>("Array.from(document.querySelectorAll('[data-work-session-output]')).map(item => item.textContent?.trim() ?? '')"),
+      values => values.length === 1 && values[0]?.includes('other-session.md') === true,
+      'Session B real output did not appear',
+    )
+    assert.equal(fs.readFileSync(path.join(baseline.workspacePath, 'other-session.md'), 'utf8'), '# 乙报告\n')
+
+    step = 'current-turn-files'; report('fail')
+    await clickSession('成果会话甲')
+    await waitFor(
+      () => js<number>("document.querySelectorAll('[data-work-session-output]').length"),
+      count => count === 0,
+      'Session B output leaked into Session A',
+    )
+    await js("window.__dshWorkOutputSelections = []; window.addEventListener('dsh-work:select-session-output', event => { event.preventDefault(); window.__dshWorkOutputSelections.push(event.detail) })")
+    await send(baseline.generateAPrompt)
+    const names = await waitFor(
+      () => js<string[]>("Array.from(document.querySelectorAll('[data-work-session-output] strong')).map(item => item.textContent ?? '')"),
+      values => values.length === 2,
+      'Two validated Session A outputs did not appear',
+    )
+    assert.deepEqual(names, ['report-a.md', 'report-b.csv'])
+    assert.equal(await js<boolean>("document.body.innerText.includes('empty.md')"), false)
+    assert.equal(await js<number>("document.querySelectorAll('[data-work-session-outputs]').length"), 1)
+    assert.equal(await js<number>("document.querySelectorAll('[data-produced-files-row]').length"), 0)
+    assert.equal(fs.readFileSync(path.join(baseline.workspacePath, 'report-a.md'), 'utf8'), '# 甲报告\n')
+    assert.equal(fs.readFileSync(path.join(baseline.workspacePath, 'report-b.csv'), 'utf8'), 'name,value\nalpha,1\n')
+    assert.equal(fs.statSync(path.join(baseline.workspacePath, 'empty.md')).size, 0)
+
+    const selectAt = async (index: number): Promise<string> => {
+      const source = "(() => { const buttons = document.querySelectorAll('[data-work-session-output]'); const button = buttons.item(" + String(index) + "); if (!(button instanceof HTMLButtonElement)) return ''; button.click(); return button.getAttribute('data-work-session-output') ?? '' })()"
+      return js<string>(source)
+    }
+    assert.equal(await selectAt(0), 'report-a.md')
+    await waitFor(
+      () => js<number>("window.__dshWorkOutputSelections?.length ?? 0"),
+      count => count === 1,
+      'First output selection was not published',
+    )
+    assert.equal(await js<string>("document.querySelector('[data-work-session-output][aria-pressed=true]')?.getAttribute('data-work-session-output') ?? ''"), 'report-a.md')
+    assert.equal(await selectAt(1), 'report-b.csv')
+    await waitFor(
+      () => js<number>("window.__dshWorkOutputSelections?.length ?? 0"),
+      count => count === 2,
+      'Second output selection was not published',
+    )
+    assert.equal(await js<string>("document.querySelector('[data-work-session-output][aria-pressed=true]')?.getAttribute('data-work-session-output') ?? ''"), 'report-b.csv')
+    const selected = await js<Array<{ path: string }>>("window.__dshWorkOutputSelections")
+    assert.deepEqual(selected.map(item => item.path), ['report-a.md', 'report-b.csv'])
+    fs.writeFileSync(path.join(output, 'files.png'), (await window.webContents.capturePage()).toPNG())
+
+    step = 'retain-original-turn'; report('fail')
+    await send(baseline.ordinaryPrompt)
+    await waitFor(
+      () => js<number>("document.body.innerText.split('这是没有文件的普通回复。').length - 1"),
+      count => count >= 2,
+      'Second ordinary reply did not complete',
+    )
+    assert.equal(await js<number>("document.querySelectorAll('[data-work-session-outputs]').length"), 1)
+    assert.deepEqual(await js<string[]>("Array.from(document.querySelectorAll('[data-work-session-output] strong')).map(item => item.textContent ?? '')"), ['report-a.md', 'report-b.csv'])
+
+    await host.stop()
+    host = null
+    step = 'complete'; report('pass')
+  } catch (error) {
+    const detail = error instanceof Error ? error.stack ?? error.message : 'unknown failure'
+    report('fail', detail)
+    if (window && !window.isDestroyed()) {
+      fs.writeFileSync(path.join(output, 'failure.png'), (await window.webContents.capturePage()).toPNG())
+    }
+    process.exitCode = 1
+  } finally {
+    await host?.stop().catch(() => {})
+    window?.destroy()
+    app.exit(typeof process.exitCode === 'number' ? process.exitCode : 0)
+  }
+}
+
+void run()

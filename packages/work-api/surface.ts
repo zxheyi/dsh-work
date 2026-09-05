@@ -16,7 +16,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 
 import type { IWorks, WorkClientSnapshot } from './client-model.ts'
-import type { WorkView } from './index.ts'
+import type { WorkSessionOutputFile, WorkView } from './index.ts'
 import type { WorkDeliverableContent } from './index.ts'
 
 interface WorkSurfaceInjected {
@@ -47,6 +47,22 @@ interface NativeSessionResourceProps extends WorkSurfaceInjected {
   readonly session: { readonly sessionId: string }
   readonly input: { readonly draft: string; readonly phase: string }
   readonly inputActions: { readonly setDraft: (text: string) => void }
+}
+
+interface SessionOutputsMatch {
+  readonly turn: number
+  readonly throughSeq: number
+}
+
+interface SessionOutputsOwner {
+  readonly turn: { readonly turn: number }
+  readonly seq: number
+}
+
+interface NativeSessionOutputsProps extends WorkSurfaceInjected {
+  readonly matched: SessionOutputsMatch
+  readonly sessionId: string
+  readonly openFile: (path: string) => void
 }
 
 const sessionResourceEntries = new Map<string, readonly SessionResourceEntryState[]>()
@@ -911,6 +927,67 @@ export function WorkHomeSurface({ works }: WorkSurfaceInjected): ReactNode {
             : h('p', { className: 'dsh-work-list-empty' }, '从上面的目标开始你的第一项工作。')))))
 }
 
+function outputSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function NativeSessionOutputs({ matched, openFile, sessionId, works }: NativeSessionOutputsProps): ReactNode {
+  const [files, setFiles] = useState<readonly WorkSessionOutputFile[]>(Object.freeze([]))
+  const [selectedPath, setSelectedPath] = useState<string | null>(null)
+
+  useEffect(() => {
+    const abort = new AbortController()
+    setFiles(Object.freeze([]))
+    setSelectedPath(null)
+    void works.inspectSessionOutputs({
+      sessionId,
+      turn: matched.turn,
+      throughSeq: matched.throughSeq,
+    }, abort.signal).then(value => {
+      setFiles(value)
+    }).catch(() => {
+      if (!abort.signal.aborted) {
+        setFiles(Object.freeze([]))
+      }
+    })
+    return () => abort.abort()
+  }, [matched.throughSeq, matched.turn, sessionId, works])
+
+  if (files.length < 1) return null
+  return h('div', {
+    className: 'dsh-work-session-outputs',
+    'data-work-session-outputs': true,
+    'data-work-session-output-turn': String(matched.turn),
+  },
+  h('span', { className: 'dsh-work-session-outputs-label' }, '成果'),
+  h('div', { className: 'dsh-work-session-outputs-row' }, ...files.map(file => h('button', {
+    type: 'button',
+    key: file.path,
+    title: file.path,
+    className: `dsh-work-session-output${selectedPath === file.path ? ' is-selected' : ''}`,
+    'data-work-session-output': file.path,
+    'aria-pressed': selectedPath === file.path,
+    onClick: () => {
+      setSelectedPath(file.path)
+      const selection = new CustomEvent('dsh-work:select-session-output', {
+        cancelable: true,
+        detail: Object.freeze({
+          sessionId: file.sessionId,
+          turn: file.turn,
+          path: file.path,
+        }),
+      })
+      if (window.dispatchEvent(selection)) openFile(file.path)
+    },
+  },
+  h('span', { className: 'dsh-work-session-output-icon', 'aria-hidden': 'true' }, '文'),
+  h('span', { className: 'dsh-work-session-output-copy' },
+    h('strong', null, file.name),
+    h('small', null, outputSize(file.bytes)))))))
+}
+
 const styles = `
 :root {
   --work-bg: #f5f6f4;
@@ -953,6 +1030,18 @@ body[data-ds-dark-theme] {
 .dsh-work-native-brand-mark { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: white; background: #365eca; font: 700 13px/1 var(--work-font); }
 [data-approval-key] { font-family: var(--work-font); }
 [data-approval-key] > div { border-color: color-mix(in srgb, var(--work-warning) 46%, var(--work-border)) !important; border-radius: 14px !important; box-shadow: var(--work-shadow) !important; }
+.dsh-work-session-outputs { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 8px; margin-top: 16px; color: var(--work-text); font-family: var(--work-font); }
+.dsh-work-session-outputs-label { color: var(--work-faint); font-size: 13px; line-height: 22px; }
+.dsh-work-session-outputs-row { min-width: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.dsh-work-session-output { min-width: 0; max-width: 260px; display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 8px; padding: 7px 10px 7px 8px; border: 1px solid var(--work-border); border-radius: 9px; color: var(--work-text); background: var(--work-surface); text-align: left; cursor: pointer; font-family: var(--work-font); }
+.dsh-work-session-output:hover { border-color: var(--work-border-strong); background: var(--work-surface-subtle); }
+.dsh-work-session-output.is-selected { border-color: var(--work-accent); box-shadow: inset 0 0 0 1px var(--work-accent); }
+.dsh-work-session-output:focus-visible { outline: 2px solid var(--work-accent); outline-offset: 2px; }
+.dsh-work-session-output-icon { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; color: var(--work-accent); background: var(--work-accent-subtle); font-size: 10px; font-weight: 700; }
+.dsh-work-session-output-copy { min-width: 0; }
+.dsh-work-session-output-copy strong, .dsh-work-session-output-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-work-session-output-copy strong { font-size: 12px; line-height: 17px; }
+.dsh-work-session-output-copy small { color: var(--work-faint); font-size: 10px; line-height: 14px; }
 .dsh-work-legacy-deliverable-open { min-width: 30px; height: 30px; padding: 0 9px; border: 1px solid var(--work-border); border-radius: 6px; color: var(--work-muted); background: var(--work-surface); cursor: pointer; font: 550 12px/1 var(--work-font); white-space: nowrap; }
 .dsh-work-legacy-deliverable-open:hover { color: var(--work-accent); border-color: var(--work-accent); }
 .dsh-work-legacy-deliverable-overlay { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 28px; background: rgb(20 24 32 / .28); pointer-events: auto; }
@@ -1174,6 +1263,15 @@ export function registerWorkSurface(ctx: Context, works: IWorks): () => void {
     label: '添加资料',
     inject: () => ({ works }),
   }, NativeSessionResourceEntry))
+  ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
+    name: 'conversation.chat.turnTail',
+    priority: -100,
+    select: (owner: SessionOutputsOwner) => Object.freeze({
+      turn: owner.turn.turn,
+      throughSeq: owner.seq,
+    }),
+    inject: () => ({ works }),
+  }, NativeSessionOutputs))
   ctx.slots.inject('sidebar.brand.mark', () => ctx.slots.register({
     name: 'sidebar.brand.mark',
     priority: -100,

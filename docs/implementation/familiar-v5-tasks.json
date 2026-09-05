@@ -157,7 +157,7 @@
       "files": "packages/work-domain/index.ts；packages/work-api/index.ts；packages/work-api/remote.ts；packages/work-api/surface.ts",
       "verification": "事件关联与文件校验集成、双文件 E2E、输出卡截图",
       "limits": "解除单一 deliverable 限制需按 T01 的契约演进；文件标题来自真实文件。",
-      "status": "pending"
+      "status": "verified"
     },
     {
       "id": "T09",
