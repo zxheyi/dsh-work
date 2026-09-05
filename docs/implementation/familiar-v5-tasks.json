@@ -62,7 +62,7 @@
       "files": "packages/work-api/surface.ts；packages/work-api/client-model.ts；原生模型/会话公共服务",
       "verification": "模型集成、连接失败负向、普通聊天 E2E、首次连接截图",
       "limits": "不新建凭据系统；图上的“默认模型”应绑定真实选择。",
-      "status": "pending"
+      "status": "verified"
     },
     {
       "id": "T04",

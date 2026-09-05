@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-work-chat-test-model
+      name: '@dsh-work/chat-test-model'

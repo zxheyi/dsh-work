@@ -22,6 +22,8 @@
     "test:work-ui": "node scripts/run-work-home-test.mjs",
     "pretest:work-shell": "pnpm build",
     "test:work-shell": "node scripts/run-desktop-work-shell-test.mjs",
+    "pretest:conversation": "pnpm build",
+    "test:conversation": "node scripts/run-native-conversation-test.mjs",
     "pretest:work-persistence": "pnpm build",
     "test:work-persistence": "node scripts/run-desktop-work-persistence-test.mjs",
     "predesktop": "pnpm build",

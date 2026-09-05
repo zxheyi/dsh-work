@@ -65,4 +65,13 @@ T01-T22 cover the main product implementation. D01-D03 remain follow-on epics fr
 - Verification: Work Client bundle and frozen dependency tests passed 2/2; TypeScript passed; real alpha.2 Loader/Profile/runtime integration passed 11/11; 1440×900 Work UI acceptance passed; authenticated desktop Shell E2E passed with sandbox, navigation and clean-stop assertions.
 - First-run alpha.2 still presents its native internal-testing/model onboarding. T03 owns the exact missing-model and draft-preservation behavior; T02 does not claim credentials or a live model were verified.
 
+### T03 First connection and ordinary conversation
+
+- Kept production routing inside the locked Harness model directory, per-Session model projection and native composer. DSH Work adds no credential store, provider picker or duplicate message path.
+- Added an isolated test Profile bundle that registers a public `LlmAdapter`, two advertised models and one fixed Workspace/Session only inside disposable acceptance homes. The production Profile and shipped bundles do not load this fixture.
+- The two-phase desktop acceptance proves that an unroutable default locks both Enter and Send with native guidance. In one connected Profile and Session, withdrawing the selected route locks a populated composer without submitting, reloading through the native setup prompt preserves the draft, and restoring the route unlocks that same draft. Changing to the second catalog model also preserves it.
+- After reconnection, two prompts and responses remain in that durable Session. The native Stop action must abort a deliberately delayed third model request within three seconds; waiting for the fixture to finish cannot satisfy the check.
+- The connected ordinary-chat flow leaves the Workspace empty and renders no Markdown result or delivery action. The selected model is read from the real Host model catalog rather than a client constant.
+- Verification: `pnpm typecheck`, `pnpm test` (130/130) and `pnpm check` passed; `DSH_WORK_NODE=<locked-node> pnpm test:conversation` passed both missing and connected phases, including the plain-JSONL test-only persistence record. Screenshots are written to ignored `artifacts/conversation/` for local review.
+
 Further entries record actual commands and results, not intended verification. Human usability, Windows and live-model evidence must remain explicitly pending until obtained.
