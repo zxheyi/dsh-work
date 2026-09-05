@@ -2,6 +2,8 @@
 
 Status: implemented
 
+Historical receipt for the 2026-09-02 Work-first shell. Its S1/S2 product presentation and corresponding non-goals are superseded for new implementation by [Familiar Work v5](familiar-work-v5.md) and [ADR 0014](../decisions/0014-familiar-conversations-and-versioned-files.md). S3-S6 security, lifecycle and persistence guarantees remain required. The receipt below is retained as historical evidence, not evidence for the new interface.
+
 ## User outcome
 
 When a user opens DSH Work, the desktop starts its managed Harness runtime and enters the real Work home. The product does not ask the user to understand DSH Web, Workspace, Session, Profile, models, or plugins. Runtime failure returns to a product recovery screen, and a clean restart restores the same Work.

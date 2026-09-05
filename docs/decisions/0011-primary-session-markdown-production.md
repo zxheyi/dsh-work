@@ -4,6 +4,8 @@ Status: implemented
 
 Date: 2026-09-02
 
+Product direction note (2026-09-05): Single fixed outcome as the product-wide constraint is superseded for new implementation by [ADR 0014](0014-familiar-conversations-and-versioned-files.md). This historical decision and its original evidence remain intact; ownership, file containment and request-correlation guarantees still apply.
+
 ## Problem
 
 The first product slice needs one result that an ordinary user can recognize and review. Merely recording an arbitrary existing Workspace file does not cause Harness to produce an outcome, while treating an assistant message as the outcome would detach review and delivery from a durable file.

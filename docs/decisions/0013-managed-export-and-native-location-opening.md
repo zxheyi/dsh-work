@@ -4,6 +4,8 @@ Status: implemented
 
 Date: 2026-09-02
 
+Product direction note (2026-09-05): Completed-only delivery and disabling revisions after acceptance are superseded for new implementation by [ADR 0014](0014-familiar-conversations-and-versioned-files.md). This historical decision and its original evidence remain intact; ownership, file containment and request-correlation guarantees still apply.
+
 ## Problem
 
 Work completion and delivery are different user decisions. Marking a Work complete should mean “I accept this result”; delivery should require a successful file export. Changing status without copying a file would claim an outcome that the user cannot take away.

@@ -4,6 +4,8 @@ Status: accepted
 
 Date: 2026-09-01
 
+Product direction note (2026-09-05): Required Work topology and completion/delivery semantics are superseded for new implementation by [ADR 0014](0014-familiar-conversations-and-versioned-files.md). This historical decision and its original evidence remain intact; ownership, file containment and request-correlation guarantees still apply.
+
 ## Problem
 
 DSH Work needs a durable product object for the thing an ordinary user is trying to finish. DeepSeek Harness already provides Workspace, Session, Turn, Agent, tool, permission, Profile, Bundle, and plugin lifecycles, but none of those objects represents the complete user outcome.

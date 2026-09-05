@@ -4,6 +4,8 @@ Status: implemented
 
 Date: 2026-09-02
 
+Product direction note (2026-09-05): Source-only preview and same-path-only version semantics are superseded for new implementation by [ADR 0014](0014-familiar-conversations-and-versioned-files.md). This historical decision and its original evidence remain intact; ownership, file containment and request-correlation guarantees still apply.
+
 ## Problem
 
 A generated file is not a usable Work outcome until the user can inspect it and request changes. A full in-app editor would require selection semantics, conflict handling, autosave, undo, accessibility, large-document behavior and a second write owner alongside Harness tools. Opening an external editor alone would also break the product's goal-first review loop.

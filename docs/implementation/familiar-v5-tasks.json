@@ -1,0 +1,511 @@
+{
+  "title": "DSH Work 最新设计实施任务",
+  "date": "2026-09-05",
+  "revision": "60812cc",
+  "source": "docs/design/familiar-v5/requirements.json",
+  "status": "authorized for sequential local implementation and independent commits",
+  "tasks": [
+    {
+      "id": "T01",
+      "title": "同步新产品契约与旧数据兼容方案",
+      "phase": "准备",
+      "dependsOn": [],
+      "requirements": [
+        "R02",
+        "R03",
+        "R04",
+        "R11",
+        "R12",
+        "R16"
+      ],
+      "owner": "产品 / 架构",
+      "scope": "把最新版 PRD 作为本次产品行为依据，记录 Work 可选关联、Workspace 多会话、保存不依赖采用三项变化；为 ADR 0006/0012/0013 与旧 Shell S1/S2 写后继决策和新验收草案。",
+      "acceptance": "形成逐条旧新语义映射；历史文档保留；明确旧 completed/delivered 数据不能伪造版本；决策正式接受后才合入依赖实现。",
+      "files": "docs/product-scope.md；docs/decisions/；docs/acceptance/desktop-work-shell.md",
+      "verification": "文档/决策审查、PRD 映射、契约门禁",
+      "limits": "不在此任务升级 Harness，也不直接删除旧 Work 数据。",
+      "status": "verified"
+    },
+    {
+      "id": "T02",
+      "title": "恢复原生两栏会话壳并验证插件组合",
+      "phase": "准备",
+      "dependsOn": [
+        "T01"
+      ],
+      "requirements": [
+        "R03",
+        "R04"
+      ],
+      "owner": "客户端 / Harness 集成",
+      "scope": "用已锁定 alpha.2 公共插槽组合原生侧栏、会话和输入，移除目标表单作为主入口；按设计统一浅色、字体、间距和控件，设置仍可达。 Existing records retain a temporary explicit legacy access path until T04 maps their Sessions.",
+      "acceptance": "真实 Profile 能加载/卸载；新窗口显示两栏；默认不打开文件面板；模型、模式、权限原生能力保留；原生贡献没有被重复渲染。",
+      "files": "packages/work-api/surface.ts；packages/work-api/client.ts；packages/work-bundle/",
+      "verification": "Loader/Profile smoke、Shell E2E、1440×900 截图",
+      "limits": "发现公共扩展缺口先出证据与上游方案，不复制私有实现；新旧图的细微像素差以统一 token 为准。",
+      "status": "pending"
+    },
+    {
+      "id": "T03",
+      "title": "首次连接与普通聊天贯通",
+      "phase": "会话与文件",
+      "dependsOn": [
+        "T02"
+      ],
+      "requirements": [
+        "R01",
+        "R04"
+      ],
+      "owner": "客户端 / Harness 集成",
+      "scope": "复用模型设置，缺少连接时提示；已连接可直接问答、追问和停止，在同一个原生输入框选择模型与模式。",
+      "acceptance": "未连接时按钮与 Enter 都不能执行；连接后保留草稿；连续追问保持 Session；普通回复不自动生成成果；模型选择来自真实目录。",
+      "files": "packages/work-api/surface.ts；packages/work-api/client-model.ts；原生模型/会话公共服务",
+      "verification": "模型集成、连接失败负向、普通聊天 E2E、首次连接截图",
+      "limits": "不新建凭据系统；图上的“默认模型”应绑定真实选择。",
+      "status": "pending"
+    },
+    {
+      "id": "T04",
+      "title": "在工作区内创建多条会话",
+      "phase": "会话与文件",
+      "dependsOn": [
+        "T02"
+      ],
+      "requirements": [
+        "R02",
+        "R16"
+      ],
+      "owner": "领域 / Harness 集成",
+      "scope": "通过原生 Workspace/Session 服务确认目录并新建会话，解除新建会话必须新建 Work 与目录的绑定；旧 Work 先以兼容映射入口可读。",
+      "acceptance": "一个目录可建立两条不同会话；新建不移动旧文件；添加资料不增建 Workspace；重启仍能打开原会话；不存在可用目录时给出明确选择入口。",
+      "files": "packages/work-domain/index.ts；packages/work-api/index.ts；packages/work-api/remote.ts；packages/work-api/client-model.ts",
+      "verification": "Workspace/Session 集成、创建中断恢复、双会话重启 E2E",
+      "limits": "保持现有存储可回读；完整批量迁移另列 D01。",
+      "status": "pending"
+    },
+    {
+      "id": "T05",
+      "title": "会话切换、搜索与归档准确生效",
+      "phase": "会话与文件",
+      "dependsOn": [
+        "T04"
+      ],
+      "requirements": [
+        "R02",
+        "R03"
+      ],
+      "owner": "客户端 / 领域",
+      "scope": "让所有动作绑定实际选中的会话，替换 snapshot.items[0] 假设；接入原生搜索/归档能力并处理空列表、无结果和草稿。",
+      "acceptance": "切换两条会话不会串消息、附件和文件；搜索可定位后打开；无结果可退出搜索；归档不删除文件；切换前草稿返回后仍在。",
+      "files": "packages/work-api/surface.ts；packages/work-api/client-model.ts；公开导航服务",
+      "verification": "选择态集成、搜索/归档/草稿 E2E、空态截图",
+      "limits": "公共能力不足时回到 T02 的兼容性核验，不复制 Session 存储。",
+      "status": "pending"
+    },
+    {
+      "id": "T06",
+      "title": "在原输入框导入资料并发送",
+      "phase": "会话与文件",
+      "dependsOn": [
+        "T03",
+        "T05"
+      ],
+      "requirements": [
+        "R05"
+      ],
+      "owner": "客户端 / 文件能力",
+      "scope": "把已有受管文件复制能力接到附件按钮和拖放入口，展示文件名、复制语义、进度与失败，附件随当前请求提交。",
+      "acceptance": "源文件保持原样；成功资料可核对受管路径；失败附件不当作已读；可移除或重试；切换会话不串附件；大小/格式/路径拒绝有反馈。",
+      "files": "packages/work-domain/index.ts；packages/work-api/index.ts；packages/work-api/remote.ts；packages/work-api/surface.ts",
+      "verification": "文件字节/路径负向集成、导入发送 E2E、生成中截图",
+      "limits": "首批明确支持的可解析格式，不把可上传等同可理解。",
+      "status": "pending"
+    },
+    {
+      "id": "T07",
+      "title": "在会话内处理权限请求",
+      "phase": "会话与文件",
+      "dependsOn": [
+        "T03",
+        "T05"
+      ],
+      "requirements": [
+        "R13"
+      ],
+      "owner": "Harness 集成 / 客户端",
+      "scope": "使用原生授权卡说明操作与范围，展示允许一次和拒绝；等待期间保留会话、草稿和已有文件。",
+      "acceptance": "允许一次后只执行对应受限请求；拒绝后动作没有发生且不绕过；两种结果都恢复原输入；错误不会重放审批；页面匹配权限确认图。",
+      "files": "packages/work-api/surface.ts；Harness 原生授权贡献与公共事件",
+      "verification": "授权正负集成、拒绝后继续聊天 E2E、权限图截图",
+      "limits": "不自建授权状态机，不用产品完成状态扩权。",
+      "status": "pending"
+    },
+    {
+      "id": "T08",
+      "title": "生成真实文件并显示成果入口",
+      "phase": "会话与文件",
+      "dependsOn": [
+        "T06",
+        "T07"
+      ],
+      "requirements": [
+        "R06"
+      ],
+      "owner": "领域 / 文件能力 / 客户端",
+      "scope": "保留已有 Turn 关联与文件校验，按实际生产事件登记文件；在原会话显示文件卡，支持选择当前会话中的不同文件。",
+      "acceptance": "普通回复无文件卡；不存在、空文件、半写入及越界路径不算成功；另一会话或旧 Turn 事件不串成果；两个真实文件可分别打开。",
+      "files": "packages/work-domain/index.ts；packages/work-api/index.ts；packages/work-api/remote.ts；packages/work-api/surface.ts",
+      "verification": "事件关联与文件校验集成、双文件 E2E、输出卡截图",
+      "limits": "解除单一 deliverable 限制需按 T01 的契约演进；文件标题来自真实文件。",
+      "status": "pending"
+    },
+    {
+      "id": "T09",
+      "title": "在右侧安全阅读 Markdown",
+      "phase": "会话与文件",
+      "dependsOn": [
+        "T08"
+      ],
+      "requirements": [
+        "R07",
+        "R17"
+      ],
+      "owner": "客户端 / 文件能力",
+      "scope": "点击文件打开右侧详情，按设计渲染标题、段落、列表；关闭回到会话，按需读取内容，不把全文放入列表流。",
+      "acceptance": "预览对应选中会话和文件；切换后过期读取不能覆盖新文件；脚本、不可信 HTML 和外部资源不自动执行/加载；加载失败可重试；关闭不丢草稿。",
+      "files": "packages/work-api/surface.ts；packages/work-api/client-model.ts；packages/work-domain/index.ts",
+      "verification": "渲染安全负向、异步竞态、预览开关 E2E、成果阅读截图",
+      "limits": "依赖选择须有必要性/许可证/打包证据；不实现富文本编辑器。",
+      "status": "pending"
+    },
+    {
+      "id": "T10",
+      "title": "显示资料来源与文件分组",
+      "phase": "会话与文件",
+      "dependsOn": [
+        "T06",
+        "T09"
+      ],
+      "requirements": [
+        "R08"
+      ],
+      "owner": "领域 / 客户端",
+      "scope": "文件列表区分输入资料与生成结果；预览来源页展示实际参与生成的资料及复制/引用方式。",
+      "acceptance": "资料可追到真实文件或快照；缺失、不可访问与未验证如实标注；不创建虚构引用；同一文件不在两个成果系统重复登记。",
+      "files": "packages/work-domain/index.ts；packages/work-api/index.ts；packages/work-api/surface.ts",
+      "verification": "来源关联集成、缺失来源负向、来源页 E2E/截图",
+      "limits": "来源不是可信度评分，不从聊天措辞臆造来源。",
+      "status": "pending"
+    },
+    {
+      "id": "T11",
+      "title": "同会话修改，并保留上一有效结果",
+      "phase": "会话与文件",
+      "dependsOn": [
+        "T09"
+      ],
+      "requirements": [
+        "R09",
+        "R14"
+      ],
+      "owner": "领域 / 客户端",
+      "scope": "要求修改将文件引用带回原输入框；修订前保护上一有效字节，验证成功后才发布结果，失败可在原会话重试。",
+      "acceptance": "Session ID 不变；生成中旧结果可读；写空、损坏、中断均不丢上一有效文件；失败不显示假新版；重试不重复交付。",
+      "files": "packages/work-domain/index.ts；packages/work-api/client-model.ts；packages/work-api/surface.ts",
+      "verification": "破坏性写入/中断故障注入、同 Session 修订 E2E、失败截图",
+      "limits": "阶段 B 的恢复保护不冒充完整版本库；阶段 C 再支持选旧版修改。",
+      "status": "pending"
+    },
+    {
+      "id": "T12",
+      "title": "无需采用即可保存当前文件副本",
+      "phase": "会话与文件",
+      "dependsOn": [
+        "T09",
+        "T11"
+      ],
+      "requirements": [
+        "R12"
+      ],
+      "owner": "领域 / 文件能力 / 客户端",
+      "scope": "移除 completed 导出前置条件；保存动作捕获文件摘要，成功后显示真实受管位置；与继续聊天并存。",
+      "acceptance": "未采用文件可保存；保存字节对应点击时选定内容；失败/取消不记成功；不同内容不静默覆盖；保存后仍能修改；打开真实位置可用。",
+      "files": "packages/work-domain/index.ts；packages/work-api/remote.ts；packages/work-api/client-model.ts；packages/work-api/surface.ts",
+      "verification": "字节/冲突/重连幂等集成、保存并继续修改 E2E",
+      "limits": "首批受管保存不假装系统另存为；没有真实取消交互时不人为新增弹窗。",
+      "status": "pending"
+    },
+    {
+      "id": "T13",
+      "title": "运行时故障后回到原会话",
+      "phase": "会话与文件",
+      "dependsOn": [
+        "T05",
+        "T11",
+        "T12"
+      ],
+      "requirements": [
+        "R14"
+      ],
+      "owner": "桌面 / 生命周期 / 客户端",
+      "scope": "复用 Guardian 恢复能力，区别普通生成失败与运行时不可用；保留当前会话、文件选择和草稿，恢复后继续。",
+      "acceptance": "不可用期间拒绝依赖 runtime 的写操作；恢复不另建会话；已发生的外部操作不自动重放；原有效结果仍可恢复查看。",
+      "files": "apps/desktop/renderer.ts；apps/desktop/main.ts；packages/runtime-guardian/；packages/work-api/client-model.ts",
+      "verification": "进程故障注入、原上下文恢复 E2E、生命周期回归",
+      "limits": "不把重启服务等同重新生成，不修改现有清理与隔离安全边界。",
+      "status": "pending"
+    },
+    {
+      "id": "T14",
+      "title": "窄窗口、键盘与会话文件闭环验收",
+      "phase": "会话与文件",
+      "dependsOn": [
+        "T03",
+        "T05",
+        "T07",
+        "T10",
+        "T12",
+        "T13"
+      ],
+      "requirements": [
+        "R03",
+        "R17"
+      ],
+      "owner": "客户端 / 验证",
+      "scope": "补齐 390px/736px 窄窗口面板返回、键盘焦点、图标名称和文字状态；按图核对桌面并完成第一批可用性验收。",
+      "acceptance": "新建→导入→权限→生成→预览→修改→保存全程可操作；窄窗口无横向溢出、能返回输入；键盘完成主要动作；5名既有用户至少4名无需新术语教学完成核心流程。",
+      "files": "packages/work-api/surface.ts；tests/work-home-e2e.ts；tests/desktop-work-shell-e2e.ts；新场景验收文件",
+      "verification": "桌面/窄窗截图、键盘 E2E、真实用户观察记录",
+      "limits": "自动化与人工观察分别记录；阶段 C 未完成前不展示可点击假版本/采用功能。",
+      "status": "pending"
+    },
+    {
+      "id": "T15",
+      "title": "为成功生成保存不可变版本",
+      "phase": "版本闭环",
+      "dependsOn": [
+        "T01",
+        "T08",
+        "T11"
+      ],
+      "requirements": [
+        "R10"
+      ],
+      "owner": "领域 / 持久化",
+      "scope": "按已接受的存储决策建立文件身份与不可变快照，绑定 digest、Turn、来源和创建时间；将阶段 B 的恢复保护演进为正式版本。",
+      "acceptance": "连续两次生成得到可读且不同的快照；失败/未完成不增版本；原子发布中断可恢复；重启后摘要一致；旧记录仅从实际保有文件建立基线。",
+      "files": "packages/work-domain/index.ts；packages/work-api/index.ts；packages/work-api/remote.ts；docs/decisions/",
+      "verification": "快照集成、逐中断点恢复、重启持久化、旧数据 fixture",
+      "limits": "Work revision 不是文件版本；不把同名覆盖包装成历史。",
+      "status": "pending"
+    },
+    {
+      "id": "T16",
+      "title": "查看历史版本并指定旧版修改",
+      "phase": "版本闭环",
+      "dependsOn": [
+        "T09",
+        "T15"
+      ],
+      "requirements": [
+        "R09",
+        "R10"
+      ],
+      "owner": "客户端 / 领域",
+      "scope": "版本页列出真实快照和变更摘要；选择 v1/v2 可阅读；要求修改把选定版本引用带回原输入框。",
+      "acceptance": "查看旧版不改变当前版；内容与摘要匹配；明确以 v1 修改时请求绑定 v1；发布新版本后旧版仍在；切换竞态不显示错内容。",
+      "files": "packages/work-api/surface.ts；packages/work-api/client-model.ts；packages/work-domain/index.ts",
+      "verification": "版本读取/修订输入集成、历史选择 E2E/截图",
+      "limits": "展示的摘要需可追溯，不伪造历史时间或作者。",
+      "status": "pending"
+    },
+    {
+      "id": "T17",
+      "title": "在文件面板比较两个版本",
+      "phase": "版本闭环",
+      "dependsOn": [
+        "T16"
+      ],
+      "requirements": [
+        "R10"
+      ],
+      "owner": "客户端 / 文件能力",
+      "scope": "按版本比较图提供 v1→v2 选择和分块差异，新增/删除同时用符号、文字和颜色表达，保持原输入框可用。",
+      "acceptance": "比较方向准确；相同内容明确无变化；增加/删除行对应真实快照；切换比较不改变当前版；大文件有有界降级；差异文本不执行 HTML。",
+      "files": "packages/work-api/surface.ts；文件差异模块（位置待实现确定）",
+      "verification": "确定性差异用例、安全负向、版本比较 E2E/截图",
+      "limits": "先做 Markdown 文本差异，不承诺 Office 结构或语义差异。",
+      "status": "pending"
+    },
+    {
+      "id": "T18",
+      "title": "恢复旧版时创建新版本",
+      "phase": "版本闭环",
+      "dependsOn": [
+        "T15",
+        "T16"
+      ],
+      "requirements": [
+        "R10"
+      ],
+      "owner": "领域 / 客户端",
+      "scope": "恢复 v1 创建新的当前版本，引用原始快照；保留 v1/v2 及历史记录，界面在真正完成后更新。",
+      "acceptance": "恢复后新版本字节等于 v1；v2仍可读；请求重试不生成重复版本；中断可恢复；已有外部变更时拒绝覆盖并提示冲突。",
+      "files": "packages/work-domain/index.ts；packages/work-api/remote.ts；packages/work-api/surface.ts",
+      "verification": "恢复字节/幂等/中断/冲突集成、恢复 E2E",
+      "limits": "恢复不是删除后来历史，失败不先改当前指针。",
+      "status": "pending"
+    },
+    {
+      "id": "T19",
+      "title": "采用绑定到具体文件版本",
+      "phase": "版本闭环",
+      "dependsOn": [
+        "T15",
+        "T16"
+      ],
+      "requirements": [
+        "R11"
+      ],
+      "owner": "领域 / 客户端",
+      "scope": "以版本和摘要记录采用，区分当前版和已采用版；采用不结束会话，也不阻止下一次修改。",
+      "acceptance": "采用v1后仍可聊天/修订；产生v2后v1采用记录保留，v2默认未采用；仅追问解释不取消采用；切换文件不串采用记录。",
+      "files": "packages/work-domain/index.ts；packages/work-api/index.ts；packages/work-api/surface.ts",
+      "verification": "采用状态域集成、采用后修改 E2E、版本行标识截图",
+      "limits": "不再用 Work completed 表示所有文件都已采用。",
+      "status": "pending"
+    },
+    {
+      "id": "T20",
+      "title": "保存任意选定版本并核对记录",
+      "phase": "版本闭环",
+      "dependsOn": [
+        "T12",
+        "T16",
+        "T19"
+      ],
+      "requirements": [
+        "R12"
+      ],
+      "owner": "领域 / 客户端",
+      "scope": "保存动作绑定选定版本而不是当前指针，按钮明确 v1/v2，成功记录关联该版本与真实位置。",
+      "acceptance": "旧版未采用也可保存；导出摘要等于选定快照；切换版本与后台生成不改变在途保存对象；失败不增记录；文件名冲突不覆盖。",
+      "files": "packages/work-domain/index.ts；packages/work-api/remote.ts；packages/work-api/surface.ts",
+      "verification": "导出字节/并发选择/冲突集成、旧版保存 E2E",
+      "limits": "采用与保存两种状态保持独立。",
+      "status": "pending"
+    },
+    {
+      "id": "T21",
+      "title": "处理跨会话与外部文件修改冲突",
+      "phase": "版本闭环",
+      "dependsOn": [
+        "T15",
+        "T18",
+        "T20"
+      ],
+      "requirements": [
+        "R10",
+        "R14"
+      ],
+      "owner": "领域 / 持久化 / 验证",
+      "scope": "在同一文件的生成、恢复、采用和保存路径校验预期快照/摘要；外部编辑或另一会话先发布时明确冲突。",
+      "acceptance": "两个会话同时修订只有符合预期基线的操作发布；失败不损坏当前/旧快照；重连重试不重复发布/导出；冲突后可刷新并明确重试，不静默覆盖。",
+      "files": "packages/work-domain/index.ts；packages/work-api/remote.ts；packages/work-api/client-model.ts",
+      "verification": "双会话并发、外部改写、故障注入、Remote 租约回归",
+      "limits": "基本保护必须随 T15/T18 引入，本任务补齐跨操作交错验证与用户恢复路径。",
+      "status": "pending"
+    },
+    {
+      "id": "T22",
+      "title": "按四张设计图完成整体验收",
+      "phase": "版本闭环",
+      "dependsOn": [
+        "T14",
+        "T17",
+        "T18",
+        "T19",
+        "T20",
+        "T21"
+      ],
+      "requirements": [
+        "R01",
+        "R02",
+        "R03",
+        "R04",
+        "R05",
+        "R06",
+        "R07",
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12",
+        "R13",
+        "R14",
+        "R17"
+      ],
+      "owner": "验证 / 产品",
+      "scope": "冻结四个真实桌面状态截图，对照设计与PRD检查行为；增加未连接、生成中、空态、拒绝、修改失败和恢复场景。",
+      "acceptance": "四图主路径与所有补充状态具备实际证据；8个 PRD 场景贯通；相同文件的采用/保存/版本无状态矛盾；受影响测试与原生生命周期门禁通过。",
+      "files": "tests/；docs/acceptance/；artifacts/design/（执行时生成）",
+      "verification": "仓库门禁、Loader/Profile、E2E、截图差异与人工验收",
+      "limits": "静态图存在不代表可发布；没有真实设备/平台证据的部分单列未验证。",
+      "status": "pending"
+    },
+    {
+      "id": "D01",
+      "title": "完整旧 Work 数据迁移与回滚",
+      "phase": "后续",
+      "dependsOn": [
+        "T22"
+      ],
+      "requirements": [
+        "R16"
+      ],
+      "owner": "领域 / 桌面",
+      "scope": "将旧 Work 映射到原会话与文件，建立有版本号的迁移记录及回滚流程；已迁移数据可幂等重入。",
+      "acceptance": "原ID/会话/文件可核对；各中断点可继续或回滚；没有快照的历史明确缺失；两个客户端不能并发接管 Profile。",
+      "files": "packages/work-domain/index.ts；packages/runtime-guardian/；docs/decisions/",
+      "verification": "迁移 fixture、中断矩阵、真实旧数据副本升级/回滚",
+      "limits": "T04只要求兼容可读；完成本任务前不能宣称旧用户无损升级已通过。",
+      "status": "pending"
+    },
+    {
+      "id": "D02",
+      "title": "原生另存为及双平台桌面发布",
+      "phase": "后续",
+      "dependsOn": [
+        "D01"
+      ],
+      "requirements": [
+        "R15"
+      ],
+      "owner": "桌面 / 发布",
+      "scope": "进一步拆为 macOS 原生另存为、Windows 原生另存为、各平台打包启动/升级验证三个独立切片，复用有界可信桌面能力。",
+      "acceptance": "取消无副作用；成功后字节和位置一致；路径权限/冲突正确处理；网页拿不到任意 shell 或通用IPC；两平台各有原生构建、启动与升级证据。",
+      "files": "apps/desktop/；packages/work-api/；发布脚本与平台验收",
+      "verification": "桌面边界负向、原生系统对话框 E2E、平台打包/升级门禁",
+      "limits": "属于后续 Epic，实施前再拆至半天到一天任务；不能用模拟对话框当原生证据。",
+      "status": "pending"
+    },
+    {
+      "id": "D03",
+      "title": "按真实需求逐格式扩展",
+      "phase": "后续",
+      "dependsOn": [
+        "T22"
+      ],
+      "requirements": [
+        "R18"
+      ],
+      "owner": "产品 / 文件能力",
+      "scope": "分别调研 PDF、DOCX、表格、演示的输入解析、预览和输出矩阵；选择有证据的高频场景后单独建任务。",
+      "acceptance": "每格式能力边界明确；不能保留的属性预先说明；有内容/视觉样例与失败保留源文件的验收。",
+      "files": "后续格式方案与验收集，尚不预设依赖",
+      "verification": "格式专项内容/视觉/失败矩阵",
+      "limits": "不纳入本轮四图实现，不一次性复刻 Office。",
+      "status": "pending"
+    }
+  ]
+}
