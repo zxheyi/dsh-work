@@ -8,6 +8,7 @@ import type {
   WorkImportSessionResourceSpec,
   WorkInspectSessionOutputSourcesSpec,
   WorkInspectSessionOutputsSpec,
+  WorkPrepareSessionOutputRevisionSpec,
   WorkReadSessionOutputSpec,
   WorkListValue,
   WorkDeliverableContent,
@@ -18,6 +19,8 @@ import type {
   WorkSessionOutputFile,
   WorkSessionOutputContent,
   WorkSessionOutputSource,
+  WorkSessionOutputRevision,
+  WorkSessionOutputRevisionFailure,
   WorkSessionOutputSourcesValue,
   WorkSessionOutputsValue,
   WorkRemoteFollowFrame,
@@ -150,6 +153,23 @@ const readSessionOutputSchema: z.ZodType<WorkReadSessionOutputSpec> = z.object({
   turn: z.number().int().nonnegative(),
   throughSeq: z.number().int().nonnegative(),
   path: z.string().min(1).max(4096),
+}).strict()
+const sessionOutputRevisionSchema: z.ZodType<WorkSessionOutputRevision> = z.object({
+  sessionId: z.string().min(1).max(256),
+  sourceTurn: z.number().int().nonnegative(),
+  name: z.string().min(1).max(512),
+  path: z.string().min(1).max(4096),
+  reference: z.string().min(2).max(4099),
+  contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+}).strict()
+const sessionOutputRevisionFailureSchema: z.ZodType<WorkSessionOutputRevisionFailure> = z.object({
+  sessionId: z.string().min(1).max(256),
+  turn: z.number().int().nonnegative(),
+  name: z.string().min(1).max(512),
+  path: z.string().min(1).max(4096),
+  reference: z.string().min(2).max(4099),
+  status: z.literal('failed'),
+  message: z.string().min(1).max(512),
 }).strict()
 const sessionOutputContentSchema: z.ZodType<WorkSessionOutputContent> = z.object({
   sessionId: z.string().min(1).max(256),
@@ -325,6 +345,39 @@ export const TYPERT_REMOTE: TypertRemoteContribution = Object.freeze({
       result: strict('@dsh-work/work-api#WorkSessionOutputContent', sessionOutputContentSchema),
     }),
     Object.freeze({
+      id: '@dsh-work/work-api#work/prepareSessionOutputRevision',
+      service: 'workApi',
+      namespace: 'work',
+      method: 'prepareSessionOutputRevision',
+      invocation: Object.freeze({ kind: 'direct' as const }),
+      parameters: Object.freeze([Object.freeze({
+        name: 'spec',
+        wire: 'spec',
+        source: 'json' as const,
+        codec: strict('@dsh-work/work-api#WorkPrepareSessionOutputRevisionSpec', readSessionOutputSchema),
+      })]),
+      cancellation: Object.freeze({ parameter: 'signal' as const }),
+      result: strict('@dsh-work/work-api#WorkSessionOutputRevision', sessionOutputRevisionSchema),
+    }),
+    Object.freeze({
+      id: '@dsh-work/work-api#work/inspectSessionRevision',
+      service: 'workApi',
+      namespace: 'work',
+      method: 'inspectSessionRevision',
+      invocation: Object.freeze({ kind: 'direct' as const }),
+      parameters: Object.freeze([Object.freeze({
+        name: 'spec',
+        wire: 'spec',
+        source: 'json' as const,
+        codec: strict('@dsh-work/work-api#WorkInspectSessionOutputsSpec', inspectSessionOutputsSchema),
+      })]),
+      cancellation: Object.freeze({ parameter: 'signal' as const }),
+      result: strict(
+        '@dsh-work/work-api#WorkSessionOutputRevisionFailure',
+        sessionOutputRevisionFailureSchema.nullable(),
+      ),
+    }),
+    Object.freeze({
       id: '@dsh-work/work-api#work/follow',
       service: 'workApi',
       namespace: 'work',
@@ -368,6 +421,14 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       spec: WorkInspectSessionOutputSourcesSpec,
       signal?: AbortSignal,
     ) => Promise<RemoteResult<WorkSessionOutputSourcesValue>>
+    'work/prepareSessionOutputRevision': (
+      spec: WorkPrepareSessionOutputRevisionSpec,
+      signal?: AbortSignal,
+    ) => Promise<RemoteResult<WorkSessionOutputRevision>>
+    'work/inspectSessionRevision': (
+      spec: WorkInspectSessionOutputsSpec,
+      signal?: AbortSignal,
+    ) => Promise<RemoteResult<WorkSessionOutputRevisionFailure | null>>
     'work/readSessionOutput': (
       spec: WorkReadSessionOutputSpec,
       signal?: AbortSignal,
@@ -386,6 +447,8 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       importSessionResource: TypertRemoteMap['work/importSessionResource']
       inspectSessionOutputs: TypertRemoteMap['work/inspectSessionOutputs']
       inspectSessionOutputSources: TypertRemoteMap['work/inspectSessionOutputSources']
+      prepareSessionOutputRevision: TypertRemoteMap['work/prepareSessionOutputRevision']
+      inspectSessionRevision: TypertRemoteMap['work/inspectSessionRevision']
       readSessionOutput: TypertRemoteMap['work/readSessionOutput']
       list: TypertRemoteMap['work/list']
       follow: TypertRemoteMap['work/follow']

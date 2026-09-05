@@ -20,6 +20,7 @@ import type {
   WorkSessionOutputContent,
   WorkSessionOutputFile,
   WorkSessionOutputSource,
+  WorkSessionOutputRevisionFailure,
   WorkView,
 } from './index.ts'
 import type { WorkDeliverableContent } from './index.ts'
@@ -1127,6 +1128,7 @@ function NativeSessionOutputs({ matched, openFile, sessionId, works }: NativeSes
   const [sources, setSources] = useState<readonly WorkSessionOutputSource[]>(Object.freeze([]))
   const [sourcePhase, setSourcePhase] = useState<'loading' | 'ready' | 'error'>('loading')
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [revisionFailure, setRevisionFailure] = useState<WorkSessionOutputRevisionFailure | null>(null)
 
   useEffect(() => {
     const abort = new AbortController()
@@ -1139,9 +1141,13 @@ function NativeSessionOutputs({ matched, openFile, sessionId, works }: NativeSes
       turn: matched.turn,
       throughSeq: matched.throughSeq,
     }
-    void works.inspectSessionOutputs(spec, abort.signal).then(nextFiles => {
+    setRevisionFailure(null)
+    void works.inspectSessionRevision(spec, abort.signal).then(failure => {
       if (abort.signal.aborted) return
-      setFiles(nextFiles)
+      setRevisionFailure(failure)
+      return works.inspectSessionOutputs(spec, abort.signal).then(nextFiles => {
+        if (!abort.signal.aborted) setFiles(nextFiles)
+      })
     }).catch(() => {
       if (!abort.signal.aborted) setFiles(Object.freeze([]))
     })
@@ -1158,7 +1164,7 @@ function NativeSessionOutputs({ matched, openFile, sessionId, works }: NativeSes
     return () => abort.abort()
   }, [matched.throughSeq, matched.turn, sessionId, works])
 
-  if (files.length < 1) return null
+  if (files.length < 1 && !revisionFailure) return null
   const verifiedCount = sources.filter(source => source.status === 'verified').length
   const sourceSummary = verifiedCount > 0
     ? `已读取 ${String(verifiedCount)} 份资料`
@@ -1169,6 +1175,21 @@ function NativeSessionOutputs({ matched, openFile, sessionId, works }: NativeSes
     'data-work-session-output-turn': String(matched.turn),
     'data-work-session-sources-phase': sourcePhase,
   },
+  revisionFailure ? h('div', {
+    className: 'dsh-work-session-revision-failure',
+    role: 'alert',
+    'data-work-session-revision-failure': revisionFailure.path,
+  },
+  h('span', null,
+    h('strong', null, `${revisionFailure.name} 修改失败`),
+    h('small', null, revisionFailure.message)),
+  h('button', {
+    type: 'button',
+    onClick: () => window.dispatchEvent(new CustomEvent<SessionResourceReferenceDetail>(
+      'dsh-work:reference-session-resource',
+      { detail: Object.freeze({ sessionId: revisionFailure.sessionId, path: revisionFailure.path }) },
+    )),
+  }, '在原会话重试')) : null,
   sources.length > 0 ? h('div', {
     className: 'dsh-work-session-sources',
     'data-work-session-sources': true,
@@ -1270,9 +1291,11 @@ function NativeSessionOutputPreview({
     | { readonly phase: 'idle' | 'loading' | 'error' }
     | { readonly phase: 'ready'; readonly sources: readonly WorkSessionOutputSource[] }
   >({ phase: 'idle' })
+  const [revisionPhase, setRevisionPhase] = useState<'idle' | 'preparing' | 'error'>('idle')
 
   useEffect(() => {
     setTab('content')
+    setRevisionPhase('idle')
   }, [selection?.path, selection?.sessionId])
 
   useEffect(() => {
@@ -1401,7 +1424,37 @@ function NativeSessionOutputPreview({
             h('strong', null, '暂时无法读取文件'),
             h('p', null, '文件可能已移动、仍在写入或内容过大。'),
             h('button', { type: 'button', onClick: () => setRetry(value => value + 1) }, '重试'))
-          : safeMarkdownContent(state.content)))
+          : safeMarkdownContent(state.content)),
+  !unsupported ? h('footer', { className: 'dsh-work-output-preview-actions' },
+    revisionPhase === 'error'
+      ? h('span', { role: 'alert' }, '无法保护当前文件，请重新读取后再试。')
+      : h('span', null, '修改会继续使用当前会话'),
+    h('button', {
+      type: 'button',
+      disabled: state.phase !== 'ready' || revisionPhase === 'preparing',
+      onClick: () => {
+        const target = selection
+        setRevisionPhase('preparing')
+        void works.prepareSessionOutputRevision({
+          sessionId: target.sessionId,
+          turn: target.turn,
+          throughSeq: target.throughSeq,
+          path: target.path,
+        }).then(revision => {
+          if (preview.getSnapshot()?.sessionId !== target.sessionId
+            || preview.getSnapshot()?.path !== target.path
+            || sessionId !== target.sessionId) return
+          setRevisionPhase('idle')
+          window.dispatchEvent(new CustomEvent<SessionResourceReferenceDetail>(
+            'dsh-work:reference-session-resource',
+            { detail: Object.freeze({ sessionId: revision.sessionId, path: revision.path }) },
+          ))
+        }).catch(() => {
+          if (preview.getSnapshot()?.sessionId === target.sessionId
+            && preview.getSnapshot()?.path === target.path) setRevisionPhase('error')
+        })
+      },
+    }, revisionPhase === 'preparing' ? '正在准备…' : '要求修改')) : null)
 }
 
 const styles = `
@@ -1458,6 +1511,11 @@ body[data-ds-dark-theme] {
 .dsh-work-session-source strong { overflow: hidden; color: var(--work-text); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .dsh-work-session-source small { flex: 0 0 auto; color: var(--work-faint); font-size: 10px; }
 .dsh-work-session-source.is-missing small, .dsh-work-session-source.is-changed small, .dsh-work-session-source.is-inaccessible small { color: var(--work-warning); }
+.dsh-work-session-revision-failure { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--work-danger) 35%, var(--work-border)); border-radius: 9px; background: color-mix(in srgb, var(--work-danger) 7%, var(--work-surface)); }
+.dsh-work-session-revision-failure > span { display: grid; min-width: 0; gap: 2px; }
+.dsh-work-session-revision-failure strong { color: var(--work-text); font-size: 12px; }
+.dsh-work-session-revision-failure small { color: var(--work-muted); font-size: 11px; }
+.dsh-work-session-revision-failure button { flex: 0 0 auto; padding: 6px 9px; border: 1px solid var(--work-border-strong); border-radius: 7px; color: var(--work-text); background: var(--work-surface); cursor: pointer; font: 600 11px/1.2 var(--work-font); }
 .dsh-work-session-output { min-width: 0; max-width: 260px; display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 8px; padding: 7px 10px 7px 8px; border: 1px solid var(--work-border); border-radius: 9px; color: var(--work-text); background: var(--work-surface); text-align: left; cursor: pointer; font-family: var(--work-font); }
 .dsh-work-session-output:hover { border-color: var(--work-border-strong); background: var(--work-surface-subtle); }
 .dsh-work-session-output.is-selected { border-color: var(--work-accent); box-shadow: inset 0 0 0 1px var(--work-accent); }
@@ -1479,6 +1537,11 @@ body[data-ds-dark-theme] {
 .dsh-work-output-preview-tabs button[aria-selected="true"]::after { content: ''; position: absolute; height: 2px; left: 10px; right: 10px; bottom: 0; background: var(--work-accent); }
 .dsh-work-output-preview-meta { display: flex; justify-content: space-between; gap: 12px; padding: 14px 24px 0; color: var(--work-faint); font-size: 11px; }
 .dsh-work-output-preview-body { flex: 1; min-height: 0; padding: 18px 24px 96px; overflow-y: auto; }
+.dsh-work-output-preview-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 18px; border-top: 1px solid var(--work-border); background: var(--work-surface); }
+.dsh-work-output-preview-actions span { color: var(--work-muted); font-size: 11px; }
+.dsh-work-output-preview-actions span[role="alert"] { color: var(--work-danger); }
+.dsh-work-output-preview-actions button { flex: 0 0 auto; padding: 8px 14px; border: 1px solid var(--work-accent); border-radius: 8px; color: white; background: var(--work-accent); cursor: pointer; font: 600 13px/18px var(--work-font); }
+.dsh-work-output-preview-actions button:disabled { cursor: default; opacity: .55; }
 .dsh-work-output-preview-sources { display: grid; gap: 12px; }
 .dsh-work-output-preview-source { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: 10px 12px; padding: 14px; border: 1px solid var(--work-border); border-radius: 10px; background: var(--work-surface-subtle); }
 .dsh-work-output-preview-source-main { display: flex; min-width: 0; align-items: center; gap: 10px; }

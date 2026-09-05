@@ -56,6 +56,8 @@ test('exports the narrow Work surface through public Typert markers', () => {
     { method: 'importSessionResource', mode: 'unary' },
     { method: 'inspectSessionOutputs', mode: 'unary' },
     { method: 'inspectSessionOutputSources', mode: 'unary' },
+    { method: 'prepareSessionOutputRevision', mode: 'unary' },
+    { method: 'inspectSessionRevision', mode: 'unary' },
     { method: 'readSessionOutput', mode: 'unary' },
     { method: 'list', mode: 'unary' },
     { method: 'follow', mode: 'stream' },
@@ -75,6 +77,8 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
     'work/inspectSessionOutputs',
     'work/inspectSessionOutputSources',
     'work/readSessionOutput',
+    'work/prepareSessionOutputRevision',
+    'work/inspectSessionRevision',
     'work/follow',
   ])
   const dispatch = TYPERT_REMOTE.descriptors.find(descriptor => descriptor.method === 'dispatch')

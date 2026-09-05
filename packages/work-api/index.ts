@@ -8,12 +8,15 @@ import {
   type InspectSessionOutputsSpec,
   type InspectSessionOutputSourcesSpec,
   type ReadSessionOutputSpec,
+  type PrepareSessionOutputRevisionSpec,
   type ImportSessionResourceSpec,
   type ImportConversationSpec,
   type SessionFileResource,
   type SessionOutputFile,
   type SessionOutputContent,
   type SessionOutputSource,
+  type SessionOutputRevision,
+  type SessionOutputRevisionFailure,
   type WorkController,
   type WorkDeliverableContent as DomainWorkDeliverableContent,
   type WorkFollowFrame,
@@ -36,6 +39,9 @@ export type WorkSessionOutputFile = SessionOutputFile
 export type WorkSessionOutputSource = SessionOutputSource
 export type WorkReadSessionOutputSpec = ReadSessionOutputSpec
 export type WorkSessionOutputContent = SessionOutputContent
+export type WorkPrepareSessionOutputRevisionSpec = PrepareSessionOutputRevisionSpec
+export type WorkSessionOutputRevision = SessionOutputRevision
+export type WorkSessionOutputRevisionFailure = SessionOutputRevisionFailure
 
 export interface WorkReadDeliverableRequest {
   readonly workId: string
@@ -195,6 +201,20 @@ export class WorkRemoteController extends TypertRemoteService {
     }))
   }
 
+  prepareSessionOutputRevision(
+    spec: WorkPrepareSessionOutputRevisionSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkSessionOutputRevision> {
+    return workResult(() => this.controller.prepareSessionOutputRevision(spec, signal))
+  }
+
+  inspectSessionRevision(
+    spec: WorkInspectSessionOutputsSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkSessionOutputRevisionFailure | null> {
+    return workResult(() => this.controller.inspectSessionRevision(spec, signal))
+  }
+
   readSessionOutput(
     spec: WorkReadSessionOutputSpec,
     signal?: AbortSignal,
@@ -213,7 +233,7 @@ export class WorkRemoteController extends TypertRemoteService {
   }
 }
 
-type RemoteMethodName = 'create' | 'importConversation' | 'dispatch' | 'readDeliverable' | 'showDelivery' | 'importSessionResource' | 'inspectSessionOutputs' | 'inspectSessionOutputSources' | 'readSessionOutput' | 'list' | 'follow'
+type RemoteMethodName = 'create' | 'importConversation' | 'dispatch' | 'readDeliverable' | 'showDelivery' | 'importSessionResource' | 'inspectSessionOutputs' | 'inspectSessionOutputSources' | 'prepareSessionOutputRevision' | 'inspectSessionRevision' | 'readSessionOutput' | 'list' | 'follow'
 type RemoteMethod = (this: WorkRemoteController, ...args: unknown[]) => unknown
 type RemoteDecorator = (
   method: RemoteMethod,
@@ -246,6 +266,8 @@ installRemoteMarker('showDelivery', Remote as RemoteDecorator)
 installRemoteMarker('importSessionResource', Remote as RemoteDecorator)
 installRemoteMarker('inspectSessionOutputs', Remote as RemoteDecorator)
 installRemoteMarker('inspectSessionOutputSources', Remote as RemoteDecorator)
+installRemoteMarker('prepareSessionOutputRevision', Remote as RemoteDecorator)
+installRemoteMarker('inspectSessionRevision', Remote as RemoteDecorator)
 installRemoteMarker('readSessionOutput', Remote as RemoteDecorator)
 installRemoteMarker('list', Remote as RemoteDecorator)
 installRemoteMarker('follow', Remote({ mode: 'stream' }) as RemoteDecorator)

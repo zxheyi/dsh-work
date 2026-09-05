@@ -155,6 +155,27 @@ export interface SessionOutputContent extends SessionOutputFile {
   readonly sources: readonly SessionOutputSource[]
 }
 
+export interface PrepareSessionOutputRevisionSpec extends ReadSessionOutputSpec {}
+
+export interface SessionOutputRevision {
+  readonly sessionId: string
+  readonly sourceTurn: number
+  readonly name: string
+  readonly path: string
+  readonly reference: string
+  readonly contentDigest: string
+}
+
+export interface SessionOutputRevisionFailure {
+  readonly sessionId: string
+  readonly turn: number
+  readonly name: string
+  readonly path: string
+  readonly reference: string
+  readonly status: 'failed'
+  readonly message: string
+}
+
 export interface WorkFileDeliverable {
   readonly kind: 'file'
   readonly path: string
@@ -180,6 +201,14 @@ export interface WorkController {
     spec: InspectSessionOutputSourcesSpec,
     signal?: AbortSignal,
   ): Promise<readonly SessionOutputSource[]>
+  prepareSessionOutputRevision(
+    spec: PrepareSessionOutputRevisionSpec,
+    signal?: AbortSignal,
+  ): Promise<SessionOutputRevision>
+  inspectSessionRevision(
+    spec: InspectSessionOutputsSpec,
+    signal?: AbortSignal,
+  ): Promise<SessionOutputRevisionFailure | null>
   readSessionOutput(spec: ReadSessionOutputSpec, signal?: AbortSignal): Promise<SessionOutputContent>
   follow(signal?: AbortSignal): AsyncIterable<WorkFollowFrame>
   dispatch(request: DispatchWorkRequest, signal?: AbortSignal): Promise<WorkSnapshot>
@@ -1502,6 +1531,157 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
   const now = options.now ?? (() => new Date().toISOString())
   const store = options.store ?? createMemoryWorkStore()
   const deliveryRoot = options.deliveryRoot ?? path.join(options.workspaceRoot, '.dsh-work-deliveries')
+  interface RevisionProtection {
+    readonly sessionId: string
+    readonly sourceTurn: number
+    readonly preparedAfterTurn: number
+    readonly preparedAfterSeq: number
+    readonly throughSeq: number
+    readonly name: string
+    readonly path: string
+    readonly normalizedPath: string
+    readonly workspacePath: string
+    readonly bytes: Buffer
+    readonly mediaType: string | null
+    readonly contentDigest: string
+    lastCheckedTurn: number
+    lastFailureTurn: number | null
+  }
+  const revisionProtections = new Map<string, RevisionProtection>()
+  const failedRevisionPaths = new Map<string, ReadonlySet<string>>()
+  let revisionQueue: Promise<void> = Promise.resolve()
+  const withRevisionLock = async <Value>(operation: () => Promise<Value>): Promise<Value> => {
+    const prior = revisionQueue
+    let release!: () => void
+    revisionQueue = new Promise<void>(resolve => { release = resolve })
+    await prior
+    try {
+      return await operation()
+    } finally {
+      release()
+    }
+  }
+  const revisionKey = (sessionId: string, normalizedPath: string): string => `${sessionId}\0${normalizedPath}`
+  const revisionTurnKey = (sessionId: string, turn: number): string => `${sessionId}\0${String(turn)}`
+  const asRevision = (value: RevisionProtection): SessionOutputRevision => Object.freeze({
+    sessionId: value.sessionId,
+    sourceTurn: value.sourceTurn,
+    name: value.name,
+    path: value.path,
+    reference: /\s/u.test(value.path) ? `@"${value.path}"` : `@${value.path}`,
+    contentDigest: value.contentDigest,
+  })
+  const revisionFailure = (
+    value: RevisionProtection,
+    turn: number,
+  ): SessionOutputRevisionFailure => Object.freeze({
+    sessionId: value.sessionId,
+    turn,
+    name: value.name,
+    path: value.path,
+    reference: /\s/u.test(value.path) ? `@"${value.path}"` : `@${value.path}`,
+    status: 'failed',
+    message: '修改未生成有效文件，已保留上一结果。',
+  })
+  const matchingProtection = (
+    inspected: { readonly cwd: string },
+    spec: ReadSessionOutputSpec,
+  ): RevisionProtection | null => {
+    const workspacePath = path.resolve(inspected.cwd)
+    const normalized = normalizedWorkspacePath(workspacePath, inspected.cwd, spec.path)
+    if (!normalized) return null
+    return revisionProtections.get(revisionKey(spec.sessionId, normalized)) ?? null
+  }
+  const reconcileSessionRevision = async (
+    inspected: { readonly cwd: string; readonly events: readonly unknown[] },
+    spec: InspectSessionOutputsSpec,
+    signal?: AbortSignal,
+  ): Promise<SessionOutputRevisionFailure | null> => {
+    const turnKey = revisionTurnKey(spec.sessionId, spec.turn)
+    const existingFailed = failedRevisionPaths.get(turnKey)
+    let pendingReferences: readonly { readonly path: string; readonly seq: number }[] = Object.freeze([])
+    let turnReferences: readonly { readonly path: string; readonly seq: number }[] = Object.freeze([])
+    let activeTurn: number | null = null
+    for (const raw of inspected.events) {
+      const event = recordData(raw)
+      const data = recordData(event?.data)
+      const seq = event?.seq
+      if (!event || !data || (typeof seq === 'number' && seq > spec.throughSeq)) continue
+      if (event.type === 'user/message') {
+        const text = userMessageText(data)
+        pendingReferences = text === null || typeof seq !== 'number'
+          ? Object.freeze([])
+          : Object.freeze(resourceReferences(text).map(reference => Object.freeze({ path: reference, seq })))
+        if (data.turn === spec.turn || activeTurn === spec.turn) turnReferences = pendingReferences
+        continue
+      }
+      if (event.type === 'turn/start') {
+        activeTurn = typeof data.turn === 'number' ? data.turn : null
+        if (activeTurn === spec.turn) turnReferences = pendingReferences
+        pendingReferences = Object.freeze([])
+        continue
+      }
+      if (event.type === 'turn/end' && data.turn === activeTurn) activeTurn = null
+    }
+    const workspacePath = path.resolve(inspected.cwd)
+    const protections = [...revisionProtections.values()].filter(value =>
+      value.sessionId === spec.sessionId
+      && value.preparedAfterTurn < spec.turn
+      && turnReferences.some(reference => {
+        if (reference.seq <= value.preparedAfterSeq) return false
+        return normalizedWorkspacePath(workspacePath, inspected.cwd, reference.path) === value.normalizedPath
+      }))
+    if (protections.length < 1) return null
+    const ended = inspected.events.some(raw => {
+      const event = recordData(raw)
+      const data = recordData(event?.data)
+      return event?.type === 'turn/end' && data?.turn === spec.turn
+    })
+    if (!ended) return null
+    const latestAssistantSeq = inspected.events.reduce<number>((latest, raw) => {
+      const event = recordData(raw)
+      const data = recordData(event?.data)
+      const seq = event?.seq
+      return event?.type === 'assistant/message'
+        && data?.turn === spec.turn
+        && typeof seq === 'number'
+        ? Math.max(latest, seq)
+        : latest
+    }, -1)
+    if (latestAssistantSeq > spec.throughSeq) return null
+    const validated = await validatedSessionOutputs(inspected, spec, options.sessionOutputInternals)
+    for (const protection of protections) {
+      if (protection.lastFailureTurn === spec.turn || existingFailed?.has(protection.normalizedPath)) {
+        return revisionFailure(protection, spec.turn)
+      }
+      if (protection.lastCheckedTurn >= spec.turn) continue
+      signal?.throwIfAborted()
+      const produced = validated.find(output =>
+        normalizedWorkspacePath(protection.workspacePath, inspected.cwd, output.path) === protection.normalizedPath)
+      let valid = false
+      if (produced?.mediaType === 'text/markdown') {
+        try {
+          await readValidatedSessionOutput(inspected, { ...spec, path: produced.path }, signal, options.sessionOutputInternals)
+          valid = true
+        } catch (cause) {
+          if (signal?.aborted) throw cause
+          valid = false
+        }
+      }
+      if (valid) {
+        protection.lastCheckedTurn = spec.turn
+        revisionProtections.delete(revisionKey(protection.sessionId, protection.normalizedPath))
+        continue
+      }
+      protection.lastFailureTurn = spec.turn
+      protection.lastCheckedTurn = spec.turn
+      const failed = new Set(failedRevisionPaths.get(turnKey) ?? [])
+      failed.add(protection.normalizedPath)
+      failedRevisionPaths.set(turnKey, failed)
+      return revisionFailure(protection, spec.turn)
+    }
+    return null
+  }
   let work: WorkSnapshot | null = null
   const followers = new Set<{
     readonly frames: WorkFollowFrame[]
@@ -1779,7 +1959,33 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
           { cause },
         )
       }
-      return validatedSessionOutputs(inspected, spec, options.sessionOutputInternals)
+      return withRevisionLock(async () => {
+        await reconcileSessionRevision(inspected, spec, signal)
+        const outputs = await validatedSessionOutputs(inspected, spec, options.sessionOutputInternals)
+        const failed = failedRevisionPaths.get(revisionTurnKey(spec.sessionId, spec.turn))
+        const visible = failed
+          ? outputs.filter(output => {
+            const workspacePath = path.resolve(inspected.cwd)
+            const normalized = normalizedWorkspacePath(workspacePath, inspected.cwd, output.path)
+            return normalized === null || !failed.has(normalized)
+          })
+          : [...outputs]
+        for (const protection of revisionProtections.values()) {
+          if (protection.sessionId !== spec.sessionId
+            || protection.sourceTurn !== spec.turn
+            || protection.throughSeq !== spec.throughSeq
+            || visible.some(output => output.path === protection.path)) continue
+          visible.push(Object.freeze({
+            sessionId: protection.sessionId,
+            turn: protection.sourceTurn,
+            name: protection.name,
+            path: protection.path,
+            bytes: protection.bytes.byteLength,
+            mediaType: protection.mediaType,
+          }))
+        }
+        return Object.freeze(visible)
+      })
     },
 
     async inspectSessionOutputSources(spec, signal) {
@@ -1802,6 +2008,98 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
       return validatedSessionOutputSources(inspected, spec, signal, options.sessionOutputInternals)
     },
 
+    async prepareSessionOutputRevision(spec, signal) {
+      if (!options.harness.inspectSession) {
+        throw new WorkError(
+          'work/session-output-invalid',
+          'This Host cannot protect Session output revisions.',
+        )
+      }
+      let inspected: Awaited<ReturnType<NonNullable<HarnessWorkPort['inspectSession']>>>
+      try {
+        inspected = await options.harness.inspectSession(spec.sessionId, signal)
+      } catch (cause) {
+        throw new WorkError(
+          'work/session-output-invalid',
+          'The current Session output is not readable for revision.',
+          { cause },
+        )
+      }
+      return withRevisionLock(async () => {
+        signal?.throwIfAborted()
+        let workspacePath: string
+        try {
+          workspacePath = await fs.realpath(inspected.cwd)
+        } catch (cause) {
+          throw new WorkError('work/session-output-invalid', 'The Session Workspace is not readable.', { cause })
+        }
+        const normalizedPath = normalizedWorkspacePath(workspacePath, inspected.cwd, spec.path)
+        if (!normalizedPath) {
+          throw new WorkError('work/session-output-invalid', 'The selected output is outside its Session Workspace.')
+        }
+        const key = revisionKey(spec.sessionId, normalizedPath)
+        const existing = revisionProtections.get(key)
+        if (existing) return asRevision(existing)
+        if ([...revisionProtections.values()].some(installed => installed.sessionId === spec.sessionId)) {
+          throw new WorkError(
+            'work/session-output-invalid',
+            'Finish or retry the current file revision before modifying another file.',
+          )
+        }
+        const content = await readValidatedSessionOutput(inspected, spec, signal, options.sessionOutputInternals)
+        const preparedAfterTurn = inspected.events.reduce<number>((latest, raw) => {
+          const event = recordData(raw)
+          const data = recordData(event?.data)
+          const turn = data?.turn
+          return event?.type === 'turn/end' && typeof turn === 'number'
+            ? Math.max(latest, turn)
+            : latest
+        }, spec.turn)
+        const preparedAfterSeq = inspected.events.reduce<number>((latest, raw) => {
+          const seq = recordData(raw)?.seq
+          return typeof seq === 'number' ? Math.max(latest, seq) : latest
+        }, spec.throughSeq)
+        const protection: RevisionProtection = {
+          sessionId: spec.sessionId,
+          sourceTurn: spec.turn,
+          preparedAfterTurn,
+          preparedAfterSeq,
+          throughSeq: spec.throughSeq,
+          name: content.name,
+          path: spec.path,
+          normalizedPath,
+          workspacePath,
+          bytes: Buffer.from(content.content, 'utf8'),
+          mediaType: content.mediaType,
+          contentDigest: content.contentDigest,
+          lastCheckedTurn: preparedAfterTurn,
+          lastFailureTurn: null,
+        }
+        revisionProtections.set(key, protection)
+        return asRevision(protection)
+      })
+    },
+
+    async inspectSessionRevision(spec, signal) {
+      if (!options.harness.inspectSession) {
+        throw new WorkError(
+          'work/session-output-invalid',
+          'This Host cannot inspect Session revisions.',
+        )
+      }
+      let inspected: Awaited<ReturnType<NonNullable<HarnessWorkPort['inspectSession']>>>
+      try {
+        inspected = await options.harness.inspectSession(spec.sessionId, signal)
+      } catch (cause) {
+        throw new WorkError(
+          'work/session-output-invalid',
+          'The current Session revision is not readable.',
+          { cause },
+        )
+      }
+      return withRevisionLock(() => reconcileSessionRevision(inspected, spec, signal))
+    },
+
     async readSessionOutput(spec, signal) {
       if (!options.harness.inspectSession) {
         throw new WorkError(
@@ -1819,7 +2117,32 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
           { cause },
         )
       }
-      return readValidatedSessionOutput(inspected, spec, signal, options.sessionOutputInternals)
+      return withRevisionLock(async () => {
+        const protection = matchingProtection(inspected, spec)
+        if (protection
+          && protection.sourceTurn === spec.turn
+          && protection.throughSeq === spec.throughSeq) {
+          signal?.throwIfAborted()
+          const sources = await validatedSessionOutputSources(
+            inspected,
+            spec,
+            signal,
+            options.sessionOutputInternals,
+          )
+          return Object.freeze({
+            sessionId: protection.sessionId,
+            turn: protection.sourceTurn,
+            name: protection.name,
+            path: protection.path,
+            bytes: protection.bytes.byteLength,
+            mediaType: protection.mediaType,
+            content: new TextDecoder('utf-8', { fatal: true }).decode(protection.bytes),
+            contentDigest: protection.contentDigest,
+            sources,
+          })
+        }
+        return readValidatedSessionOutput(inspected, spec, signal, options.sessionOutputInternals)
+      })
     },
 
     async *follow(signal = new AbortController().signal) {

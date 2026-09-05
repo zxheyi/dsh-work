@@ -1687,6 +1687,302 @@ test('reads only the addressed validated Markdown output on demand', async () =>
   await fs.rm(root, { recursive: true, force: true })
 })
 
+test('protects the last valid Session output until a same-Session revision is validated', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-revision-'))
+  const events: unknown[] = [
+    {
+      seq: 1,
+      type: 'tool/call',
+      data: {
+        turn: 1,
+        callId: 'initial',
+        name: 'write',
+        arguments: JSON.stringify({ file_path: 'report.md', content: '# Original\n' }),
+      },
+    },
+    {
+      seq: 2,
+      type: 'tool/result',
+      surfaceOp: 'append',
+      data: {
+        turn: 1,
+        message: { source: { callId: 'initial' }, content: [{ type: 'tool-result', isError: false }] },
+      },
+    },
+    {
+      seq: 3,
+      type: 'tool/call',
+      data: {
+        turn: 1,
+        callId: 'initial-b',
+        name: 'write',
+        arguments: JSON.stringify({ file_path: 'report-b.md', content: '# Other\n' }),
+      },
+    },
+    {
+      seq: 4,
+      type: 'tool/result',
+      surfaceOp: 'append',
+      data: {
+        turn: 1,
+        message: { source: { callId: 'initial-b' }, content: [{ type: 'tool-result', isError: false }] },
+      },
+    },
+    { seq: 5, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ]
+  await fs.writeFile(path.join(root, 'report.md'), '# Original\n')
+  await fs.writeFile(path.join(root, 'report-b.md'), '# Other\n')
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    harness: {
+      ...testHarness(),
+      async inspectSession(sessionId) {
+        assert.equal(sessionId, 'session-revision')
+        return { cwd: root, events }
+      },
+    },
+  })
+  const source = { sessionId: 'session-revision', turn: 1, throughSeq: 5, path: 'report.md' }
+
+  assert.deepEqual(await controller.prepareSessionOutputRevision(source), {
+    sessionId: 'session-revision',
+    sourceTurn: 1,
+    name: 'report.md',
+    path: 'report.md',
+    reference: '@report.md',
+    contentDigest: createHash('sha256').update('# Original\n').digest('hex'),
+  })
+
+  await fs.writeFile(path.join(root, 'report.md'), '')
+  assert.equal((await controller.readSessionOutput(source)).content, '# Original\n')
+  assert.deepEqual(await controller.inspectSessionOutputs({
+    sessionId: 'session-revision', turn: 1, throughSeq: 5,
+  }), [
+    {
+      sessionId: 'session-revision', turn: 1, name: 'report-b.md', path: 'report-b.md',
+      bytes: Buffer.byteLength('# Other\n'), mediaType: 'text/markdown',
+    },
+    {
+      sessionId: 'session-revision', turn: 1, name: 'report.md', path: 'report.md',
+      bytes: Buffer.byteLength('# Original\n'), mediaType: 'text/markdown',
+    },
+  ])
+
+  events.push(
+    { seq: 6, type: 'user/message', data: {
+      turn: 2, source: { kind: 'user' }, content: [{ type: 'text', text: '@report.md revise' }],
+    } },
+    { seq: 7, type: 'assistant/message', data: { turn: 2, step: 1 } },
+    {
+      seq: 8,
+      type: 'tool/call',
+      data: {
+        turn: 2,
+        callId: 'empty-revision',
+        name: 'write',
+        arguments: JSON.stringify({ file_path: 'report.md', content: '' }),
+      },
+    },
+    {
+      seq: 9,
+      type: 'tool/result',
+      surfaceOp: 'append',
+      data: {
+        turn: 2,
+        message: { source: { callId: 'empty-revision' }, content: [{ type: 'tool-result', isError: false }] },
+      },
+    },
+    { seq: 10, type: 'assistant/message', data: { turn: 2, step: 2 } },
+    { seq: 11, type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } },
+  )
+  assert.equal(await controller.inspectSessionRevision({
+    sessionId: 'session-revision', turn: 2, throughSeq: 7,
+  }), null)
+  const failedSpec = { sessionId: 'session-revision', turn: 2, throughSeq: 10 }
+  assert.deepEqual(await controller.inspectSessionRevision(failedSpec), {
+    sessionId: 'session-revision',
+    turn: 2,
+    name: 'report.md',
+    path: 'report.md',
+    reference: '@report.md',
+    status: 'failed',
+    message: '修改未生成有效文件，已保留上一结果。',
+  })
+  assert.equal((await fs.stat(path.join(root, 'report.md'))).size, 0)
+  assert.equal((await controller.readSessionOutput(source)).content, '# Original\n')
+  await assert.rejects(controller.prepareSessionOutputRevision({
+    sessionId: 'session-revision', turn: 1, throughSeq: 5, path: 'report-b.md',
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-output-invalid')
+  assert.equal((await controller.readSessionOutput(source)).content, '# Original\n')
+  assert.deepEqual(await controller.inspectSessionOutputs(failedSpec), [])
+  assert.deepEqual(await controller.inspectSessionRevision(failedSpec), await controller.inspectSessionRevision(failedSpec))
+
+  await fs.writeFile(path.join(root, 'report.md'), '# Revised\n')
+  events.push(
+    { seq: 12, type: 'user/message', data: {
+      turn: 3, source: { kind: 'user' }, content: [{ type: 'text', text: '@report.md retry' }],
+    } },
+    { seq: 13, type: 'assistant/message', data: { turn: 3, step: 1 } },
+    {
+      seq: 14,
+      type: 'tool/call',
+      data: {
+        turn: 3,
+        callId: 'valid-revision',
+        name: 'write',
+        arguments: JSON.stringify({ file_path: 'report.md', content: '# Revised\n' }),
+      },
+    },
+    {
+      seq: 15,
+      type: 'tool/result',
+      surfaceOp: 'append',
+      data: {
+        turn: 3,
+        message: { source: { callId: 'valid-revision' }, content: [{ type: 'tool-result', isError: false }] },
+      },
+    },
+    { seq: 16, type: 'assistant/message', data: { turn: 3, step: 2 } },
+    { seq: 17, type: 'turn/end', data: { turn: 3, reason: { kind: 'completed' } } },
+  )
+  const successSpec = { sessionId: 'session-revision', turn: 3, throughSeq: 16 }
+  assert.equal(await controller.inspectSessionRevision(successSpec), null)
+  assert.deepEqual((await controller.inspectSessionOutputs(successSpec)).map(file => file.path), ['report.md'])
+  assert.equal((await controller.readSessionOutput({ ...successSpec, path: 'report.md' })).content, '# Revised\n')
+
+  await controller.prepareSessionOutputRevision({ ...successSpec, path: 'report.md' })
+  await fs.writeFile(path.join(root, 'report.md'), Buffer.from([0xff, 0xfe]))
+  events.push(
+    { seq: 18, type: 'user/message', data: {
+      turn: 4, source: { kind: 'user' }, content: [{ type: 'text', text: '@report.md revise again' }],
+    } },
+    { seq: 19, type: 'assistant/message', data: { turn: 4, step: 1 } },
+    {
+      seq: 20,
+      type: 'tool/call',
+      data: {
+        turn: 4,
+        callId: 'interrupted-revision',
+        name: 'write',
+        arguments: JSON.stringify({ file_path: 'report.md', content: 'corrupt bytes' }),
+      },
+    },
+    {
+      seq: 21,
+      type: 'tool/result',
+      surfaceOp: 'append',
+      data: {
+        turn: 4,
+        message: { source: { callId: 'interrupted-revision' }, content: [{ type: 'tool-result', isError: false }] },
+      },
+    },
+    { seq: 22, type: 'assistant/message', data: { turn: 4, step: 2 } },
+    { seq: 23, type: 'turn/end', data: { turn: 4, reason: { kind: 'aborted' } } },
+  )
+  const interruptedSpec = { sessionId: 'session-revision', turn: 4, throughSeq: 22 }
+  assert.equal((await controller.inspectSessionRevision(interruptedSpec))?.status, 'failed')
+  assert.deepEqual(await controller.inspectSessionOutputs(interruptedSpec), [])
+  assert.deepEqual(await fs.readFile(path.join(root, 'report.md')), Buffer.from([0xff, 0xfe]))
+  assert.equal((await controller.readSessionOutput({ ...successSpec, path: 'report.md' })).content, '# Revised\n')
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('ignores unrelated Turns and keeps revision validation retryable after cancellation', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-revision-binding-'))
+  const original = '# Original\n'
+  const revised = '# Revised\n'
+  await fs.writeFile(path.join(root, 'report.md'), original)
+  const events: unknown[] = [
+    { seq: 1, type: 'tool/call', data: {
+      turn: 1, callId: 'initial', name: 'write',
+      arguments: JSON.stringify({ file_path: 'report.md', content: original }),
+    } },
+    { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1,
+      message: { source: { callId: 'initial' }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ]
+  let cancelPreview = false
+  let activeAbort: AbortController | null = null
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    harness: {
+      ...testHarness(),
+      async inspectSession() { return { cwd: root, events } },
+    },
+    sessionOutputInternals: {
+      afterPreviewFirstStat() {
+        if (cancelPreview) {
+          cancelPreview = false
+          activeAbort?.abort()
+        }
+      },
+    },
+  })
+  const source = { sessionId: 'session-binding', turn: 1, throughSeq: 3, path: 'report.md' }
+  events.push(
+    { seq: 4, type: 'user/message', data: {
+      source: { kind: 'user' }, content: [{ type: 'text', text: '@report.md revise too early' }],
+    } },
+    { seq: 5, type: 'turn/start', data: { turn: 2 } },
+  )
+  await controller.prepareSessionOutputRevision(source)
+  events.push(
+    { seq: 6, type: 'assistant/message', data: { turn: 2, step: 1 } },
+    { seq: 7, type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } },
+  )
+  await fs.writeFile(path.join(root, 'report.md'), '')
+  assert.equal(await controller.inspectSessionRevision({
+    sessionId: 'session-binding', turn: 2, throughSeq: 6,
+  }), null)
+  assert.equal((await controller.readSessionOutput(source)).content, original)
+
+  events.push(
+    { seq: 8, type: 'user/message', data: {
+      source: { kind: 'user' }, content: [{ type: 'text', text: 'ordinary chat without a file' }],
+    } },
+    { seq: 9, type: 'turn/start', data: { turn: 3 } },
+    { seq: 10, type: 'assistant/message', data: { turn: 3, step: 1 } },
+    { seq: 11, type: 'turn/end', data: { turn: 3, reason: { kind: 'completed' } } },
+  )
+  assert.equal(await controller.inspectSessionRevision({
+    sessionId: 'session-binding', turn: 3, throughSeq: 10,
+  }), null)
+  assert.equal((await controller.readSessionOutput(source)).content, original)
+
+  await fs.writeFile(path.join(root, 'report.md'), revised)
+  events.push(
+    { seq: 12, type: 'user/message', data: {
+      source: { kind: 'user' }, content: [{ type: 'text', text: '@report.md revise' }],
+    } },
+    { seq: 13, type: 'turn/start', data: { turn: 4 } },
+    { seq: 14, type: 'assistant/message', data: { turn: 4, step: 1 } },
+    { seq: 15, type: 'tool/call', data: {
+      turn: 4, callId: 'revision', name: 'write',
+      arguments: JSON.stringify({ file_path: 'report.md', content: revised }),
+    } },
+    { seq: 16, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 4,
+      message: { source: { callId: 'revision' }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+    { seq: 17, type: 'assistant/message', data: { turn: 4, step: 2 } },
+    { seq: 18, type: 'turn/end', data: { turn: 4, reason: { kind: 'completed' } } },
+  )
+  activeAbort = new AbortController()
+  cancelPreview = true
+  await assert.rejects(controller.inspectSessionRevision({
+    sessionId: 'session-binding', turn: 4, throughSeq: 17,
+  }, activeAbort.signal), error => error instanceof DOMException && error.name === 'AbortError')
+  assert.equal(await controller.inspectSessionRevision({
+    sessionId: 'session-binding', turn: 4, throughSeq: 17,
+  }), null)
+  assert.equal((await controller.readSessionOutput({
+    sessionId: 'session-binding', turn: 4, throughSeq: 17, path: 'report.md',
+  })).content, revised)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
 test('bounds a Markdown preview read when the file grows after validation', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-output-grow-'))
   const selectedPath = path.join(root, 'growing.md')

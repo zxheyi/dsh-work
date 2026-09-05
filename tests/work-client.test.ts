@@ -77,6 +77,18 @@ function successfulRemote(overrides: Partial<WorkClientRemote> = {}): WorkClient
     async inspectSessionOutputSources() {
       return { ok: true as const, value: { items: [] } }
     },
+    async prepareSessionOutputRevision() {
+      return {
+        ok: true as const,
+        value: {
+          sessionId: 'session-client', sourceTurn: 1, name: 'report.md', path: 'report.md',
+          reference: '@report.md', contentDigest: 'd'.repeat(64),
+        },
+      }
+    },
+    async inspectSessionRevision() {
+      return { ok: true as const, value: null }
+    },
     async readSessionOutput() {
       return {
         ok: true as const,
@@ -389,5 +401,42 @@ test('loads auditable sources for the exact Session Turn without mutating Work s
 
   assert.deepEqual(received, [spec])
   assert.equal(sources[0]?.status, 'verified')
+  assert.deepEqual(model.getSnapshot().items, [view(1)])
+})
+
+test('prepares and inspects a Session revision without changing the Work projection', async () => {
+  const received: unknown[] = []
+  const model = new ClientWorkModel(successfulRemote({
+    async prepareSessionOutputRevision(spec) {
+      received.push(['prepare', spec])
+      return {
+        ok: true,
+        value: {
+          sessionId: spec.sessionId,
+          sourceTurn: spec.turn,
+          name: 'report.md',
+          path: spec.path,
+          reference: '@report.md',
+          contentDigest: 'f'.repeat(64),
+        },
+      }
+    },
+    async inspectSessionRevision(spec) {
+      received.push(['inspect', spec])
+      return { ok: true, value: null }
+    },
+  }))
+  model.replaceBaseline({ items: [view(1)] })
+  const works = new WorksController(new Context(), model)
+  const output = { sessionId: 'session-revision', turn: 4, throughSeq: 23, path: 'report.md' }
+
+  assert.equal((await works.prepareSessionOutputRevision(output)).reference, '@report.md')
+  assert.equal(await works.inspectSessionRevision({
+    sessionId: output.sessionId, turn: 5, throughSeq: 31,
+  }), null)
+  assert.deepEqual(received, [
+    ['prepare', output],
+    ['inspect', { sessionId: 'session-revision', turn: 5, throughSeq: 31 }],
+  ])
   assert.deepEqual(model.getSnapshot().items, [view(1)])
 })

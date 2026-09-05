@@ -8,6 +8,8 @@ const SESSION_B = 'f2250bfd-accc-4acf-b39a-9ca687cd5f07'
 const ORDINARY_PROMPT = '只进行普通回复，不生成文件'
 const GENERATE_A_PROMPT = '生成甲会话的两个真实文件'
 const GENERATE_B_PROMPT = '生成乙会话的一个真实文件'
+const REVISION_FAIL_PROMPT = '执行失败修改夹具'
+const REVISION_SUCCESS_PROMPT = '执行成功修改夹具'
 const REPORT_A = [
   '# 甲报告',
   '',
@@ -73,6 +75,24 @@ class OutputAdapter extends LlmAdapter {
     const latestUser = [...options.messages].reverse().find(message => message?.source?.kind === 'user')
     const userPrompt = textOf(latestUser)
     if (latest?.source?.kind === 'tool') {
+      if (userPrompt.includes(REVISION_FAIL_PROMPT)) {
+        if (latest.source.callId === 'output-a-revision-read-fail') {
+          for (const event of toolCall(0, 'output-a-revision-empty', 'write', { file_path: 'report-a.md', content: '' })) yield event
+          yield { type: 'finish', reason: { kind: 'tool-calls' } }
+          return
+        }
+        yield * emitText('修改没有生成有效文件。')
+        return
+      }
+      if (userPrompt.includes(REVISION_SUCCESS_PROMPT)) {
+        if (latest.source.callId === 'output-a-revision-read-success') {
+          for (const event of toolCall(0, 'output-a-revision-valid', 'write', { file_path: 'report-a.md', content: '# 甲报告（已修改）\n\n修改成功。\n' })) yield event
+          yield { type: 'finish', reason: { kind: 'tool-calls' } }
+          return
+        }
+        yield * emitText('修改后的文件已经生成。')
+        return
+      }
       if (userPrompt.includes(GENERATE_A_PROMPT) && latest.source.callId === 'output-a-read') {
         for (const event of toolCall(0, 'output-a-markdown', 'write', { file_path: 'report-a.md', content: REPORT_A })) yield event
         for (const event of toolCall(1, 'output-a-csv', 'write', { file_path: 'report-b.csv', content: 'name,value\nalpha,1\n' })) yield event
@@ -84,6 +104,16 @@ class OutputAdapter extends LlmAdapter {
       return
     }
     const prompt = textOf(latest)
+    if (prompt.includes(REVISION_FAIL_PROMPT)) {
+      for (const event of toolCall(0, 'output-a-revision-read-fail', 'read', { file_path: 'report-a.md' })) yield event
+      yield { type: 'finish', reason: { kind: 'tool-calls' } }
+      return
+    }
+    if (prompt.includes(REVISION_SUCCESS_PROMPT)) {
+      for (const event of toolCall(0, 'output-a-revision-read-success', 'read', { file_path: 'report-a.md' })) yield event
+      yield { type: 'finish', reason: { kind: 'tool-calls' } }
+      return
+    }
     if (prompt.includes(GENERATE_A_PROMPT)) {
       const sourcePath = referencedPath(prompt)
       if (!sourcePath) {
@@ -143,6 +173,8 @@ export async function apply(context) {
     ordinaryPrompt: ORDINARY_PROMPT,
     generateAPrompt: GENERATE_A_PROMPT,
     generateBPrompt: GENERATE_B_PROMPT,
+    revisionFailPrompt: REVISION_FAIL_PROMPT,
+    revisionSuccessPrompt: REVISION_SUCCESS_PROMPT,
     workspacePath,
   }, null, 2), { flag: 'wx' })
 }

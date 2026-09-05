@@ -214,7 +214,7 @@
       "files": "packages/work-domain/index.ts；packages/work-api/client-model.ts；packages/work-api/surface.ts",
       "verification": "破坏性写入/中断故障注入、同 Session 修订 E2E、失败截图",
       "limits": "阶段 B 的恢复保护不冒充完整版本库；阶段 C 再支持选旧版修改。",
-      "status": "pending"
+      "status": "verified"
     },
     {
       "id": "T12",

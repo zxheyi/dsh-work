@@ -130,6 +130,8 @@ async function run(): Promise<void> {
       ordinaryPrompt: string
       generateAPrompt: string
       generateBPrompt: string
+      revisionFailPrompt: string
+      revisionSuccessPrompt: string
       workspacePath: string
     }
     const clickSession = async (title: string): Promise<void> => {
@@ -374,6 +376,65 @@ async function run(): Promise<void> {
       value => value === 'report-a.md',
       'Closing preview did not restore focus to the selected file',
     )
+
+    await clickSend()
+    await waitFor(
+      () => js<string>("document.querySelector('[data-composer-input]')?.textContent ?? ''"),
+      text => text === '',
+      'Existing draft did not clear before revision acceptance',
+    )
+    assert.equal(await selectAt(0), 'report-a.md')
+    await waitFor(
+      () => js<number>("document.querySelectorAll('[data-work-output-preview-markdown]').length"),
+      count => count === 1,
+      'Markdown preview did not reopen for revision',
+    )
+
+    step = 'same-session-revision-recovery'; report('fail')
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] button')).find(item => item.textContent?.trim() === '要求修改'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
+    const revisionDraft = await waitFor(
+      () => js<{ draft: string; focused: boolean }>("({ draft: document.querySelector('[data-composer-input]')?.textContent ?? '', focused: document.activeElement === document.querySelector('[data-composer-input]') })"),
+      value => value.draft.includes('@report-a.md') && value.focused,
+      'Revision did not return the file reference and focus to the native composer',
+    )
+    assert.match(revisionDraft.draft, /@report-a\.md/u)
+    const appendDraft = async (text: string): Promise<string> => js<string>(
+      "(async () => { const input = document.querySelector('[data-composer-input]'); if (!(input instanceof HTMLElement)) return ''; input.focus(); const selection = window.getSelection(); const range = document.createRange(); range.selectNodeContents(input); range.collapse(false); selection?.removeAllRanges(); selection?.addRange(range); input.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: " + JSON.stringify(text) + ", bubbles: true, cancelable: true })); await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); return input.textContent ?? '' })()",
+    )
+    assert.match(await appendDraft(baseline.revisionFailPrompt), new RegExp(baseline.revisionFailPrompt, 'u'))
+    await clickSend()
+    await waitFor(
+      () => js<string>("document.querySelector('[data-work-session-revision-failure]')?.textContent ?? ''"),
+      text => text.includes('修改失败') && text.includes('已保留上一结果') && text.includes('在原会话重试'),
+      'Invalid revision did not expose a retryable failure in the original Session',
+    )
+    assert.equal(fs.statSync(reportAPath).size, 0)
+    assert.equal(await selectAt(0), 'report-a.md')
+    await waitFor(
+      () => js<string>("document.querySelector('[data-work-output-preview-markdown]')?.textContent ?? ''"),
+      text => text.includes('本周结论已经整理完成。'),
+      'Protected prior output was not readable after the failed revision',
+    )
+    assert.equal(await js<number>("document.querySelectorAll('[data-work-session-revision-failure]').length"), 1)
+    fs.writeFileSync(path.join(output, 'revision-failure.png'), (await window.webContents.capturePage()).toPNG())
+
+    assert.equal(await js<boolean>("(() => { const button = document.querySelector('[data-work-session-revision-failure] button'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
+    await waitFor(
+      () => js<string>("document.querySelector('[data-composer-input]')?.textContent ?? ''"),
+      text => text.includes('@report-a.md'),
+      'Revision retry did not return to the original composer',
+    )
+    assert.match(await appendDraft(baseline.revisionSuccessPrompt), new RegExp(baseline.revisionSuccessPrompt, 'u'))
+    await clickSend()
+    await waitFor(
+      async () => ({
+        revisedCount: await js<number>("Array.from(document.querySelectorAll('[data-work-session-output]')).filter(item => item.getAttribute('data-work-session-output') === 'report-a.md').length"),
+        revised: fs.existsSync(reportAPath) ? fs.readFileSync(reportAPath, 'utf8') : '',
+      }),
+      value => value.revisedCount === 2 && value.revised.includes('甲报告（已修改）'),
+      'Valid retry did not publish the revised file once',
+    )
+    assert.equal(await js<number>("Array.from(document.querySelectorAll('[data-work-session-output]')).filter(item => item.getAttribute('data-work-session-output') === 'report-a.md').length"), 2)
 
     await host.stop()
     host = null
