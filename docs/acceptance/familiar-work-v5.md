@@ -18,7 +18,7 @@ Fact source: [R01-R18 and scenarios](../design/familiar-v5/requirements.json). D
 | F10 | Runtime failure returns to original context without blindly replaying external actions | Guardian/process E2E and lifecycle regression |
 | F11 | 390px/736px layouts and keyboard can return to conversation and complete main actions | Responsive screenshots, keyboard/focus/accessible-name checks |
 | F12 | Legacy Work data retains IDs/files; absent history remains explicitly absent | Compatibility fixture, later full migration interruption/rollback suite |
-| F13 | At least four of five existing DSH users complete the core flow without learning new product terms | Real human observation; automated checks are not a substitute |
+| F13 | At least four of five existing DSH users complete the core flow without learning new product terms | [Real human observation](familiar-work-v5-usability-observation.md); automated checks are not a substitute |
 
 The eight scenario paths are: initial connection, ordinary conversation, attachment/generation, file reading, revision/versions, adoption/save, permission, and revision failure. Every state must link to evidence from the tested revision. Pending Windows, human study or live-model evidence stays pending; a macOS screenshot cannot satisfy it.
 

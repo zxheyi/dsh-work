@@ -62,6 +62,16 @@ const h = createElement
 const MAX_RESOURCE_FILES = 20
 const MAX_RESOURCE_FILE_BYTES = 25 * 1024 * 1024
 const SUPPORTED_SESSION_RESOURCE = /\.(?:csv|json|md|txt)$/iu
+const NARROW_PREVIEW_QUERY = '(max-width: 995px)'
+
+const narrowPreviewSnapshot = (): boolean =>
+  typeof window !== 'undefined' && window.matchMedia(NARROW_PREVIEW_QUERY).matches
+
+const subscribeNarrowPreview = (listener: () => void): (() => void) => {
+  const query = window.matchMedia(NARROW_PREVIEW_QUERY)
+  query.addEventListener('change', listener)
+  return () => query.removeEventListener('change', listener)
+}
 
 interface SessionResourceEntryState {
   readonly id: string
@@ -1316,7 +1326,11 @@ function NativeSessionOutputs({ matched, openFile, sessionId, works }: NativeSes
   },
   h('strong', null, source.name),
   h('small', null, sourceStatusLabel(source.status)))))) : null,
-  sourcePhase === 'error' ? h('span', { className: 'dsh-work-session-sources-error' }, '资料来源暂不可用') : null,
+  sourcePhase === 'error' ? h('span', {
+    className: 'dsh-work-session-sources-error',
+    role: 'status',
+    'aria-live': 'polite',
+  }, '资料来源暂不可用') : null,
   files.length > 0 ? h('div', { className: 'dsh-work-session-output-group' },
   h('span', { className: 'dsh-work-session-outputs-label' }, '生成结果'),
   h('div', { className: 'dsh-work-session-outputs-row' }, ...files.map(file => h('button', {
@@ -1391,6 +1405,8 @@ function NativeSessionOutputPreview({
   sessionId,
   works,
 }: NativeSessionOutputPreviewProps): ReactNode {
+  const closeButton = useRef<HTMLButtonElement>(null)
+  const narrow = useSyncExternalStore(subscribeNarrowPreview, narrowPreviewSnapshot, () => false)
   const selection = useSyncExternalStore(preview.subscribe, preview.getSnapshot, preview.getSnapshot)
   const [tab, setTab] = useState<'content' | 'sources'>('content')
   const [retry, setRetry] = useState(0)
@@ -1418,6 +1434,11 @@ function NativeSessionOutputPreview({
     setSaveState({ phase: 'idle' })
     setSaveOpenError(false)
   }, [selection?.path, selection?.sessionId, selection?.throughSeq, selection?.turn])
+
+  useEffect(() => {
+    if (!selection || !narrow) return
+    requestAnimationFrame(() => closeButton.current?.focus())
+  }, [narrow, selection])
 
   useEffect(() => {
     if (!selection || selection.sessionId !== sessionId || selection.mediaType !== 'text/markdown') {
@@ -1473,16 +1494,44 @@ function NativeSessionOutputPreview({
     className: 'dsh-work-output-preview',
     'data-work-output-preview': selection.path,
     'aria-label': `${selection.name} 预览`,
+    role: narrow ? 'dialog' : 'region',
+    'aria-modal': narrow || undefined,
+    onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
+      if (!narrow) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closePreview()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>(
+        'button:not(:disabled)',
+      )).filter(button => button.tabIndex >= 0)
+      const first = focusable[0]
+      const last = focusable.at(-1)
+      if (!first || !last) return
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    },
   },
   h('header', { className: 'dsh-work-output-preview-header' },
     h('span', { className: 'dsh-work-output-preview-file-icon', 'aria-hidden': 'true' }, '文'),
     h('strong', { title: selection.path }, selection.name),
     h('button', {
+      ref: closeButton,
       type: 'button',
       className: 'dsh-work-output-preview-close',
-      'aria-label': '关闭文件预览',
+      'aria-label': '返回会话并关闭文件预览',
       onClick: closePreview,
-    }, '×')),
+    },
+    h('span', { className: 'dsh-work-output-preview-close-wide', 'aria-hidden': true }, '×'),
+    h('span', { className: 'dsh-work-output-preview-close-narrow', 'aria-hidden': true }, '←'),
+    h('span', { className: 'dsh-work-output-preview-close-label' }, '返回会话'))),
   h('div', { className: 'dsh-work-output-preview-tabs', role: 'tablist', 'aria-label': '文件详情' },
     h('button', {
       type: 'button',
@@ -1504,7 +1553,7 @@ function NativeSessionOutputPreview({
       ? sourceState.phase === 'loading' || sourceState.phase === 'idle'
         ? h('div', { className: 'dsh-work-output-preview-status', role: 'status', 'aria-live': 'polite' }, '正在核对资料来源…')
         : sourceState.phase === 'error'
-          ? h('div', { className: 'dsh-work-output-preview-empty' },
+          ? h('div', { className: 'dsh-work-output-preview-empty', role: 'status', 'aria-live': 'polite' },
             h('strong', null, '暂时无法核对资料来源'),
             h('p', null, '重新打开文件后可以再次核对。'))
           : previewSources.length < 1
@@ -1528,10 +1577,13 @@ function NativeSessionOutputPreview({
             h('button', {
               type: 'button',
               disabled: source.status !== 'verified' && source.status !== 'unverified',
-              onClick: () => window.dispatchEvent(new CustomEvent<SessionResourceReferenceDetail>(
-                'dsh-work:reference-session-resource',
-                { detail: Object.freeze({ sessionId: source.sessionId, path: source.path }) },
-              )),
+              onClick: () => {
+                window.dispatchEvent(new CustomEvent<SessionResourceReferenceDetail>(
+                  'dsh-work:reference-session-resource',
+                  { detail: Object.freeze({ sessionId: source.sessionId, path: source.path }) },
+                ))
+                if (narrow) closePreview()
+              },
             }, '在输入框引用'))))
       : unsupported
       ? h('div', { className: 'dsh-work-output-preview-empty' },
@@ -1548,7 +1600,9 @@ function NativeSessionOutputPreview({
           : safeMarkdownContent(state.content)),
   h('footer', { className: 'dsh-work-output-preview-actions' },
     h('span', {
-      role: saveState.phase === 'error' || saveOpenError || revisionPhase === 'error' ? 'alert' : undefined,
+      role: saveState.phase === 'error' || saveOpenError || revisionPhase === 'error' ? 'alert' : 'status',
+      'aria-live': 'polite',
+      'aria-atomic': 'true',
       title: saveState.phase === 'saved' ? saveState.value.location : undefined,
     }, saveState.phase === 'saved'
       ? saveOpenError
@@ -1627,6 +1681,7 @@ function NativeSessionOutputPreview({
               'dsh-work:reference-session-resource',
               { detail: Object.freeze({ sessionId: revision.sessionId, path: revision.path }) },
             ))
+            if (narrow) closePreview()
           }).catch(() => {
             if (matchesSessionOutputSelection(preview.getSnapshot(), target)) setRevisionPhase('error')
           })
@@ -1707,6 +1762,7 @@ body[data-ds-dark-theme] {
 .dsh-work-output-preview-header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
 .dsh-work-output-preview-file-icon { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; color: var(--work-accent); background: var(--work-accent-subtle); font-size: 10px; font-weight: 700; }
 .dsh-work-output-preview-close { width: 32px; height: 32px; border: 0; border-radius: 50%; color: var(--work-muted); background: transparent; cursor: pointer; font: 400 26px/30px var(--work-font); }
+.dsh-work-output-preview-close-narrow, .dsh-work-output-preview-close-label { display: none; }
 .dsh-work-output-preview-close:hover { color: var(--work-text); background: var(--work-surface-subtle); }
 .dsh-work-output-preview-tabs { height: 50px; display: flex; align-items: stretch; padding: 0 18px; border-bottom: 1px solid var(--work-border); }
 .dsh-work-output-preview-tabs button { position: relative; min-width: 54px; border: 0; color: var(--work-muted); background: transparent; cursor: pointer; font: 600 14px/50px var(--work-font); }
@@ -1753,6 +1809,26 @@ body[data-ds-dark-theme] {
 .dsh-work-output-preview-markdown pre { max-width: 100%; margin: 0 0 1.1em; padding: 14px; overflow-x: auto; border-radius: 8px; color: var(--work-text); background: var(--work-surface-subtle); font: 12px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
 .dsh-work-output-preview-density { color: var(--work-muted); font-size: 12px; }
 .dsh-work-output-preview button:focus-visible { outline: 2px solid var(--work-accent); outline-offset: 2px; }
+@media (max-width: 995px) {
+  .dsh-work-output-preview { position: fixed; z-index: 30; inset: 0; width: 100vw; height: 100dvh; min-width: 0; }
+  .dsh-work-output-preview-header { grid-template-columns: 28px minmax(0, 1fr) max-content; }
+  .dsh-work-output-preview-close { width: auto; min-width: 44px; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 8px; font-size: 14px; line-height: 32px; }
+  .dsh-work-output-preview-close-wide { display: none; }
+  .dsh-work-output-preview-close-narrow, .dsh-work-output-preview-close-label { display: inline; }
+}
+@media (max-width: 480px) {
+  .dsh-work-output-preview-header { min-height: 56px; padding-left: 12px; }
+  .dsh-work-output-preview-tabs { height: 46px; padding: 0 10px; }
+  .dsh-work-output-preview-tabs button { font-size: 13px; line-height: 46px; }
+  .dsh-work-output-preview-meta { padding: 12px 16px 0; }
+  .dsh-work-output-preview-body { padding: 14px 16px 24px; }
+  .dsh-work-output-preview-actions { align-items: stretch; flex-direction: column; padding: 10px 12px; }
+  .dsh-work-output-preview-actions > span { white-space: normal; }
+  .dsh-work-output-preview-action-buttons { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dsh-work-output-preview-actions button { min-width: 0; padding-inline: 8px; }
+  .dsh-work-output-preview-source { grid-template-columns: 1fr; }
+  .dsh-work-output-preview-source > button { justify-self: start; }
+}
 .dsh-work-legacy-deliverable-open { min-width: 30px; height: 30px; padding: 0 9px; border: 1px solid var(--work-border); border-radius: 6px; color: var(--work-muted); background: var(--work-surface); cursor: pointer; font: 550 12px/1 var(--work-font); white-space: nowrap; }
 .dsh-work-legacy-deliverable-open:hover { color: var(--work-accent); border-color: var(--work-accent); }
 .dsh-work-legacy-deliverable-overlay { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 28px; background: rgb(20 24 32 / .28); pointer-events: auto; }
@@ -2006,6 +2082,7 @@ export function registerWorkSurface(ctx: Context, works: IWorks): () => void {
   }
   const closePreview = (): void => {
     const selected = preview.getSnapshot()
+    const returnToComposer = window.matchMedia(NARROW_PREVIEW_QUERY).matches
     ctx.layout.closeDetails()
     releasePreview()
     if (selected && activeRecoveryContext?.sessionId === selected.sessionId) {
@@ -2013,6 +2090,10 @@ export function registerWorkSurface(ctx: Context, works: IWorks): () => void {
     }
     if (selected) {
       requestAnimationFrame(() => {
+        if (returnToComposer) {
+          document.querySelector<HTMLElement>('[data-composer-input]')?.focus()
+          return
+        }
         const rows = document.querySelectorAll<HTMLElement>(
           `[data-work-session-output-turn="${String(selected.turn)}"] [data-work-session-output]`,
         )

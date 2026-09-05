@@ -121,6 +121,29 @@ async function run(): Promise<void> {
     await window.loadURL(authenticated)
     const js = <T = unknown>(source: string): Promise<T> =>
       window!.webContents.executeJavaScript(source) as Promise<T>
+    const pressKey = async (key: 'Enter' | 'Tab' | 'Escape', modifiers: ('shift')[] = []): Promise<void> => {
+      const debuggerApi = window!.webContents.debugger
+      if (!debuggerApi.isAttached()) debuggerApi.attach('1.3')
+      const code = key
+      const virtualKey = key === 'Enter' ? 13 : key === 'Tab' ? 9 : 27
+      const modifierMask = modifiers.includes('shift') ? 8 : 0
+      await debuggerApi.sendCommand('Input.dispatchKeyEvent', {
+        type: 'rawKeyDown', key, code, windowsVirtualKeyCode: virtualKey, nativeVirtualKeyCode: virtualKey,
+        modifiers: modifierMask,
+      })
+      if (key === 'Enter') {
+        await debuggerApi.sendCommand('Input.dispatchKeyEvent', {
+          type: 'char', key, code, text: '\r', unmodifiedText: '\r',
+          windowsVirtualKeyCode: virtualKey, nativeVirtualKeyCode: virtualKey,
+          modifiers: modifierMask,
+        })
+      }
+      await debuggerApi.sendCommand('Input.dispatchKeyEvent', {
+        type: 'keyUp', key, code, windowsVirtualKeyCode: virtualKey, nativeVirtualKeyCode: virtualKey,
+        modifiers: modifierMask,
+      })
+      await new Promise(resolve => setTimeout(resolve, 80))
+    }
     await waitFor(
       () => js<boolean>("(() => { for (const label of ['继续', '稍后配置']) { const button = Array.from(document.querySelectorAll('button')).find(item => item.textContent?.trim() === label); if (button instanceof HTMLButtonElement) button.click() } return Boolean(document.querySelector('[data-composer-input]')) && document.body.innerText.includes('成果会话甲') && document.body.innerText.includes('成果会话乙') })()"),
       value => value,
@@ -364,7 +387,7 @@ async function run(): Promise<void> {
       'Markdown preview did not reopen',
     )
     assert.equal(await setDraft('保留的修改草稿'), '保留的修改草稿')
-    assert.equal(await js<boolean>("(() => { const button = document.querySelector('[aria-label=\"关闭文件预览\"]'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
+    assert.equal(await js<boolean>("(() => { const button = document.querySelector('[aria-label=\"返回会话并关闭文件预览\"]'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
     await waitFor(
       () => js<boolean>("document.querySelector('[data-details-collapsed]') !== null"),
       value => value,
@@ -464,6 +487,152 @@ async function run(): Promise<void> {
       'Valid retry did not publish the revised file once',
     )
     assert.equal(await js<number>("Array.from(document.querySelectorAll('[data-work-session-output]')).filter(item => item.getAttribute('data-work-session-output') === 'report-a.md').length"), 2)
+
+    step = 'responsive-keyboard-file-review'; report('fail')
+    window.show()
+    window.focus()
+    if (!window.webContents.debugger.isAttached()) window.webContents.debugger.attach('1.3')
+    if (await js<boolean>("Boolean(document.querySelector('[data-work-output-preview]'))")) {
+      await js("document.querySelector('[aria-label=\"返回会话并关闭文件预览\"]')?.click()")
+      await waitFor(
+        () => js<boolean>("document.querySelector('[data-work-output-preview]') === null"),
+        value => value,
+        'Desktop preview did not close before responsive acceptance',
+      )
+    }
+    const focusReport = (index: number): Promise<boolean> => js<boolean>(`(() => {
+      const rows = Array.from(document.querySelectorAll('[data-work-session-output="report-a.md"]'))
+      const row = rows.at(${String(index)})
+      if (!(row instanceof HTMLButtonElement)) return false
+      row.focus()
+      return document.activeElement === row
+    })()`)
+    const previewSnapshot = (): Promise<{
+      readonly width: number
+      readonly left: number
+      readonly right: number
+      readonly viewport: number
+      readonly overflow: boolean
+      readonly closeFocused: boolean
+      readonly namedButtons: boolean
+      readonly liveSaveStatus: boolean
+    }> => js(`(() => {
+      const preview = document.querySelector('[data-work-output-preview]')
+      const rect = preview?.getBoundingClientRect()
+      const buttons = Array.from(preview?.querySelectorAll('button') ?? [])
+      const saveStatus = preview?.querySelector('.dsh-work-output-preview-actions > span')
+      return {
+        width: rect?.width ?? 0,
+        left: rect?.left ?? -1,
+        right: rect?.right ?? -1,
+        viewport: innerWidth,
+        overflow: document.documentElement.scrollWidth > innerWidth
+          || buttons.some(button => {
+            const buttonRect = button.getBoundingClientRect()
+            return buttonRect.left < 0 || buttonRect.right > innerWidth
+          }),
+        closeFocused: document.activeElement?.getAttribute('aria-label') === '返回会话并关闭文件预览',
+        namedButtons: buttons.every(button => Boolean(
+          button.getAttribute('aria-label') || button.textContent?.trim() || button.getAttribute('title'),
+        )),
+        liveSaveStatus: saveStatus?.getAttribute('role') === 'status'
+          && saveStatus.getAttribute('aria-live') === 'polite',
+      }
+    })()`)
+    const openByKeyboardAt = async (width: number, outputIndex = -1): Promise<void> => {
+      window!.setContentSize(width, 900)
+      await js("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+      assert.equal(await focusReport(outputIndex), true)
+      await pressKey('Enter')
+      await waitFor(
+        () => js<boolean>("Boolean(document.querySelector('[data-work-output-preview]'))"),
+        value => value,
+        `Keyboard did not open the file preview at ${String(width)}px`,
+      )
+      await waitFor(
+        previewSnapshot,
+        value => value.viewport === width && Math.abs(value.width - width) <= 1
+          && value.left === 0 && Math.abs(value.right - width) <= 1 && value.closeFocused,
+        `File preview did not become a focused single panel at ${String(width)}px`,
+      )
+      await waitFor(
+        () => js<boolean>("Array.from(document.querySelectorAll('[data-work-output-preview] button')).some(item => item instanceof HTMLButtonElement && item.textContent?.trim() === '要求修改' && !item.disabled)"),
+        value => value,
+        `File preview actions did not become ready at ${String(width)}px`,
+      )
+      const snapshot = await previewSnapshot()
+      assert.equal(snapshot.overflow, false)
+      assert.equal(snapshot.namedButtons, true)
+      assert.equal(snapshot.liveSaveStatus, true)
+    }
+
+    await openByKeyboardAt(736)
+    const tabOrder: string[] = []
+    for (let index = 0; index < 5; index++) {
+      await pressKey('Tab')
+      tabOrder.push(await js<string>(
+        "document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.trim() || ''",
+      ))
+    }
+    assert.equal(tabOrder[0], '内容')
+    assert.ok(tabOrder[1]?.startsWith('来源'))
+    assert.ok(tabOrder.includes('保存副本'))
+    assert.ok(tabOrder.includes('要求修改'))
+    assert.equal(tabOrder.at(-1), '返回会话并关闭文件预览')
+    fs.writeFileSync(path.join(output, 'responsive-736.png'), (await window.webContents.capturePage()).toPNG())
+    await pressKey('Escape')
+    await waitFor(
+      () => js<boolean>("document.querySelector('[data-work-output-preview]') === null && document.activeElement === document.querySelector('[data-composer-input]')"),
+      value => value,
+      '736px preview did not return keyboard focus to the composer',
+    )
+    await window.webContents.debugger.sendCommand('Input.insertText', { text: 'x' })
+    await waitFor(
+      () => js<string>("document.querySelector('[data-composer-input]')?.textContent ?? ''"),
+      value => value === 'x',
+      'Composer did not accept keyboard input after returning from preview',
+    )
+
+    await openByKeyboardAt(390)
+    assert.equal(await js<string>("document.querySelector('.dsh-work-output-preview-close-label')?.textContent ?? ''"), '返回会话')
+    fs.writeFileSync(path.join(output, 'responsive-390.png'), (await window.webContents.capturePage()).toPNG())
+    for (let index = 0; index < 4; index++) await pressKey('Tab')
+    assert.equal(await js<string>("document.activeElement?.textContent?.trim() ?? ''"), '要求修改')
+    await pressKey('Enter')
+    await waitFor(
+      () => js<{ readonly previewClosed: boolean; readonly composerFocused: boolean; readonly draft: string }>(`({
+        previewClosed: document.querySelector('[data-work-output-preview]') === null,
+        composerFocused: document.activeElement === document.querySelector('[data-composer-input]'),
+        draft: document.querySelector('[data-composer-input]')?.textContent ?? '',
+      })`),
+      value => value.previewClosed && value.composerFocused
+        && value.draft.includes('x') && value.draft.includes('@report-a.md'),
+      '390px revision did not return to the preserved composer draft',
+    )
+
+    await openByKeyboardAt(390, 0)
+    await pressKey('Tab')
+    await pressKey('Tab')
+    assert.ok((await js<string>("document.activeElement?.textContent?.trim() ?? ''")).startsWith('来源'))
+    await pressKey('Enter')
+    await waitFor(
+      () => js<boolean>("Boolean(document.querySelector('[data-work-output-preview-source] button:not(:disabled)'))"),
+      value => value,
+      '390px source tab did not expose a reference action',
+    )
+    await pressKey('Tab')
+    assert.equal(await js<string>("document.activeElement?.textContent?.trim() ?? ''"), '在输入框引用')
+    await pressKey('Enter')
+    await waitFor(
+      () => js<{ readonly previewClosed: boolean; readonly composerFocused: boolean; readonly draft: string }>(`({
+        previewClosed: document.querySelector('[data-work-output-preview]') === null,
+        composerFocused: document.activeElement === document.querySelector('[data-composer-input]'),
+        draft: document.querySelector('[data-composer-input]')?.textContent ?? '',
+      })`),
+      value => value.previewClosed && value.composerFocused
+        && value.draft.includes(sourcePath),
+      '390px source reference did not return to the composer with the managed source',
+    )
 
     await host.stop()
     host = null
