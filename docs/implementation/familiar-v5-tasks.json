@@ -176,7 +176,7 @@
       "files": "packages/work-api/surface.ts；packages/work-api/client-model.ts；packages/work-domain/index.ts",
       "verification": "渲染安全负向、异步竞态、预览开关 E2E、成果阅读截图",
       "limits": "依赖选择须有必要性/许可证/打包证据；不实现富文本编辑器。",
-      "status": "pending"
+      "status": "verified"
     },
     {
       "id": "T10",

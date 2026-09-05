@@ -25,6 +25,8 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   let registration: { id: string; factory: (require: (id: string) => unknown) => unknown } | undefined
   const context = vm.createContext({
     window: {
+      addEventListener() {},
+      removeEventListener() {},
       __ModuleLoader__: {
         load(value: typeof registration) {
           registration = value
@@ -62,7 +64,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
     inject?: unknown
   }
   assert.equal(typeof exports.apply, 'function')
-  assert.deepEqual(Array.from(exports.inject as string[]), ['remote', 'slots'])
+  assert.deepEqual(Array.from(exports.inject as string[]), ['remote', 'slots', 'layout'])
 
   const injectedSlots: string[] = []
   const injectedServices: string[][] = []
@@ -76,6 +78,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
       async dispatch() { throw new Error('not called') },
       async importSessionResource() { throw new Error('not called') },
       async inspectSessionOutputs() { throw new Error('not called') },
+      async readSessionOutput() { throw new Error('not called') },
       async list() { return { ok: true, value: { items: [] } } },
       async *follow() {},
     },
@@ -83,6 +86,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   let scopedDispose: (() => Promise<void> | void) | undefined
   const clientContext = {
     remote,
+    layout: { openDetails() {}, closeDetails() {}, toggleSidebar() {} },
     inject(deps: string[], apply: (ctx: unknown) => (() => Promise<void> | void)) {
       injectedServices.push(deps)
       scopedDispose = apply(clientContext)
@@ -106,7 +110,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
     },
   }
   const dispose = await exports.apply!(clientContext)
-  assert.deepEqual(injectedServices.map(value => Array.from(value)), [['remote.work']])
+  assert.deepEqual(injectedServices.map(value => Array.from(value)), [['remote.work', 'layout']])
   assert.deepEqual(injectedSlots, [
     'sidebar.brand.name',
     'conversation.input.left',

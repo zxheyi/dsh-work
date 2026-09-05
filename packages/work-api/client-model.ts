@@ -14,11 +14,13 @@ import type {
   WorkImportConversationSpec,
   WorkImportSessionResourceSpec,
   WorkInspectSessionOutputsSpec,
+  WorkReadSessionOutputSpec,
   WorkRemoteFollowFrame,
   WorkView,
   WorkShowDeliveryValue,
   WorkSessionFileResource,
   WorkSessionOutputFile,
+  WorkSessionOutputContent,
   WorkSessionOutputsValue,
 } from './index.ts'
 
@@ -39,6 +41,10 @@ export interface WorkClientRemote {
     spec: WorkInspectSessionOutputsSpec,
     signal?: AbortSignal,
   ): Promise<RemoteResult<WorkSessionOutputsValue>>
+  readSessionOutput(
+    spec: WorkReadSessionOutputSpec,
+    signal?: AbortSignal,
+  ): Promise<RemoteResult<WorkSessionOutputContent>>
   list(): Promise<RemoteResult<WorkListValue>>
   follow(signal?: AbortSignal): AsyncIterable<WorkRemoteFollowFrame>
 }
@@ -70,6 +76,10 @@ export interface IWorks {
     spec: WorkInspectSessionOutputsSpec,
     signal?: AbortSignal,
   ): Promise<readonly WorkSessionOutputFile[]>
+  readSessionOutput(
+    spec: WorkReadSessionOutputSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkSessionOutputContent>
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -135,6 +145,13 @@ export class ClientWorkModel implements WorkSource {
     signal?: AbortSignal,
   ): Promise<RemoteResult<WorkSessionOutputsValue>> {
     return this.remote.inspectSessionOutputs(spec, signal)
+  }
+
+  readSessionOutput(
+    spec: WorkReadSessionOutputSpec,
+    signal?: AbortSignal,
+  ): Promise<RemoteResult<WorkSessionOutputContent>> {
+    return this.remote.readSessionOutput(spec, signal)
   }
 
   replaceBaseline(value: WorkListValue): void {
@@ -266,5 +283,14 @@ export class WorksController extends Service implements IWorks {
     const result = await this.model.inspectSessionOutputs(spec, signal)
     if (!result.ok) throw result.error
     return result.value.items
+  }
+
+  async readSessionOutput(
+    spec: WorkReadSessionOutputSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkSessionOutputContent> {
+    const result = await this.model.readSessionOutput(spec, signal)
+    if (!result.ok) throw result.error
+    return result.value
   }
 }

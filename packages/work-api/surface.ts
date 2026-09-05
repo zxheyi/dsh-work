@@ -16,7 +16,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 
 import type { IWorks, WorkClientSnapshot } from './client-model.ts'
-import type { WorkSessionOutputFile, WorkView } from './index.ts'
+import type { WorkSessionOutputContent, WorkSessionOutputFile, WorkView } from './index.ts'
 import type { WorkDeliverableContent } from './index.ts'
 
 interface WorkSurfaceInjected {
@@ -65,8 +65,159 @@ interface NativeSessionOutputsProps extends WorkSurfaceInjected {
   readonly openFile: (path: string) => void
 }
 
+interface SessionOutputPreviewSelection extends WorkSessionOutputFile {
+  readonly throughSeq: number
+  readonly open: () => void
+}
+
+type SessionOutputPreviewDetail = Omit<SessionOutputPreviewSelection, 'open'>
+const SESSION_OUTPUT_OPEN = Symbol('dsh-work.session-output.open')
+type SessionOutputSelectionEvent = CustomEvent<SessionOutputPreviewDetail> & {
+  readonly [SESSION_OUTPUT_OPEN]: () => void
+}
+
+interface SessionOutputPreviewStore {
+  readonly getSnapshot: () => SessionOutputPreviewSelection | null
+  readonly subscribe: (listener: () => void) => () => void
+  readonly select: (selection: SessionOutputPreviewSelection) => void
+  readonly clear: () => void
+}
+
+interface NativeSessionOutputPreviewProps extends WorkSurfaceInjected {
+  readonly sessionId: string
+  readonly preview: SessionOutputPreviewStore
+  readonly closePreview: () => void
+}
+
+export type SafeMarkdownBlock =
+  | { readonly kind: 'heading'; readonly level: number; readonly text: string }
+  | { readonly kind: 'paragraph'; readonly text: string }
+  | { readonly kind: 'list'; readonly ordered: boolean; readonly items: readonly string[] }
+  | { readonly kind: 'code'; readonly text: string }
+
+export type SafeMarkdownRenderPlan =
+  | { readonly mode: 'structured'; readonly blocks: readonly SafeMarkdownBlock[] }
+  | { readonly mode: 'plain'; readonly content: string }
+
 const sessionResourceEntries = new Map<string, readonly SessionResourceEntryState[]>()
 const sessionResourceDrafts = new Map<string, string>()
+const MAX_STRUCTURED_MARKDOWN_NODES = 2_000
+
+function createSessionOutputPreviewStore(): SessionOutputPreviewStore {
+  let snapshot: SessionOutputPreviewSelection | null = null
+  const listeners = new Set<() => void>()
+  const publish = (): void => {
+    for (const listener of listeners) listener()
+  }
+  return Object.freeze({
+    getSnapshot: () => snapshot,
+    subscribe(listener: () => void) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    select(selection: SessionOutputPreviewSelection) {
+      snapshot = selection
+      publish()
+    },
+    clear() {
+      snapshot = null
+      publish()
+    },
+  })
+}
+
+export function parseSafeMarkdown(source: string): readonly SafeMarkdownBlock[] {
+  const lines = source.replace(/\r\n?/gu, '\n').split('\n')
+  const blocks: SafeMarkdownBlock[] = []
+  let index = 0
+  while (index < lines.length) {
+    const line = lines[index] ?? ''
+    if (line.trim().length === 0) {
+      index++
+      continue
+    }
+    if (/^\s*```/u.test(line)) {
+      const code: string[] = []
+      index++
+      while (index < lines.length && !/^\s*```/u.test(lines[index] ?? '')) {
+        code.push(lines[index] ?? '')
+        index++
+      }
+      if (index < lines.length) index++
+      blocks.push(Object.freeze({ kind: 'code', text: code.join('\n') }))
+      continue
+    }
+    const heading = /^(#{1,6})\s+(.+)$/u.exec(line)
+    if (heading) {
+      blocks.push(Object.freeze({
+        kind: 'heading',
+        level: heading[1]?.length ?? 1,
+        text: heading[2] ?? '',
+      }))
+      index++
+      continue
+    }
+    const listItem = /^\s*(?:(\d+)\.|([-+*]))\s+(.+)$/u.exec(line)
+    if (listItem) {
+      const ordered = listItem[1] !== undefined
+      const items: string[] = []
+      while (index < lines.length) {
+        const item = /^\s*(?:(\d+)\.|([-+*]))\s+(.+)$/u.exec(lines[index] ?? '')
+        if (!item || (item[1] !== undefined) !== ordered) break
+        items.push(item[3] ?? '')
+        index++
+      }
+      blocks.push(Object.freeze({ kind: 'list', ordered, items: Object.freeze(items) }))
+      continue
+    }
+    const paragraph: string[] = []
+    while (index < lines.length) {
+      const next = lines[index] ?? ''
+      if (next.trim().length === 0
+        || /^\s*```/u.test(next)
+        || /^(#{1,6})\s+(.+)$/u.test(next)
+        || /^\s*(?:(\d+)\.|([-+*]))\s+(.+)$/u.test(next)) break
+      paragraph.push(next.trim())
+      index++
+    }
+    blocks.push(Object.freeze({ kind: 'paragraph', text: paragraph.join(' ') }))
+  }
+  return Object.freeze(blocks)
+}
+
+export function planSafeMarkdownRender(source: string): SafeMarkdownRenderPlan {
+  const blocks = parseSafeMarkdown(source)
+  let nodes = 0
+  for (const block of blocks) {
+    nodes += block.kind === 'list' ? block.items.length + 1 : 1
+    if (nodes > MAX_STRUCTURED_MARKDOWN_NODES) {
+      return Object.freeze({ mode: 'plain', content: source })
+    }
+  }
+  return Object.freeze({ mode: 'structured', blocks })
+}
+
+export class LatestPreviewRequest {
+  private generation = 0
+
+  async run<Value>(
+    load: () => Promise<Value>,
+    ready: (value: Value) => void,
+    failed: () => void,
+  ): Promise<void> {
+    const generation = ++this.generation
+    try {
+      const value = await load()
+      if (generation === this.generation) ready(value)
+    } catch {
+      if (generation === this.generation) failed()
+    }
+  }
+
+  invalidate(): void {
+    this.generation++
+  }
+}
 
 const shortcuts = Object.freeze([
   Object.freeze({
@@ -971,13 +1122,20 @@ function NativeSessionOutputs({ matched, openFile, sessionId, works }: NativeSes
     'aria-pressed': selectedPath === file.path,
     onClick: () => {
       setSelectedPath(file.path)
-      const selection = new CustomEvent('dsh-work:select-session-output', {
+      const selection = new CustomEvent<SessionOutputPreviewDetail>('dsh-work:select-session-output', {
         cancelable: true,
         detail: Object.freeze({
           sessionId: file.sessionId,
           turn: file.turn,
+          throughSeq: matched.throughSeq,
+          name: file.name,
           path: file.path,
+          bytes: file.bytes,
+          mediaType: file.mediaType,
         }),
+      }) as SessionOutputSelectionEvent
+      Object.defineProperty(selection, SESSION_OUTPUT_OPEN, {
+        value: () => openFile(file.path),
       })
       if (window.dispatchEvent(selection)) openFile(file.path)
     },
@@ -986,6 +1144,118 @@ function NativeSessionOutputs({ matched, openFile, sessionId, works }: NativeSes
   h('span', { className: 'dsh-work-session-output-copy' },
     h('strong', null, file.name),
     h('small', null, outputSize(file.bytes)))))))
+}
+
+function safeMarkdownContent(content: WorkSessionOutputContent): ReactNode {
+  const plan = planSafeMarkdownRender(content.content)
+  if (plan.mode === 'plain') {
+    return h('article', {
+      className: 'dsh-work-output-preview-markdown',
+      'data-work-output-preview-markdown': true,
+      'data-work-output-preview-mode': 'plain',
+    }, [
+      h('p', { className: 'dsh-work-output-preview-density', key: 'notice' },
+        '内容结构较密集，已切换为纯文本阅读。'),
+      h('pre', { key: 'content' }, plan.content),
+    ])
+  }
+  return h('article', {
+    className: 'dsh-work-output-preview-markdown',
+    'data-work-output-preview-markdown': true,
+    'data-work-output-preview-mode': 'structured',
+  }, plan.blocks.map((block, index) => {
+    if (block.kind === 'heading') {
+      return h(`h${String(block.level)}`, { key: index }, block.text)
+    }
+    if (block.kind === 'list') {
+      return h(block.ordered ? 'ol' : 'ul', { key: index },
+        block.items.map((item, itemIndex) => h('li', { key: itemIndex }, item)))
+    }
+    if (block.kind === 'code') {
+      return h('pre', { key: index }, h('code', null, block.text))
+    }
+    return h('p', { key: index }, block.text)
+  }))
+}
+
+function NativeSessionOutputPreview({
+  closePreview,
+  preview,
+  sessionId,
+  works,
+}: NativeSessionOutputPreviewProps): ReactNode {
+  const selection = useSyncExternalStore(preview.subscribe, preview.getSnapshot, preview.getSnapshot)
+  const [retry, setRetry] = useState(0)
+  const request = useMemo(() => new LatestPreviewRequest(), [])
+  const [state, setState] = useState<
+    | { readonly phase: 'idle' }
+    | { readonly phase: 'loading' }
+    | { readonly phase: 'ready'; readonly content: WorkSessionOutputContent }
+    | { readonly phase: 'error' }
+  >({ phase: 'idle' })
+
+  useEffect(() => {
+    if (!selection || selection.sessionId !== sessionId || selection.mediaType !== 'text/markdown') {
+      setState({ phase: 'idle' })
+      return
+    }
+    const abort = new AbortController()
+    setState({ phase: 'loading' })
+    void request.run(
+      () => works.readSessionOutput({
+        sessionId: selection.sessionId,
+        turn: selection.turn,
+        throughSeq: selection.throughSeq,
+        path: selection.path,
+      }, abort.signal),
+      content => setState({ phase: 'ready', content }),
+      () => setState({ phase: 'error' }),
+    )
+    return () => {
+      request.invalidate()
+      abort.abort()
+    }
+  }, [request, retry, selection, sessionId, works])
+
+  useEffect(() => {
+    if (selection && selection.sessionId !== sessionId) closePreview()
+  }, [closePreview, selection, sessionId])
+
+  if (!selection) return null
+  const unsupported = selection.mediaType !== 'text/markdown'
+  return h('section', {
+    className: 'dsh-work-output-preview',
+    'data-work-output-preview': selection.path,
+    'aria-label': `${selection.name} 预览`,
+  },
+  h('header', { className: 'dsh-work-output-preview-header' },
+    h('span', { className: 'dsh-work-output-preview-file-icon', 'aria-hidden': 'true' }, '文'),
+    h('strong', { title: selection.path }, selection.name),
+    h('button', {
+      type: 'button',
+      className: 'dsh-work-output-preview-close',
+      'aria-label': '关闭文件预览',
+      onClick: closePreview,
+    }, '×')),
+  h('div', { className: 'dsh-work-output-preview-tabs', role: 'tablist', 'aria-label': '文件详情' },
+    h('button', { type: 'button', role: 'tab', 'aria-selected': true }, '内容')),
+  h('div', { className: 'dsh-work-output-preview-meta' },
+    h('span', null, `第 ${String(selection.turn)} 回合生成`),
+    h('span', null, outputSize(selection.bytes))),
+  h('div', { className: 'dsh-work-output-preview-body' },
+    unsupported
+      ? h('div', { className: 'dsh-work-output-preview-empty' },
+        h('strong', null, '此格式暂不支持应用内预览'),
+        h('p', null, '可以使用系统应用打开这个文件。'),
+        h('button', { type: 'button', onClick: selection.open }, '使用系统应用打开'))
+      : state.phase === 'loading' || state.phase === 'idle'
+        ? h('div', { className: 'dsh-work-output-preview-status', role: 'status', 'aria-live': 'polite' }, '正在读取文件…')
+        : state.phase === 'error'
+          ? h('div', { className: 'dsh-work-output-preview-empty', role: 'alert' },
+            h('strong', null, '暂时无法读取文件'),
+            h('p', null, '文件可能已移动、仍在写入或内容过大。'),
+            h('button', { type: 'button', onClick: () => setRetry(value => value + 1) }, '重试'))
+          : safeMarkdownContent(state.content)))
 }
 
 const styles = `
@@ -1042,6 +1312,35 @@ body[data-ds-dark-theme] {
 .dsh-work-session-output-copy strong, .dsh-work-session-output-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dsh-work-session-output-copy strong { font-size: 12px; line-height: 17px; }
 .dsh-work-session-output-copy small { color: var(--work-faint); font-size: 10px; line-height: 14px; }
+.dsh-work-output-preview { height: 100%; min-width: 300px; display: flex; flex-direction: column; color: var(--work-text); background: var(--work-surface); font-family: var(--work-font); }
+.dsh-work-output-preview-header { min-height: 64px; display: grid; grid-template-columns: 28px minmax(0, 1fr) 32px; align-items: center; gap: 10px; padding: 0 12px 0 18px; border-bottom: 1px solid var(--work-border); }
+.dsh-work-output-preview-header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+.dsh-work-output-preview-file-icon { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; color: var(--work-accent); background: var(--work-accent-subtle); font-size: 10px; font-weight: 700; }
+.dsh-work-output-preview-close { width: 32px; height: 32px; border: 0; border-radius: 50%; color: var(--work-muted); background: transparent; cursor: pointer; font: 400 26px/30px var(--work-font); }
+.dsh-work-output-preview-close:hover { color: var(--work-text); background: var(--work-surface-subtle); }
+.dsh-work-output-preview-tabs { height: 50px; display: flex; align-items: stretch; padding: 0 18px; border-bottom: 1px solid var(--work-border); }
+.dsh-work-output-preview-tabs button { position: relative; min-width: 54px; border: 0; color: var(--work-accent); background: transparent; cursor: default; font: 600 14px/50px var(--work-font); }
+.dsh-work-output-preview-tabs button::after { content: ''; position: absolute; height: 2px; left: 10px; right: 10px; bottom: 0; background: var(--work-accent); }
+.dsh-work-output-preview-meta { display: flex; justify-content: space-between; gap: 12px; padding: 14px 24px 0; color: var(--work-faint); font-size: 11px; }
+.dsh-work-output-preview-body { flex: 1; min-height: 0; padding: 18px 24px 96px; overflow-y: auto; }
+.dsh-work-output-preview-status { color: var(--work-muted); padding: 16px 0; font-size: 13px; }
+.dsh-work-output-preview-empty { display: grid; gap: 8px; align-content: start; padding: 28px 0; }
+.dsh-work-output-preview-empty strong { font-size: 15px; }
+.dsh-work-output-preview-empty p { margin: 0; color: var(--work-muted); font-size: 13px; line-height: 1.7; }
+.dsh-work-output-preview-empty button { justify-self: start; margin-top: 8px; padding: 8px 14px; border: 1px solid var(--work-border-strong); border-radius: 7px; color: var(--work-text); background: var(--work-surface); cursor: pointer; font: 500 13px/18px var(--work-font); }
+.dsh-work-output-preview-markdown { color: var(--work-text); overflow-wrap: anywhere; font-size: 14px; line-height: 1.8; }
+.dsh-work-output-preview-markdown h1, .dsh-work-output-preview-markdown h2, .dsh-work-output-preview-markdown h3, .dsh-work-output-preview-markdown h4, .dsh-work-output-preview-markdown h5, .dsh-work-output-preview-markdown h6 { margin: 1.4em 0 .55em; line-height: 1.35; }
+.dsh-work-output-preview-markdown h1:first-child, .dsh-work-output-preview-markdown h2:first-child { margin-top: 0; }
+.dsh-work-output-preview-markdown h1 { font-size: 26px; }
+.dsh-work-output-preview-markdown h2 { padding-bottom: 8px; border-bottom: 1px solid var(--work-border); font-size: 19px; }
+.dsh-work-output-preview-markdown h3 { font-size: 16px; }
+.dsh-work-output-preview-markdown h4, .dsh-work-output-preview-markdown h5, .dsh-work-output-preview-markdown h6 { font-size: 14px; }
+.dsh-work-output-preview-markdown p { margin: 0 0 1em; }
+.dsh-work-output-preview-markdown ul, .dsh-work-output-preview-markdown ol { margin: 0 0 1.1em; padding-left: 1.6em; }
+.dsh-work-output-preview-markdown li + li { margin-top: 5px; }
+.dsh-work-output-preview-markdown pre { max-width: 100%; margin: 0 0 1.1em; padding: 14px; overflow-x: auto; border-radius: 8px; color: var(--work-text); background: var(--work-surface-subtle); font: 12px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+.dsh-work-output-preview-density { color: var(--work-muted); font-size: 12px; }
+.dsh-work-output-preview button:focus-visible { outline: 2px solid var(--work-accent); outline-offset: 2px; }
 .dsh-work-legacy-deliverable-open { min-width: 30px; height: 30px; padding: 0 9px; border: 1px solid var(--work-border); border-radius: 6px; color: var(--work-muted); background: var(--work-surface); cursor: pointer; font: 550 12px/1 var(--work-font); white-space: nowrap; }
 .dsh-work-legacy-deliverable-open:hover { color: var(--work-accent); border-color: var(--work-accent); }
 .dsh-work-legacy-deliverable-overlay { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 28px; background: rgb(20 24 32 / .28); pointer-events: auto; }
@@ -1252,6 +1551,61 @@ function installStyles(): () => void {
 
 export function registerWorkSurface(ctx: Context, works: IWorks): () => void {
   const removeStyles = installStyles()
+  const preview = createSessionOutputPreviewStore()
+  let removePreview: (() => void) | null = null
+  const releasePreview = (): void => {
+    removePreview?.()
+    removePreview = null
+    preview.clear()
+  }
+  const closePreview = (): void => {
+    const selected = preview.getSnapshot()
+    ctx.layout.closeDetails()
+    releasePreview()
+    if (selected) {
+      requestAnimationFrame(() => {
+        const rows = document.querySelectorAll<HTMLElement>(
+          `[data-work-session-output-turn="${String(selected.turn)}"] [data-work-session-output]`,
+        )
+        Array.from(rows).find(row => row.dataset.workSessionOutput === selected.path)?.focus()
+      })
+    }
+  }
+  const handOverToNativeToolSurface = (event: Event): void => {
+    if (!preview.getSnapshot() || !(event.target instanceof Element)) return
+    const call = event.target.closest<HTMLElement>('[data-chat-call-id]')
+    const callId = call?.dataset.chatCallId
+    if (!callId) return
+    requestAnimationFrame(() => {
+      const matching = Array.from(document.querySelectorAll<HTMLElement>('[data-chat-call-id]'))
+        .find(candidate => candidate.dataset.chatCallId === callId)
+      if (!matching || matching.hasAttribute('data-selected')) releasePreview()
+    })
+  }
+  const selectOutput = (event: Event): void => {
+    if (!(event instanceof CustomEvent) || typeof event.detail !== 'object' || !event.detail) return
+    const detail = event.detail as Partial<SessionOutputPreviewDetail>
+    const open = (event as Partial<SessionOutputSelectionEvent>)[SESSION_OUTPUT_OPEN]
+    if (typeof detail.sessionId !== 'string'
+      || typeof detail.name !== 'string'
+      || typeof detail.path !== 'string'
+      || !Number.isSafeInteger(detail.turn)
+      || !Number.isSafeInteger(detail.throughSeq)
+      || !Number.isSafeInteger(detail.bytes)
+      || detail.bytes! < 1
+      || (typeof detail.mediaType !== 'string' && detail.mediaType !== null)
+      || typeof open !== 'function') return
+    event.preventDefault()
+    preview.select(Object.freeze({ ...detail, open } as SessionOutputPreviewSelection))
+    removePreview ??= ctx.slots.register({
+      name: 'details',
+      priority: -100,
+      inject: () => ({ works, preview, closePreview }),
+    }, NativeSessionOutputPreview)
+    requestAnimationFrame(() => ctx.layout.openDetails())
+  }
+  window.addEventListener('dsh-work:select-session-output', selectOutput)
+  window.addEventListener('click', handOverToNativeToolSurface)
   ctx.slots.inject('sidebar.brand.name', () => ctx.slots.register({
     name: 'sidebar.brand.name',
     priority: -100,
@@ -1293,5 +1647,11 @@ export function registerWorkSurface(ctx: Context, works: IWorks): () => void {
     label: '旧成果',
     inject: () => ({ works }),
   }, LegacyDeliverableOverlay))
-  return removeStyles
+  return () => {
+    window.removeEventListener('dsh-work:select-session-output', selectOutput)
+    window.removeEventListener('click', handOverToNativeToolSurface)
+    removePreview?.()
+    preview.clear()
+    removeStyles()
+  }
 }

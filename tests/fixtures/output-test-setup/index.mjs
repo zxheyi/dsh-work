@@ -8,6 +8,20 @@ const SESSION_B = 'f2250bfd-accc-4acf-b39a-9ca687cd5f07'
 const ORDINARY_PROMPT = '只进行普通回复，不生成文件'
 const GENERATE_A_PROMPT = '生成甲会话的两个真实文件'
 const GENERATE_B_PROMPT = '生成乙会话的一个真实文件'
+const REPORT_A = [
+  '# 甲报告',
+  '',
+  '本周结论已经整理完成。',
+  '',
+  '## 行动项',
+  '',
+  '- 产品：整理试用反馈。',
+  '- 研发：核对导出与恢复。',
+  '',
+  '<script>globalThis.__dshWorkPreviewExecuted = true</script>',
+  '![外部图片](https://example.invalid/tracker.png)',
+  '',
+].join('\n')
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
 const MODEL = Object.freeze({
   provider: PROVIDER,
@@ -58,7 +72,7 @@ class OutputAdapter extends LlmAdapter {
     }
     const prompt = textOf(latest)
     if (prompt.includes(GENERATE_A_PROMPT)) {
-      for (const event of toolCall(0, 'output-a-markdown', 'report-a.md', '# 甲报告\n')) yield event
+      for (const event of toolCall(0, 'output-a-markdown', 'report-a.md', REPORT_A)) yield event
       for (const event of toolCall(1, 'output-a-csv', 'report-b.csv', 'name,value\nalpha,1\n')) yield event
       for (const event of toolCall(2, 'output-a-empty', 'empty.md', '')) yield event
       yield { type: 'finish', reason: { kind: 'tool-calls' } }

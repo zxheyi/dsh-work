@@ -122,6 +122,10 @@ export interface InspectSessionOutputsSpec {
   readonly throughSeq: number
 }
 
+export interface ReadSessionOutputSpec extends InspectSessionOutputsSpec {
+  readonly path: string
+}
+
 export interface SessionOutputFile {
   readonly sessionId: string
   readonly turn: number
@@ -129,6 +133,11 @@ export interface SessionOutputFile {
   readonly path: string
   readonly bytes: number
   readonly mediaType: string | null
+}
+
+export interface SessionOutputContent extends SessionOutputFile {
+  readonly content: string
+  readonly contentDigest: string
 }
 
 export interface WorkFileDeliverable {
@@ -152,6 +161,7 @@ export interface WorkController {
   showDelivery(workId: string, signal?: AbortSignal): Promise<void>
   importSessionResource(spec: ImportSessionResourceSpec, signal?: AbortSignal): Promise<SessionFileResource>
   inspectSessionOutputs(spec: InspectSessionOutputsSpec, signal?: AbortSignal): Promise<readonly SessionOutputFile[]>
+  readSessionOutput(spec: ReadSessionOutputSpec, signal?: AbortSignal): Promise<SessionOutputContent>
   follow(signal?: AbortSignal): AsyncIterable<WorkFollowFrame>
   dispatch(request: DispatchWorkRequest, signal?: AbortSignal): Promise<WorkSnapshot>
 }
@@ -235,6 +245,7 @@ export interface WorkControllerOptions {
       readonly candidatePath: string
       readonly producedPath: string
     }) => void | Promise<void>
+    readonly afterPreviewFirstStat?: (path: string) => void | Promise<void>
   }
 }
 
@@ -311,6 +322,7 @@ export const MAX_WORK_MARKDOWN_DELIVERABLE_BYTES = 5 * 1024 * 1024
 
 const MAX_WORK_FILE_RESOURCE_BASE64_CHARS = Math.ceil(MAX_WORK_FILE_RESOURCE_BYTES / 3) * 4
 const MAX_SESSION_OUTPUT_FILES = 64
+const MAX_SESSION_OUTPUT_PREVIEW_BYTES = 5 * 1024 * 1024
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u
 
 function resourceError(message: string, options?: ErrorOptions): WorkError {
@@ -788,6 +800,110 @@ async function validatedSessionOutputs(
     }
   }
   return Object.freeze(outputs)
+}
+
+async function readValidatedSessionOutput(
+  inspected: { readonly cwd: string; readonly events: readonly unknown[] },
+  spec: ReadSessionOutputSpec,
+  signal?: AbortSignal,
+  internals?: WorkControllerOptions['sessionOutputInternals'],
+): Promise<SessionOutputContent> {
+  const outputs = await validatedSessionOutputs(inspected, spec)
+  const output = outputs.find(candidate => candidate.path === spec.path)
+  if (!output || output.mediaType !== 'text/markdown') {
+    throw new WorkError(
+      'work/session-output-invalid',
+      'The selected Session output is not a readable Markdown file.',
+    )
+  }
+  signal?.throwIfAborted()
+  let workspacePath: string
+  try {
+    workspacePath = await fs.realpath(inspected.cwd)
+  } catch (cause) {
+    throw new WorkError('work/session-output-invalid', 'The Session Workspace is not readable.', { cause })
+  }
+  const candidate = path.isAbsolute(output.path)
+    ? output.path
+    : path.resolve(workspacePath, output.path)
+  const lexicalRelative = path.relative(workspacePath, candidate)
+  if (lexicalRelative === '..'
+    || lexicalRelative.startsWith(`..${path.sep}`)
+    || path.isAbsolute(lexicalRelative)) {
+    throw new WorkError('work/session-output-invalid', 'The selected output is outside its Session Workspace.')
+  }
+  try {
+    const handle = await fs.open(
+      candidate,
+      fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK,
+    )
+    try {
+      const first = await handle.stat({ bigint: true })
+      if (!first.isFile()
+        || first.size < 1n
+        || first.size > BigInt(MAX_SESSION_OUTPUT_PREVIEW_BYTES)
+        || Number(first.size) !== output.bytes) {
+        throw new Error('output changed before preview')
+      }
+      const resolved = await fs.realpath(candidate)
+      const relative = path.relative(workspacePath, resolved)
+      if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+        throw new Error('output resolves outside workspace')
+      }
+      const current = await fs.lstat(candidate, { bigint: true })
+      if (current.dev !== first.dev || current.ino !== first.ino || current.size !== first.size) {
+        throw new Error('output identity changed before preview')
+      }
+      await internals?.afterPreviewFirstStat?.(candidate)
+      signal?.throwIfAborted()
+      const allocation = Buffer.allocUnsafe(MAX_SESSION_OUTPUT_PREVIEW_BYTES + 1)
+      let byteLength = 0
+      while (byteLength < allocation.byteLength) {
+        signal?.throwIfAborted()
+        const { bytesRead } = await handle.read(
+          allocation,
+          byteLength,
+          allocation.byteLength - byteLength,
+          byteLength,
+        )
+        if (bytesRead === 0) break
+        byteLength += bytesRead
+      }
+      signal?.throwIfAborted()
+      if (byteLength > MAX_SESSION_OUTPUT_PREVIEW_BYTES) {
+        throw new Error('output exceeded preview limit during preview')
+      }
+      const bytes = allocation.subarray(0, byteLength)
+      const second = await handle.stat({ bigint: true })
+      const finalPath = await fs.lstat(candidate, { bigint: true })
+      if (second.dev !== first.dev
+        || second.ino !== first.ino
+        || second.size !== first.size
+        || second.mtimeNs !== first.mtimeNs
+        || second.ctimeNs !== first.ctimeNs
+        || finalPath.dev !== second.dev
+        || finalPath.ino !== second.ino
+        || finalPath.size !== second.size
+        || bytes.byteLength !== Number(second.size)) {
+        throw new Error('output changed during preview')
+      }
+      const content = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+      return Object.freeze({
+        ...output,
+        content,
+        contentDigest: createHash('sha256').update(bytes).digest('hex'),
+      })
+    } finally {
+      await handle.close()
+    }
+  } catch (cause) {
+    if (signal?.aborted) throw cause
+    throw new WorkError(
+      'work/session-output-invalid',
+      'The selected Markdown output could not be read safely.',
+      { cause },
+    )
+  }
 }
 
 async function waitForSubmittedTurn(
@@ -1358,6 +1474,26 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         )
       }
       return validatedSessionOutputs(inspected, spec, options.sessionOutputInternals)
+    },
+
+    async readSessionOutput(spec, signal) {
+      if (!options.harness.inspectSession) {
+        throw new WorkError(
+          'work/session-output-invalid',
+          'This Host cannot inspect Session output events.',
+        )
+      }
+      let inspected: Awaited<ReturnType<NonNullable<HarnessWorkPort['inspectSession']>>>
+      try {
+        inspected = await options.harness.inspectSession(spec.sessionId, signal)
+      } catch (cause) {
+        throw new WorkError(
+          'work/session-output-invalid',
+          'The current Session output events are not readable.',
+          { cause },
+        )
+      }
+      return readValidatedSessionOutput(inspected, spec, signal, options.sessionOutputInternals)
     },
 
     async *follow(signal = new AbortController().signal) {

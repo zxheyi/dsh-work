@@ -74,6 +74,21 @@ function successfulRemote(overrides: Partial<WorkClientRemote> = {}): WorkClient
     async inspectSessionOutputs() {
       return { ok: true as const, value: { items: [] } }
     },
+    async readSessionOutput() {
+      return {
+        ok: true as const,
+        value: {
+          sessionId: 'session-client',
+          turn: 1,
+          name: 'report.md',
+          path: 'report.md',
+          bytes: 9,
+          mediaType: 'text/markdown',
+          content: '# Report\n',
+          contentDigest: 'd'.repeat(64),
+        },
+      }
+    },
     async list(): Promise<RemoteResult<WorkListValue>> {
       return { ok: true, value: { items: [view(1)] } }
     },
@@ -304,5 +319,36 @@ test('loads validated output files for the exact Session Turn without mutating W
     bytes: 9,
     mediaType: 'text/markdown',
   }])
+  assert.deepEqual(model.getSnapshot().items, [view(1)])
+})
+
+test('reads the exact Session output without mutating Work state', async () => {
+  const received: unknown[] = []
+  const model = new ClientWorkModel(successfulRemote({
+    async readSessionOutput(spec) {
+      received.push(spec)
+      return {
+        ok: true,
+        value: {
+          sessionId: spec.sessionId,
+          turn: spec.turn,
+          name: 'report.md',
+          path: spec.path,
+          bytes: 9,
+          mediaType: 'text/markdown',
+          content: '# Report\n',
+          contentDigest: 'e'.repeat(64),
+        },
+      }
+    },
+  }))
+  model.replaceBaseline({ items: [view(1)] })
+  const works = new WorksController(new Context(), model)
+  const spec = { sessionId: 'session-exact', turn: 3, throughSeq: 18, path: 'report.md' }
+
+  const content = await works.readSessionOutput(spec)
+
+  assert.deepEqual(received, [spec])
+  assert.equal(content.content, '# Report\n')
   assert.deepEqual(model.getSnapshot().items, [view(1)])
 })

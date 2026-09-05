@@ -55,6 +55,7 @@ test('exports the narrow Work surface through public Typert markers', () => {
     { method: 'showDelivery', mode: 'unary' },
     { method: 'importSessionResource', mode: 'unary' },
     { method: 'inspectSessionOutputs', mode: 'unary' },
+    { method: 'readSessionOutput', mode: 'unary' },
     { method: 'list', mode: 'unary' },
     { method: 'follow', mode: 'stream' },
   ])
@@ -71,6 +72,7 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
     'work/importSessionResource',
     'work/list',
     'work/inspectSessionOutputs',
+    'work/readSessionOutput',
     'work/follow',
   ])
   const dispatch = TYPERT_REMOTE.descriptors.find(descriptor => descriptor.method === 'dispatch')
@@ -176,6 +178,19 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
   assert.throws(() => outputCodec.schema.parse({
     sessionId: 'session-remote', turn: 2, throughSeq: 12, staleTurn: 1,
   }))
+
+  const readOutput = TYPERT_REMOTE.descriptors.find(
+    descriptor => descriptor.method === 'readSessionOutput',
+  )
+  assert.ok(readOutput)
+  const readOutputCodec = readOutput.parameters[0]?.codec
+  assert.equal(readOutputCodec?.mode, 'strict')
+  if (!readOutputCodec || readOutputCodec.mode !== 'strict') {
+    throw new Error('Session output read must publish a strict request codec')
+  }
+  assert.deepEqual(readOutputCodec.schema.parse({
+    sessionId: 'session-remote', turn: 2, throughSeq: 12, path: 'report.md',
+  }), { sessionId: 'session-remote', turn: 2, throughSeq: 12, path: 'report.md' })
 })
 
 test('imports conversation content through the product Remote without exposing provenance internals', async () => {

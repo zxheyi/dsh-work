@@ -31,5 +31,5 @@ if (exit !== 0 || report?.status !== 'pass') {
   console.error(`Session output acceptance failed in ${report?.step || 'launch'}`)
   process.exitCode = 1
 } else {
-  console.log('Session output acceptance passed: validate, isolate, retain, and select real files')
+  console.log('Session output acceptance passed: validate files and safely preview Markdown')
 }

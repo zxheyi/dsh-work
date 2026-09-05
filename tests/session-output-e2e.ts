@@ -185,7 +185,8 @@ async function run(): Promise<void> {
     assert.equal(await js<boolean>("document.body.innerText.includes('empty.md')"), false)
     assert.equal(await js<number>("document.querySelectorAll('[data-work-session-outputs]').length"), 1)
     assert.equal(await js<number>("document.querySelectorAll('[data-produced-files-row]').length"), 0)
-    assert.equal(fs.readFileSync(path.join(baseline.workspacePath, 'report-a.md'), 'utf8'), '# 甲报告\n')
+    const reportA = fs.readFileSync(path.join(baseline.workspacePath, 'report-a.md'), 'utf8')
+    assert.match(reportA, /^# 甲报告/u)
     assert.equal(fs.readFileSync(path.join(baseline.workspacePath, 'report-b.csv'), 'utf8'), 'name,value\nalpha,1\n')
     assert.equal(fs.statSync(path.join(baseline.workspacePath, 'empty.md')).size, 0)
 
@@ -193,6 +194,9 @@ async function run(): Promise<void> {
       const source = "(() => { const buttons = document.querySelectorAll('[data-work-session-output]'); const button = buttons.item(" + String(index) + "); if (!(button instanceof HTMLButtonElement)) return ''; button.click(); return button.getAttribute('data-work-session-output') ?? '' })()"
       return js<string>(source)
     }
+    const reportAPath = path.join(baseline.workspacePath, 'report-a.md')
+    const heldReportAPath = path.join(baseline.workspacePath, '.report-a-held.md')
+    fs.renameSync(reportAPath, heldReportAPath)
     assert.equal(await selectAt(0), 'report-a.md')
     await waitFor(
       () => js<number>("window.__dshWorkOutputSelections?.length ?? 0"),
@@ -200,15 +204,78 @@ async function run(): Promise<void> {
       'First output selection was not published',
     )
     assert.equal(await js<string>("document.querySelector('[data-work-session-output][aria-pressed=true]')?.getAttribute('data-work-session-output') ?? ''"), 'report-a.md')
+    await waitFor(
+      () => js<string>("document.querySelector('[data-work-output-preview]')?.textContent ?? ''"),
+      text => text.includes('暂时无法读取文件') && text.includes('重试'),
+      'Missing Markdown output did not expose a retryable read failure',
+    )
+    fs.renameSync(heldReportAPath, reportAPath)
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] button')).find(item => item.textContent?.trim() === '重试'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
+    await waitFor(
+      () => js<string>("document.querySelector('[data-work-output-preview-markdown]')?.textContent ?? ''"),
+      text => text.includes('本周结论已经整理完成。') && text.includes('产品：整理试用反馈。'),
+      'Markdown output did not render in the details panel',
+    )
+    await waitFor(
+      () => js<boolean>("document.querySelector('[data-details-collapsed]') === null"),
+      value => value,
+      'Details layout did not open for the Markdown preview',
+    )
+    await waitFor(
+      () => js<number>("document.querySelector('[data-slot=details]')?.parentElement?.getBoundingClientRect().width ?? 0"),
+      width => width >= 300,
+      'Details layout did not finish expanding',
+    )
+    assert.equal(await js<number>("document.querySelectorAll('[data-work-output-preview-markdown] script, [data-work-output-preview-markdown] img, [data-work-output-preview-markdown] iframe, [data-work-output-preview-markdown] a').length"), 0)
+    assert.equal(await js<boolean>('globalThis.__dshWorkPreviewExecuted === true'), false)
+    fs.writeFileSync(path.join(output, 'preview.png'), (await window.webContents.capturePage()).toPNG())
+
+    step = 'native-tool-surface-handoff'; report('fail')
+    await js("(() => { const process = document.querySelector('[data-turn-process]'); if (process instanceof HTMLButtonElement && process.getAttribute('aria-expanded') !== 'true') process.click() })()")
+    await waitFor(
+      () => js<number>("document.querySelectorAll('[data-chat-call-id]').length"),
+      count => count > 0,
+      'Native Tool rows did not expand',
+    )
+    assert.equal(await js<boolean>("(() => { const row = document.querySelector('[data-chat-call-id] [data-disclosure-row]'); if (!(row instanceof HTMLElement)) return false; row.click(); return true })()"), true)
+    await waitFor(
+      () => js<number>("document.querySelector('[data-chat-call-id]')?.querySelectorAll('button').length ?? 0"),
+      count => count >= 2,
+      'Native Tool inspect action did not become available',
+    )
+    assert.equal(await js<boolean>("(() => { const call = document.querySelector('[data-chat-call-id]'); const buttons = call?.querySelectorAll('button'); const inspect = buttons?.item((buttons?.length ?? 0) - 1); if (!(inspect instanceof HTMLButtonElement)) return false; inspect.click(); return true })()"), true)
+    await waitFor(
+      () => js<boolean>("document.querySelector('[data-work-output-preview]') === null && document.querySelector('[role=tab][aria-selected=true]')?.textContent?.trim() === '轨迹'"),
+      value => value,
+      'Native Tool inspection did not take over from the Work preview',
+    )
+    assert.equal(await js<boolean>("(() => { const tab = Array.from(document.querySelectorAll('[role=tab]')).find(item => item.textContent?.trim() === '对话'); if (!(tab instanceof HTMLButtonElement)) return false; tab.click(); return true })()"), true)
+    await waitFor(
+      () => js<number>("document.querySelectorAll('[data-work-session-output]').length"),
+      count => count === 2,
+      'Conversation outputs did not return after native Tool inspection',
+    )
+    assert.equal(await selectAt(0), 'report-a.md')
+    await waitFor(
+      () => js<number>("document.querySelectorAll('[data-work-output-preview-markdown]').length"),
+      count => count === 1,
+      'Markdown preview did not reopen after native Tool details',
+    )
+
     assert.equal(await selectAt(1), 'report-b.csv')
     await waitFor(
       () => js<number>("window.__dshWorkOutputSelections?.length ?? 0"),
-      count => count === 2,
+      count => count === 3,
       'Second output selection was not published',
     )
     assert.equal(await js<string>("document.querySelector('[data-work-session-output][aria-pressed=true]')?.getAttribute('data-work-session-output') ?? ''"), 'report-b.csv')
+    await waitFor(
+      () => js<string>("document.querySelector('[data-work-output-preview]')?.textContent ?? ''"),
+      text => text.includes('此格式暂不支持应用内预览') && text.includes('使用系统应用打开'),
+      'Unsupported output did not expose a real system-open action',
+    )
     const selected = await js<Array<{ path: string }>>("window.__dshWorkOutputSelections")
-    assert.deepEqual(selected.map(item => item.path), ['report-a.md', 'report-b.csv'])
+    assert.deepEqual(selected.map(item => item.path), ['report-a.md', 'report-a.md', 'report-b.csv'])
     fs.writeFileSync(path.join(output, 'files.png'), (await window.webContents.capturePage()).toPNG())
 
     step = 'retain-original-turn'; report('fail')
@@ -220,6 +287,27 @@ async function run(): Promise<void> {
     )
     assert.equal(await js<number>("document.querySelectorAll('[data-work-session-outputs]').length"), 1)
     assert.deepEqual(await js<string[]>("Array.from(document.querySelectorAll('[data-work-session-output] strong')).map(item => item.textContent ?? '')"), ['report-a.md', 'report-b.csv'])
+
+    step = 'close-preview-retain-draft'; report('fail')
+    assert.equal(await selectAt(0), 'report-a.md')
+    await waitFor(
+      () => js<number>("document.querySelectorAll('[data-work-output-preview-markdown]').length"),
+      count => count === 1,
+      'Markdown preview did not reopen',
+    )
+    assert.equal(await setDraft('保留的修改草稿'), '保留的修改草稿')
+    assert.equal(await js<boolean>("(() => { const button = document.querySelector('[aria-label=\"关闭文件预览\"]'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
+    await waitFor(
+      () => js<boolean>("document.querySelector('[data-details-collapsed]') !== null"),
+      value => value,
+      'Preview did not close',
+    )
+    assert.equal(await js<string>("document.querySelector('[data-composer-input]')?.textContent ?? ''"), '保留的修改草稿')
+    await waitFor(
+      () => js<string>("document.activeElement?.getAttribute('data-work-session-output') ?? ''"),
+      value => value === 'report-a.md',
+      'Closing preview did not restore focus to the selected file',
+    )
 
     await host.stop()
     host = null

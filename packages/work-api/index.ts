@@ -6,10 +6,12 @@ import {
   type CreateWorkSpec,
   type DispatchWorkRequest,
   type InspectSessionOutputsSpec,
+  type ReadSessionOutputSpec,
   type ImportSessionResourceSpec,
   type ImportConversationSpec,
   type SessionFileResource,
   type SessionOutputFile,
+  type SessionOutputContent,
   type WorkController,
   type WorkDeliverableContent as DomainWorkDeliverableContent,
   type WorkFollowFrame,
@@ -28,6 +30,8 @@ export type WorkImportSessionResourceSpec = ImportSessionResourceSpec
 export type WorkSessionFileResource = SessionFileResource
 export type WorkInspectSessionOutputsSpec = InspectSessionOutputsSpec
 export type WorkSessionOutputFile = SessionOutputFile
+export type WorkReadSessionOutputSpec = ReadSessionOutputSpec
+export type WorkSessionOutputContent = SessionOutputContent
 
 export interface WorkReadDeliverableRequest {
   readonly workId: string
@@ -177,6 +181,13 @@ export class WorkRemoteController extends TypertRemoteService {
     }))
   }
 
+  readSessionOutput(
+    spec: WorkReadSessionOutputSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkSessionOutputContent> {
+    return workResult(() => this.controller.readSessionOutput(spec, signal))
+  }
+
   async list(): Promise<WorkListValue> {
     return Object.freeze({
       items: Object.freeze((await this.controller.list()).map(projectWork)),
@@ -188,7 +199,7 @@ export class WorkRemoteController extends TypertRemoteService {
   }
 }
 
-type RemoteMethodName = 'create' | 'importConversation' | 'dispatch' | 'readDeliverable' | 'showDelivery' | 'importSessionResource' | 'inspectSessionOutputs' | 'list' | 'follow'
+type RemoteMethodName = 'create' | 'importConversation' | 'dispatch' | 'readDeliverable' | 'showDelivery' | 'importSessionResource' | 'inspectSessionOutputs' | 'readSessionOutput' | 'list' | 'follow'
 type RemoteMethod = (this: WorkRemoteController, ...args: unknown[]) => unknown
 type RemoteDecorator = (
   method: RemoteMethod,
@@ -220,6 +231,7 @@ installRemoteMarker('readDeliverable', Remote as RemoteDecorator)
 installRemoteMarker('showDelivery', Remote as RemoteDecorator)
 installRemoteMarker('importSessionResource', Remote as RemoteDecorator)
 installRemoteMarker('inspectSessionOutputs', Remote as RemoteDecorator)
+installRemoteMarker('readSessionOutput', Remote as RemoteDecorator)
 installRemoteMarker('list', Remote as RemoteDecorator)
 installRemoteMarker('follow', Remote({ mode: 'stream' }) as RemoteDecorator)
 

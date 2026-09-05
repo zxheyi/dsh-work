@@ -1362,6 +1362,118 @@ test('bounds validated Session outputs to the remote contract maximum', async ()
   await fs.rm(root, { recursive: true, force: true })
 })
 
+test('reads only the addressed validated Markdown output on demand', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-output-read-'))
+  const markdown = '# Safe report\n\n- First\n- Second\n\n<script>unsafe()</script>\n'
+  await fs.writeFile(path.join(root, 'report.md'), markdown)
+  await fs.writeFile(path.join(root, 'unregistered.md'), '# Not produced\n')
+  await fs.writeFile(path.join(root, 'page.html'), '<script>unsafe()</script>')
+  const eventPair = (callId: string, filePath: string, seq: number) => [{
+    seq,
+    type: 'tool/call',
+    data: {
+      turn: 3,
+      callId,
+      name: 'write',
+      arguments: JSON.stringify({ file_path: filePath, content: 'fixture' }),
+    },
+  }, {
+    seq: seq + 1,
+    type: 'tool/result',
+    surfaceOp: 'append',
+    data: {
+      turn: 3,
+      message: { source: { callId }, content: [{ type: 'tool-result', isError: false }] },
+    },
+  }]
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    harness: {
+      ...testHarness(),
+      async inspectSession() {
+        return {
+          cwd: root,
+          events: [
+            ...eventPair('markdown', 'report.md', 1),
+            ...eventPair('html', 'page.html', 3),
+            { seq: 5, type: 'turn/end', data: { turn: 3, reason: { kind: 'completed' } } },
+          ],
+        }
+      },
+    },
+  })
+
+  assert.deepEqual(await controller.readSessionOutput({
+    sessionId: 'session-read', turn: 3, throughSeq: 4, path: 'report.md',
+  }), {
+    sessionId: 'session-read',
+    turn: 3,
+    name: 'report.md',
+    path: 'report.md',
+    bytes: Buffer.byteLength(markdown),
+    mediaType: 'text/markdown',
+    content: markdown,
+    contentDigest: createHash('sha256').update(markdown).digest('hex'),
+  })
+  for (const selectedPath of ['unregistered.md', 'page.html']) {
+    await assert.rejects(controller.readSessionOutput({
+      sessionId: 'session-read', turn: 3, throughSeq: 4, path: selectedPath,
+    }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-output-invalid')
+  }
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('bounds a Markdown preview read when the file grows after validation', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-output-grow-'))
+  const selectedPath = path.join(root, 'growing.md')
+  await fs.writeFile(selectedPath, '# Small\n')
+  const events = [{
+    seq: 1,
+    type: 'tool/call',
+    data: {
+      turn: 1,
+      callId: 'growing',
+      name: 'write',
+      arguments: JSON.stringify({ file_path: 'growing.md', content: '# Small\n' }),
+    },
+  }, {
+    seq: 2,
+    type: 'tool/result',
+    surfaceOp: 'append',
+    data: {
+      turn: 1,
+      message: {
+        source: { callId: 'growing' },
+        content: [{ type: 'tool-result', isError: false }],
+      },
+    },
+  }, {
+    seq: 3,
+    type: 'turn/end',
+    data: { turn: 1, reason: { kind: 'completed' } },
+  }]
+  let grew = false
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    harness: {
+      ...testHarness(),
+      async inspectSession() { return { cwd: root, events } },
+    },
+    sessionOutputInternals: {
+      async afterPreviewFirstStat(candidatePath) {
+        grew = true
+        await fs.writeFile(candidatePath, Buffer.alloc(5 * 1024 * 1024 + 1, 120))
+      },
+    },
+  })
+
+  await assert.rejects(controller.readSessionOutput({
+    sessionId: 'growing-session', turn: 1, throughSeq: 3, path: 'growing.md',
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-output-invalid')
+  assert.equal(grew, true)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
 test('rejects invalid Session output coordinates and unavailable inspection', async () => {
   const withoutInspection = createWorkController({
     workspaceRoot: '/managed',
