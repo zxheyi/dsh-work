@@ -37,5 +37,5 @@ if (exit !== 0 || report?.status !== 'pass' || report?.runId !== runId) {
   console.error(`Desktop Work Shell E2E failed in ${report?.phase || 'launch'}`)
   process.exitCode = 1
 } else {
-  console.log('Desktop Work Shell E2E passed: real Work home')
+  console.log('Desktop Work Shell E2E passed: native conversation shell')
 }

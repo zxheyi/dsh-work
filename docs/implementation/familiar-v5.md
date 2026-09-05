@@ -57,4 +57,12 @@ T01-T22 cover the main product implementation. D01-D03 remain follow-on epics fr
 - Verification: `node --test scripts/verify-contract.test.mjs` passed 12/12; `node scripts/verify-contract.mjs` passed; all new Markdown links and R01-R18 task mappings checked. Independent read-only review found and corrected the ADR index table boundary and the T02/T04 legacy-access dependency.
 - Release notes: product direction and implementation plan only; no runtime behavior changed.
 
+### T02 Native conversation shell
+
+- Removed the Work plugin's full `sidebar` and `conversation` takeovers. The locked alpha.2 sidebar, Workspace/Session browser, conversation, composer, model controls and settings now retain their native owners.
+- DSH Work uses the official `sidebar.brand.*`, `sidebar.footer.action` and `shell.overlay` extension seats. A temporary “旧版工作” action keeps existing Work records reachable until T04 maps them to native Sessions.
+- Added the already locked alpha.2 sidebar package as an explicit type/load-order dependency. It adds no new version, license or runtime family; rollback removes the fine-grained registrations and direct declaration together.
+- Verification: Work Client bundle and frozen dependency tests passed 2/2; TypeScript passed; real alpha.2 Loader/Profile/runtime integration passed 11/11; 1440×900 Work UI acceptance passed; authenticated desktop Shell E2E passed with sandbox, navigation and clean-stop assertions.
+- First-run alpha.2 still presents its native internal-testing/model onboarding. T03 owns the exact missing-model and draft-preservation behavior; T02 does not claim credentials or a live model were verified.
+
 Further entries record actual commands and results, not intended verification. Human usability, Windows and live-model evidence must remain explicitly pending until obtained.

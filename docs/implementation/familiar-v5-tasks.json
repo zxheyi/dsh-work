@@ -43,7 +43,7 @@
       "files": "packages/work-api/surface.ts；packages/work-api/client.ts；packages/work-bundle/",
       "verification": "Loader/Profile smoke、Shell E2E、1440×900 截图",
       "limits": "发现公共扩展缺口先出证据与上游方案，不复制私有实现；新旧图的细微像素差以统一 token 为准。",
-      "status": "pending"
+      "status": "verified"
     },
     {
       "id": "T03",

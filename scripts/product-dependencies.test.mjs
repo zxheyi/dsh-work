@@ -13,6 +13,7 @@ test('product dependencies match the accepted baseline with a frozen DSH family'
     '@deepseek-ai/dsh-api-gateway': baseline.runtime.version,
     '@deepseek-ai/dsh-client-ui-layout': baseline.runtime.version,
     '@deepseek-ai/dsh-client-ui-renderer': baseline.runtime.version,
+    '@deepseek-ai/dsh-client-ui-sidebar': baseline.runtime.version,
     '@deepseek-ai/dsh-cmdline': baseline.runtime.version,
     '@deepseek-ai/dsh-storage-domain': baseline.runtime.version,
     '@deepseek-ai/dsh-typert-protocol': baseline.runtime.version,

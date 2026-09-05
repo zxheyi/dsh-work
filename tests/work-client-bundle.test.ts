@@ -16,6 +16,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
       '@deepseek-ai/dsh-client-connection',
       '@deepseek-ai/dsh-client-ui-layout',
       '@deepseek-ai/dsh-client-ui-renderer',
+      '@deepseek-ai/dsh-client-ui-sidebar',
     ],
     platform: 'web',
   })
@@ -104,11 +105,15 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   }
   const dispose = await exports.apply!(clientContext)
   assert.deepEqual(injectedServices.map(value => Array.from(value)), [['remote.work']])
-  assert.deepEqual(injectedSlots, ['sidebar', 'conversation'])
+  assert.deepEqual(injectedSlots, ['sidebar.brand.name', 'sidebar.brand.mark', 'sidebar.footer.action', 'shell.overlay'])
   assert.deepEqual(registeredSlots, [
-    { name: 'sidebar', priority: -100 },
-    { name: 'conversation', priority: -100 },
+    { name: 'sidebar.brand.name', priority: -100 },
+    { name: 'sidebar.brand.mark', priority: -100 },
+    { name: 'sidebar.footer.action' },
+    { name: 'shell.overlay' },
   ])
+  assert.match(source, /data-dsh-work-brand/)
+  assert.match(source, /data-work-legacy-open/)
   assert.match(source, /你想完成什么？/)
   assert.match(source, /添加资料/)
   assert.match(source, /type:\s*["']file["']/)

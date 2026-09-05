@@ -51,19 +51,49 @@ async function run(): Promise<void> {
     active = await desktop
     const js = <T = unknown>(source: string): Promise<T> =>
       active!.window.webContents.executeJavaScript(source) as Promise<T>
-    phase = 'wait-work-home'; write('fail')
+    phase = 'wait-authenticated-handoff'; write('fail')
+    await waitFor(
+      async () => active!.window.webContents.getURL(),
+      value => /^http:\/\/127\.0\.0\.1:\d+\/$/u.test(value),
+      'Desktop did not reach the authenticated Work surface',
+    )
+    phase = 'dismiss-upstream-notice'; write('fail')
+    await waitFor(
+      () => js<boolean>(`(() => {
+        const button = Array.from(document.querySelectorAll('button'))
+          .find(item => item.textContent?.trim() === '继续')
+        if (button instanceof HTMLButtonElement) button.click()
+        return !document.body.innerText.includes('内测声明')
+      })()`),
+      value => value,
+      'Upstream notice could not be dismissed',
+    )
+    phase = 'wait-native-shell'; write('fail')
     const surface = await waitFor(async () => ({
       url: active!.window.webContents.getURL(),
       text: await js<string>('document.body.innerText'),
-      ready: await js<boolean>("Boolean(document.querySelector('.dsh-work-home'))"),
+      ready: await js<boolean>(`Boolean(
+        document.querySelector('[data-dsh-work-brand="name"]')
+        && document.querySelector('[data-composer-card]')
+        && document.querySelector('[data-work-legacy-open]')
+      )`),
       bridge: await js<string>('typeof window.dshWork'),
-    }), value => value.ready && value.text.includes('你想完成什么？') && !new URL(value.url).search,
-    'Desktop did not enter the Work home')
+    }), value => value.ready && /^http:\/\/127\.0\.0\.1:\d+\/$/u.test(value.url),
+    'Desktop did not enter the native conversation shell')
     assert.match(surface.url, /^http:\/\/127\.0\.0\.1:\d+\/$/u)
     assert.equal(surface.bridge, 'undefined')
-    assert.ok(surface.text.includes('常见工作'))
-    assert.ok(surface.text.includes('最近工作'))
-    assert.doesNotMatch(surface.text, /DSH Web|Workspace|Session|Profile|模型|插件/u)
+    assert.ok(surface.text.includes('DSH Work'))
+    assert.ok(surface.text.includes('新会话'))
+    assert.ok(surface.text.includes('工作区'))
+    assert.ok(surface.text.includes('设置'))
+    assert.doesNotMatch(surface.text, /你想完成什么？|常见工作|最近工作/u)
+    await js("document.querySelector('[data-work-legacy-open]')?.click()")
+    await waitFor(
+      () => js<boolean>("Boolean(document.querySelector('[data-work-legacy-surface]') && document.querySelector('.dsh-work-home'))"),
+      value => value,
+      'Legacy Work access did not open',
+    )
+    await js("document.querySelector('[aria-label=\"关闭旧版工作\"]')?.click()")
     const preferences = active.window.webContents as unknown as {
       getLastWebPreferences(): { sandbox?: boolean; contextIsolation?: boolean; nodeIntegration?: boolean }
     }
@@ -80,6 +110,7 @@ async function run(): Promise<void> {
     assert.equal(active.window.webContents.getURL(), surface.url)
 
     phase = 'capture-home'; write('fail')
+    await js("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
     const captured = await active.window.webContents.capturePage()
     fs.writeFileSync(path.join(output, 'home.png'), captured.toPNG())
     phase = 'close-cleanly'; write('fail')

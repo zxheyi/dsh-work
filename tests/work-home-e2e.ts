@@ -134,7 +134,12 @@ async function run(): Promise<void> {
       url: string
       size: { width: number; height: number }
     }> => window!.webContents.executeJavaScript(`({
-      ready: Boolean(document.querySelector('.dsh-work-home') && document.querySelector('.dsh-work-sidebar')),
+      ready: Boolean(
+        document.querySelector('[data-dsh-work-brand="name"]')
+        && document.querySelector('[data-composer-card]')
+        && document.querySelector('[data-work-legacy-open]')
+        && !document.body.innerText.includes('内测声明')
+      ),
       text: document.body.innerText,
       url: location.href,
       size: { width: innerWidth, height: innerHeight },
@@ -144,72 +149,54 @@ async function run(): Promise<void> {
       url: string
       size: { width: number; height: number }
     }>
-    phase = 'wait-work-surface'; writeReport('fail')
+    phase = 'dismiss-upstream-notice'; writeReport('fail')
+    await waitFor(
+      () => window!.webContents.executeJavaScript(`(() => {
+        const button = Array.from(document.querySelectorAll('button'))
+          .find(item => item.textContent?.trim() === '继续')
+        if (button instanceof HTMLButtonElement) button.click()
+        return !document.body.innerText.includes('内测声明')
+      })()`) as Promise<boolean>,
+      value => value,
+      'Upstream notice could not be dismissed',
+    )
+
+    phase = 'wait-native-surface'; writeReport('fail')
     const surface = await waitFor(
       readSurface,
-      value => value.ready && value.text.includes('你想完成什么？') && !new URL(value.url).search,
-      'Work home surface did not become visible',
+      value => value.ready && !new URL(value.url).search,
+      'Native conversation surface did not become visible',
     )
     assert.deepEqual(surface.size, { width: 1440, height: 900 })
-    assert.ok(surface.text.includes('常见工作'))
-    assert.ok(surface.text.includes('最近工作'))
-    assert.doesNotMatch(surface.text, /Workspace|Session|Agent|模型|插件/)
+    assert.ok(surface.text.includes('DSH Work'))
+    assert.ok(surface.text.includes('新会话'))
+    assert.ok(surface.text.includes('工作区'))
+    assert.ok(surface.text.includes('设置'))
+    assert.doesNotMatch(surface.text, /你想完成什么？|常见工作|最近工作/u)
+    assert.equal(await window.webContents.executeJavaScript(
+      "Boolean(document.querySelector('[data-slot=sidebar]') && document.querySelector('[data-slot=conversation]'))",
+    ), true)
 
-    const resourceMenu = await window.webContents.executeJavaScript(`(() => {
-      const menu = document.querySelector('.dsh-work-resource-menu')
-      if (!(menu instanceof HTMLDetailsElement)) return null
-      menu.open = true
-      return {
-        open: menu.open,
-        trigger: menu.querySelector('summary')?.textContent?.trim(),
-        items: Array.from(menu.querySelectorAll('.dsh-work-resource-item')).map(item => item.textContent?.trim()),
-      }
-    })()`) as { open: boolean; trigger?: string; items: string[] } | null
-    assert.deepEqual(resourceMenu, {
-      open: true,
-      trigger: '+添加资料⌄',
-      items: ['添加文件还可添加 20 个', '添加文件夹即将支持', '添加网页即将支持', '粘贴内容即将支持'],
-    })
-    const stagedFile = await window.webContents.executeJavaScript(`(async () => {
-      const input = document.querySelector('.dsh-work-file-input')
-      if (!(input instanceof HTMLInputElement)) return null
-      const transfer = new DataTransfer()
-      transfer.items.add(new File(['Launch brief'], 'launch brief.txt', { type: 'text/plain' }))
-      input.files = transfer.files
-      input.dispatchEvent(new Event('change', { bubbles: true }))
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-      const chip = document.querySelector('[data-work-pending-resource]')
-      return { name: chip?.getAttribute('data-work-pending-resource'), text: chip?.textContent }
-    })()`) as { name?: string; text?: string } | null
-    assert.equal(stagedFile?.name, 'launch brief.txt')
-    assert.match(stagedFile?.text ?? '', /待添加/u)
-    const importPanel = await window.webContents.executeJavaScript(`(async () => {
-      const menu = document.querySelector('.dsh-work-resource-menu')
-      if (menu instanceof HTMLDetailsElement) menu.open = false
-      const trigger = document.querySelector('.dsh-work-import-trigger')
-      if (!(trigger instanceof HTMLButtonElement)) return null
-      trigger.click()
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-      const panel = document.querySelector('.dsh-work-import')
-      return {
-        title: panel?.querySelector('h3')?.textContent?.trim(),
-        text: panel?.textContent,
-        sourceCount: panel?.querySelectorAll('option').length,
-        hasContentInput: Boolean(panel?.querySelector('[data-work-import-content]')),
-      }
-    })()`) as {
-      title?: string
-      text?: string
-      sourceCount?: number
-      hasContentInput: boolean
-    } | null
-    assert.equal(importPanel?.title, '继续已有对话')
-    assert.match(importPanel?.text ?? '', /原对话不会改变/u)
-    assert.equal(importPanel?.sourceCount, 3)
-    assert.equal(importPanel?.hasContentInput, true)
-    await window.webContents.executeJavaScript(`new Promise(resolve => {
-      requestAnimationFrame(() => requestAnimationFrame(resolve))
-    })`)
+    phase = 'legacy-access'; writeReport('fail')
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[data-work-legacy-open]')?.click()",
+    )
+    await waitFor(
+      () => window!.webContents.executeJavaScript(
+        "Boolean(document.querySelector('[data-work-legacy-surface]') && document.querySelector('.dsh-work-home'))",
+      ) as Promise<boolean>,
+      value => value,
+      'Legacy Work records lost their temporary access path',
+    )
+    await window.webContents.executeJavaScript(
+      "document.querySelector('[aria-label=\"关闭旧版工作\"]')?.click()",
+    )
+    assert.equal(await window.webContents.executeJavaScript(
+      "Boolean(document.querySelector('[data-work-legacy-surface]'))",
+    ), false)
+    await window.webContents.executeJavaScript(
+      "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+    )
 
     const output = path.resolve('artifacts/design')
     fs.mkdirSync(output, { recursive: true })
@@ -218,7 +205,7 @@ async function run(): Promise<void> {
       ? captured
       : captured.resize({ width: 1440, height: 900, quality: 'best' })
     assert.deepEqual(image.getSize(), { width: 1440, height: 900 })
-    fs.writeFileSync(path.join(output, 'work-home-v2-actual.png'), image.toPNG())
+    fs.writeFileSync(path.join(output, 'familiar-native-shell-actual.png'), image.toPNG())
     phase = 'complete'; writeReport('pass')
   } catch (error) {
     const detail = error instanceof Error ? error.message : 'unknown failure'

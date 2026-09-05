@@ -13,6 +13,7 @@ import {
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 
 import type { IWorks, WorkClientSnapshot } from './client-model.ts'
 import type { WorkView } from './index.ts'
@@ -588,6 +589,13 @@ body[data-ds-dark-theme] {
   --work-shadow: 0 12px 32px rgba(0, 0, 0, .22);
 }
 .dsh-work-sidebar, .dsh-work-home { font-family: var(--work-font); color: var(--work-text); }
+.dsh-work-native-brand-mark { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: white; background: #365eca; font: 700 13px/1 var(--work-font); }
+.dsh-work-legacy-open { min-width: 30px; height: 30px; padding: 0 9px; border: 1px solid var(--work-border); border-radius: 6px; color: var(--work-muted); background: var(--work-surface); cursor: pointer; font: 550 12px/1 var(--work-font); white-space: nowrap; }
+.dsh-work-legacy-open:hover { color: var(--work-accent); border-color: var(--work-accent); }
+.dsh-work-legacy-overlay { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 28px; background: rgb(20 24 32 / .28); pointer-events: auto; }
+.dsh-work-legacy-frame { position: relative; width: min(1180px, calc(100vw - 56px)); height: min(760px, calc(100vh - 56px)); overflow: hidden; border: 1px solid var(--work-border); border-radius: 12px; background: var(--work-surface); box-shadow: 0 22px 70px rgb(20 24 32 / .22); }
+.dsh-work-legacy-frame .dsh-work-home { height: 100%; }
+.dsh-work-legacy-close { position: absolute; z-index: 2; top: 14px; right: 20px; height: 32px; padding: 0 12px; border: 1px solid var(--work-border); border-radius: 6px; color: var(--work-text); background: var(--work-surface); cursor: pointer; font: 550 12px/1 var(--work-font); }
 .dsh-work-sidebar { height: 100%; min-width: 0; display: flex; flex-direction: column; padding: 16px 20px; background: var(--work-sidebar); }
 .dsh-work-sidebar.is-collapsed { align-items: center; padding: 18px 10px; gap: 18px; }
 .dsh-work-sidebar-brand { height: 36px; display: flex; align-items: center; gap: 10px; font-size: 19px; letter-spacing: -.02em; }
@@ -769,15 +777,61 @@ function installStyles(): () => void {
 
 export function registerWorkSurface(ctx: Context, works: IWorks): () => void {
   const removeStyles = installStyles()
-  ctx.slots.inject('sidebar', () => ctx.slots.register({
-    name: 'sidebar',
+  ctx.slots.inject('sidebar.brand.name', () => ctx.slots.register({
+    name: 'sidebar.brand.name',
     priority: -100,
-    inject: () => ({ works }),
-  }, WorkSidebar))
-  ctx.slots.inject('conversation', () => ctx.slots.register({
-    name: 'conversation',
+  }, () => h('span', { 'data-dsh-work-brand': 'name' }, 'DSH Work')))
+  ctx.slots.inject('sidebar.brand.mark', () => ctx.slots.register({
+    name: 'sidebar.brand.mark',
     priority: -100,
+  }, () => h('span', {
+    className: 'dsh-work-native-brand-mark',
+    'data-dsh-work-brand': 'mark',
+    'aria-hidden': 'true',
+  }, 'W')))
+  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
+    name: 'sidebar.footer.action',
+    id: 'dsh-work-legacy-open',
+    label: '旧版工作',
+  }, ({ wide }: { readonly wide: boolean }) => h('button', {
+    className: 'dsh-work-legacy-open',
+    type: 'button',
+    title: '打开旧版工作',
+    'aria-label': '打开旧版工作',
+    'data-work-legacy-open': true,
+    onClick: () => window.dispatchEvent(new Event('dsh-work:open-legacy')),
+  }, wide ? '旧版工作' : 'W')))
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+    name: 'shell.overlay',
+    id: 'dsh-work-legacy-surface',
+    order: 100,
+    label: '旧版工作',
     inject: () => ({ works }),
-  }, WorkHomeSurface))
+  }, LegacyWorkOverlay))
   return removeStyles
+}
+
+function LegacyWorkOverlay({ works }: WorkSurfaceInjected): ReactNode {
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    const show = (): void => setOpen(true)
+    window.addEventListener('dsh-work:open-legacy', show)
+    return () => window.removeEventListener('dsh-work:open-legacy', show)
+  }, [])
+  if (!open) return null
+  return h('section', {
+    className: 'dsh-work-legacy-overlay',
+    role: 'dialog',
+    'aria-modal': 'true',
+    'aria-label': '旧版工作',
+    'data-work-legacy-surface': true,
+  },
+  h('div', { className: 'dsh-work-legacy-frame' },
+    h('button', {
+      className: 'dsh-work-legacy-close',
+      type: 'button',
+      'aria-label': '关闭旧版工作',
+      onClick: () => setOpen(false),
+    }, '关闭'),
+    h(WorkHomeSurface, { works })))
 }
