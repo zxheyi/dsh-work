@@ -173,6 +173,7 @@ const prepareSessionOutputRevisionSchema: z.ZodType<WorkPrepareSessionOutputRevi
   throughSeq: z.number().int().nonnegative(),
   path: z.string().min(1).max(4096),
   baseVersion: sessionOutputVersionIdentitySchema.optional(),
+  intent: z.enum(['modify', 'restore']).optional(),
 }).strict()
 const sessionOutputRevisionBaseVersionSchema = z.object({
   fileId: z.string().regex(/^[a-f0-9]{32}$/u),
@@ -190,6 +191,7 @@ const sessionOutputRevisionSchema: z.ZodType<WorkSessionOutputRevision> = z.obje
   reference: z.string().min(2).max(4099),
   contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
   baseVersion: sessionOutputRevisionBaseVersionSchema.optional(),
+  intent: z.literal('restore').optional(),
 }).strict()
 const sessionOutputRevisionFailureSchema: z.ZodType<WorkSessionOutputRevisionFailure> = z.object({
   sessionId: z.string().min(1).max(256),

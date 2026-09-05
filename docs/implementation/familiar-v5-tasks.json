@@ -354,7 +354,7 @@
       "files": "packages/work-domain/index.ts；packages/work-api/remote.ts；packages/work-api/surface.ts",
       "verification": "恢复字节/幂等/中断/冲突集成、恢复 E2E",
       "limits": "恢复不是删除后来历史，失败不先改当前指针。",
-      "status": "pending"
+      "status": "verified"
     },
     {
       "id": "T19",

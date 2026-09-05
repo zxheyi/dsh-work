@@ -16,6 +16,7 @@ export type WorkErrorCode =
   | 'work/resource-invalid'
   | 'work/resource-limit'
   | 'work/session-output-invalid'
+  | 'work/session-output-conflict'
   | 'work/session-output-save-failed'
   | 'work/session-output-version-failed'
   | 'work/session-resource-invalid'
@@ -159,6 +160,7 @@ export interface SessionOutputContent extends SessionOutputFile {
 
 export interface PrepareSessionOutputRevisionSpec extends ReadSessionOutputSpec {
   readonly baseVersion?: ReadSessionOutputVersionSpec | undefined
+  readonly intent?: 'modify' | 'restore' | undefined
 }
 
 export interface SessionOutputRevisionBaseVersion {
@@ -178,6 +180,7 @@ export interface SessionOutputRevision {
   readonly reference: string
   readonly contentDigest: string
   readonly baseVersion?: SessionOutputRevisionBaseVersion | undefined
+  readonly intent?: 'restore' | undefined
 }
 
 export interface SessionOutputRevisionFailure {
@@ -373,6 +376,7 @@ export interface WorkControllerOptions {
     readonly afterPreviewFirstStat?: (path: string) => void | Promise<void>
     readonly afterSourceFirstStat?: (path: string) => void | Promise<void>
     readonly afterSourceWorkspaceRealpath?: () => void | Promise<void>
+    readonly afterStableOutputOpen?: (path: string) => void | Promise<void>
   }
   readonly sessionOutputSaveInternals?: {
     readonly afterTargetOpen?: (paths: {
@@ -1866,7 +1870,7 @@ async function readManagedSaveDigest(target: string): Promise<string> {
   )
   try {
     const first = await handle.stat({ bigint: true })
-    if (!first.isFile() || first.size < 1n || first.size > BigInt(MAX_SESSION_OUTPUT_SAVE_BYTES)) {
+    if (!first.isFile() || first.size > BigInt(MAX_SESSION_OUTPUT_SAVE_BYTES)) {
       throw new Error('managed save is not a bounded regular file')
     }
     const data = Buffer.allocUnsafe(Number(first.size))
@@ -2224,6 +2228,65 @@ async function readVersionFile(filePath: string, maximumBytes: number): Promise<
       throw new Error('version file changed while being read')
     }
     return data
+  } finally {
+    await handle.close()
+  }
+}
+
+async function readStableWorkspaceOutputBytes(
+  workspaceInput: string,
+  relativePath: string,
+  signal?: AbortSignal,
+  internals?: WorkControllerOptions['sessionOutputInternals'],
+): Promise<{ readonly normalizedPath: string; readonly data: Buffer }> {
+  signal?.throwIfAborted()
+  const before = await fs.stat(workspaceInput, { bigint: true })
+  const workspacePath = await fs.realpath(workspaceInput)
+  const normalizedPath = normalizedWorkspacePath(workspacePath, workspaceInput, relativePath)
+  if (!before.isDirectory() || !normalizedPath) throw new Error('workspace output path is invalid')
+  const target = path.join(workspacePath, normalizedPath)
+  const resolvedTarget = await fs.realpath(target)
+  const resolvedRelative = path.relative(workspacePath, resolvedTarget)
+  if (resolvedRelative === '..' || resolvedRelative.startsWith(`..${path.sep}`) || path.isAbsolute(resolvedRelative)) {
+    throw new Error('workspace output resolves outside its Session')
+  }
+  const handle = await fs.open(
+    target,
+    fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK,
+  )
+  try {
+    const first = await handle.stat({ bigint: true })
+    await internals?.afterStableOutputOpen?.(target)
+    if (!first.isFile() || first.size > BigInt(MAX_SESSION_OUTPUT_SAVE_BYTES)) {
+      throw new Error('workspace output is not a bounded regular file')
+    }
+    const data = Buffer.allocUnsafe(Number(first.size))
+    let offset = 0
+    while (offset < data.byteLength) {
+      signal?.throwIfAborted()
+      const read = await handle.read(data, offset, data.byteLength - offset, offset)
+      if (read.bytesRead === 0) break
+      offset += read.bytesRead
+    }
+    const second = await handle.stat({ bigint: true })
+    const currentPath = await fs.lstat(target, { bigint: true })
+    const currentWorkspace = await fs.stat(workspaceInput, { bigint: true })
+    const resolvedTargetAfter = await fs.realpath(target)
+    const resolvedRelativeAfter = path.relative(workspacePath, resolvedTargetAfter)
+    if (offset !== data.byteLength
+      || second.dev !== first.dev || second.ino !== first.ino || second.size !== first.size
+      || second.mtimeNs !== first.mtimeNs || second.ctimeNs !== first.ctimeNs
+      || !currentPath.isFile() || currentPath.isSymbolicLink()
+      || currentPath.dev !== second.dev || currentPath.ino !== second.ino
+      || !currentWorkspace.isDirectory()
+      || currentWorkspace.dev !== before.dev || currentWorkspace.ino !== before.ino
+      || await fs.realpath(workspaceInput) !== workspacePath
+      || resolvedTargetAfter !== resolvedTarget
+      || resolvedRelativeAfter === '..' || resolvedRelativeAfter.startsWith(`..${path.sep}`)
+      || path.isAbsolute(resolvedRelativeAfter)) {
+      throw new Error('workspace output changed while being read')
+    }
+    return Object.freeze({ normalizedPath, data })
   } finally {
     await handle.close()
   }
@@ -2742,8 +2805,8 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
   interface RevisionProtection {
     readonly sessionId: string
     readonly sourceTurn: number
-    readonly preparedAfterTurn: number
-    readonly preparedAfterSeq: number
+    preparedAfterTurn: number
+    preparedAfterSeq: number
     readonly throughSeq: number
     readonly name: string
     readonly path: string
@@ -2752,6 +2815,9 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
     readonly bytes: Buffer
     readonly mediaType: string | null
     readonly contentDigest: string
+    intent: 'modify' | 'restore'
+    requiredContentDigest: string | null
+    retryableContentDigest: string | null
     lastCheckedTurn: number
     lastFailureTurn: number | null
   }
@@ -2794,6 +2860,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
     reference: /\s/u.test(value.path) ? `@"${value.path}"` : `@${value.path}`,
     contentDigest: value.contentDigest,
     ...(baseVersion ? { baseVersion } : {}),
+    ...(value.intent === 'restore' ? { intent: 'restore' as const } : {}),
   })
   const revisionFailure = (
     value: RevisionProtection,
@@ -2805,7 +2872,9 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
     path: value.path,
     reference: /\s/u.test(value.path) ? `@"${value.path}"` : `@${value.path}`,
     status: 'failed',
-    message: '修改未生成有效文件，已保留上一结果。',
+    message: value.intent === 'restore'
+      ? '恢复未生成选定版本的完整内容，已保留上一结果。'
+      : '修改未生成有效文件，已保留上一结果。',
   })
   const matchingProtection = (
     inspected: { readonly cwd: string },
@@ -2815,6 +2884,80 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
     const normalized = normalizedWorkspacePath(workspacePath, inspected.cwd, spec.path)
     if (!normalized) return null
     return revisionProtections.get(revisionKey(spec.sessionId, normalized)) ?? null
+  }
+  const restoreExpectation = async (
+    inspected: { readonly cwd: string; readonly events: readonly unknown[] },
+    spec: InspectSessionOutputsSpec,
+    outputPath: string,
+    signal?: AbortSignal,
+  ): Promise<{ readonly recognized: boolean; readonly contentDigest: string | null }> => {
+    if (!versionRoot) return Object.freeze({ recognized: false, contentDigest: null })
+    let pendingText: string | null = null
+    let turnText: string | null = null
+    let activeTurn: number | null = null
+    for (const raw of inspected.events) {
+      const event = recordData(raw)
+      const data = recordData(event?.data)
+      const seq = event?.seq
+      if (!event || !data || typeof seq !== 'number' || seq > spec.throughSeq) continue
+      if (event.type === 'user/message') {
+        pendingText = userMessageText(data)
+        if (data.turn === spec.turn || activeTurn === spec.turn) turnText = pendingText
+        continue
+      }
+      if (event.type === 'turn/start') {
+        activeTurn = typeof data.turn === 'number' ? data.turn : null
+        if (activeTurn === spec.turn) turnText = pendingText
+        pendingText = null
+        continue
+      }
+      if (event.type === 'turn/end' && data.turn === activeTurn) activeTurn = null
+    }
+    const text = turnText
+    if (!text || !text.includes('的完整内容恢复') || !text.includes('保持字节一致')) {
+      return Object.freeze({ recognized: false, contentDigest: null })
+    }
+    const workspacePath = await fs.realpath(inspected.cwd)
+    const normalizedOutputPath = normalizedWorkspacePath(workspacePath, inspected.cwd, outputPath)
+    const referencedOutput = /\s/u.test(outputPath) ? `@"${outputPath}"` : `@${outputPath}`
+    if (!normalizedOutputPath || !text.includes(referencedOutput)) {
+      return Object.freeze({ recognized: false, contentDigest: null })
+    }
+    const references = [...text.matchAll(
+      /@(attachment-[a-f0-9]{12}-[a-f0-9]{12}-version-[a-f0-9]{8}-v\d+-[a-f0-9]{12}\.[a-z0-9]+)/gu,
+    )].map(match => match[1]!)
+    const fileId = sessionOutputFileId(spec.sessionId, normalizedOutputPath)
+    for (const reference of references) {
+      const identity = importedSourceIdentity(spec.sessionId, reference)
+      const matched = identity
+        ? /^version-([a-f0-9]{8})-v(\d+)-([a-f0-9]{12})\.[a-z0-9]+$/u.exec(identity.name)
+        : null
+      const ordinal = Number(matched?.[2])
+      if (!identity || !matched || matched[1] !== fileId.slice(0, 8)
+        || !Number.isSafeInteger(ordinal) || ordinal < 1) continue
+      let snapshot: Awaited<ReturnType<typeof readStableWorkspaceOutputBytes>>
+      try {
+        snapshot = await readStableWorkspaceOutputBytes(
+          inspected.cwd, identity.path, signal, options.sessionOutputInternals,
+        )
+      } catch (cause) {
+        if (signal?.aborted) throw cause
+        continue
+      }
+      const digest = createHash('sha256').update(snapshot.data).digest('hex')
+      if (digest.slice(0, 12) !== identity.digestPrefix || digest.slice(0, 12) !== matched[3]) continue
+      const version = await withVersionLock(async () => {
+        const journal = await openVersionJournal(versionRoot)
+        await recoverVersionIntentsForFile(journal, fileId, signal, options.sessionOutputVersionInternals)
+        return (await listVersionRecordsByFileId(journal, fileId)).find(candidate =>
+          candidate.ordinal === ordinal && candidate.contentDigest === digest) ?? null
+      })
+      if (version?.sessionId === spec.sessionId
+        && normalizedWorkspacePath(workspacePath, inspected.cwd, version.path) === normalizedOutputPath) {
+        return Object.freeze({ recognized: true, contentDigest: digest })
+      }
+    }
+    return Object.freeze({ recognized: true, contentDigest: null })
   }
   const reconcileSessionRevision = async (
     inspected: { readonly cwd: string; readonly events: readonly unknown[] },
@@ -2883,10 +3026,15 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
       const produced = validated.find(output =>
         normalizedWorkspacePath(protection.workspacePath, inspected.cwd, output.path) === protection.normalizedPath)
       let valid = false
+      let observedDigest: string | null = null
       if (produced?.mediaType === 'text/markdown') {
         try {
-          await readValidatedSessionOutput(inspected, { ...spec, path: produced.path }, signal, options.sessionOutputInternals)
-          valid = true
+          const content = await readValidatedSessionOutput(
+            inspected, { ...spec, path: produced.path }, signal, options.sessionOutputInternals,
+          )
+          observedDigest = content.contentDigest
+          valid = protection.requiredContentDigest === null
+            || content.contentDigest === protection.requiredContentDigest
         } catch (cause) {
           if (signal?.aborted) throw cause
           valid = false
@@ -2899,6 +3047,19 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
       }
       protection.lastFailureTurn = spec.turn
       protection.lastCheckedTurn = spec.turn
+      if (observedDigest === null) {
+        try {
+          const observed = await readStableWorkspaceOutputBytes(
+            inspected.cwd, protection.path, signal, options.sessionOutputInternals,
+          )
+          if (observed.normalizedPath === protection.normalizedPath) {
+            observedDigest = createHash('sha256').update(observed.data).digest('hex')
+          }
+        } catch (cause) {
+          if (signal?.aborted) throw cause
+        }
+      }
+      protection.retryableContentDigest = observedDigest
       const failed = new Set(failedRevisionPaths.get(turnKey) ?? [])
       failed.add(protection.normalizedPath)
       failedRevisionPaths.set(turnKey, failed)
@@ -3321,13 +3482,28 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         await reconcileSessionRevision(inspected, spec, signal)
         const outputs = await validatedSessionOutputs(inspected, spec, options.sessionOutputInternals)
         const failed = failedRevisionPaths.get(revisionTurnKey(spec.sessionId, spec.turn))
-        const visible = failed
+        let visible = failed
           ? outputs.filter(output => {
             const workspacePath = path.resolve(inspected.cwd)
             const normalized = normalizedWorkspacePath(workspacePath, inspected.cwd, output.path)
             return normalized === null || !failed.has(normalized)
           })
           : [...outputs]
+        const restoreValidity = await Promise.all(visible.map(async output => {
+          const expectation = await restoreExpectation(inspected, spec, output.path, signal)
+          if (!expectation.recognized) return true
+          if (!expectation.contentDigest || output.mediaType !== 'text/markdown') return false
+          try {
+            const content = await readValidatedSessionOutput(
+              inspected, { ...spec, path: output.path }, signal, options.sessionOutputInternals,
+            )
+            return content.contentDigest === expectation.contentDigest
+          } catch (cause) {
+            if (signal?.aborted) throw cause
+            return false
+          }
+        }))
+        visible = visible.filter((_output, index) => restoreValidity[index])
         for (const protection of revisionProtections.values()) {
           if (protection.sessionId !== spec.sessionId
             || protection.sourceTurn !== spec.turn
@@ -3342,7 +3518,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
             mediaType: protection.mediaType,
           }))
         }
-        await publishGeneratedVersions(inspected, spec, outputs, signal)
+        await publishGeneratedVersions(inspected, spec, visible, signal)
         return Object.freeze(visible)
       })
     },
@@ -3368,6 +3544,10 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
     },
 
     async prepareSessionOutputRevision(spec, signal) {
+      const intent = spec.intent ?? 'modify'
+      if (intent === 'restore' && !spec.baseVersion) {
+        throw new WorkError('work/session-output-invalid', 'Restoring requires a selected Session output version.')
+      }
       if (spec.baseVersion
         && (!/^[a-f0-9]{32}$/u.test(spec.baseVersion.fileId)
           || !/^[a-f0-9]{32}$/u.test(spec.baseVersion.versionId))) {
@@ -3402,7 +3582,21 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
           throw new WorkError('work/session-output-invalid', 'The selected output is outside its Session Workspace.')
         }
         const key = revisionKey(spec.sessionId, normalizedPath)
-        const existing = revisionProtections.get(key)
+        let existing = revisionProtections.get(key)
+        const latestEndedTurn = inspected.events.reduce<number>((latest, raw) => {
+          const event = recordData(raw)
+          const data = recordData(event?.data)
+          const turn = data?.turn
+          return event?.type === 'turn/end' && typeof turn === 'number'
+            ? Math.max(latest, turn)
+            : latest
+        }, spec.turn)
+        const latestEventSeq = inspected.events.reduce<number>((latest, raw) => {
+          const seq = recordData(raw)?.seq
+          return typeof seq === 'number' ? Math.max(latest, seq) : latest
+        }, spec.throughSeq)
+        const existingRequestSettled = (): boolean => Boolean(existing
+          && (existing.lastFailureTurn !== null || latestEndedTurn > existing.preparedAfterTurn))
         if ([...revisionProtections.values()].some(installed => installed.sessionId === spec.sessionId)) {
           if (!existing) {
             throw new WorkError(
@@ -3411,23 +3605,34 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
             )
           }
         }
-        const content = existing
-          ? null
-          : await readValidatedSessionOutput(inspected, spec, signal, options.sessionOutputInternals)
         let baseVersion: SessionOutputRevisionBaseVersion | undefined
+        let restoreCurrent: {
+          readonly sourceTurn: number
+          readonly throughSeq: number
+          readonly name: string
+          readonly bytes: Buffer
+          readonly mediaType: string | null
+          readonly contentDigest: string
+        } | null = null
+        let recognizedRetryDigest: string | null = null
         if (spec.baseVersion) {
           if (!versionRoot) {
             throw new WorkError('work/session-output-invalid', 'Session output version history is not available.')
           }
           let captured: Awaited<ReturnType<typeof readSessionOutputVersionRecord>>
+          let latest: SessionOutputVersion | null = null
           try {
-            captured = await withVersionLock(async () => {
+            const versionSelection = await withVersionLock(async () => {
               const journal = await openVersionJournal(versionRoot)
               await recoverVersionIntentsForFile(
                 journal, spec.baseVersion!.fileId, signal, options.sessionOutputVersionInternals,
               )
-              return readSessionOutputVersionRecord(versionRoot, spec.baseVersion!)
+              const selected = await readSessionOutputVersionRecord(versionRoot, spec.baseVersion!)
+              const records = await listVersionRecordsByFileId(journal, spec.baseVersion!.fileId)
+              return Object.freeze({ selected, latest: records.at(-1) ?? null })
             })
+            captured = versionSelection.selected
+            latest = versionSelection.latest
           } catch (cause) {
             if (signal?.aborted) throw cause
             throw new WorkError(
@@ -3442,6 +3647,62 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
               'work/session-output-invalid',
               'The selected version does not belong to this Session output.',
             )
+          }
+          if (intent === 'restore') {
+            if (!latest || latest.sessionId !== spec.sessionId
+              || normalizedWorkspacePath(workspacePath, inspected.cwd, latest.path) !== normalizedPath) {
+              throw new WorkError('work/session-output-invalid', 'The current Session output version is invalid.')
+            }
+            if (existing && !existingRequestSettled()
+              && (existing.intent !== 'restore'
+                || existing.requiredContentDigest !== captured.version.contentDigest)) {
+              throw new WorkError(
+                'work/session-output-invalid',
+                'Finish the current file revision before preparing a different version request.',
+              )
+            }
+            if (existing && existing.contentDigest !== latest.contentDigest) {
+              if (!existingRequestSettled()) {
+                throw new WorkError(
+                  'work/session-output-conflict',
+                  'The protected file no longer matches its current version. Refresh before restoring.',
+                )
+              }
+              revisionProtections.delete(key)
+              existing = undefined
+            }
+            let current: Awaited<ReturnType<typeof readStableWorkspaceOutputBytes>>
+            try {
+              current = await readStableWorkspaceOutputBytes(
+                inspected.cwd, spec.path, signal, options.sessionOutputInternals,
+              )
+            } catch (cause) {
+              if (signal?.aborted) throw cause
+              throw new WorkError(
+                'work/session-output-conflict',
+                'The current file changed while the restore was being prepared.',
+                { cause },
+              )
+            }
+            const currentDigest = createHash('sha256').update(current.data).digest('hex')
+            const recognizedFailedBytes = existing?.retryableContentDigest !== null
+              && existing?.retryableContentDigest === currentDigest
+            if (recognizedFailedBytes) recognizedRetryDigest = currentDigest
+            if (current.normalizedPath !== normalizedPath
+              || (currentDigest !== latest.contentDigest && !recognizedFailedBytes)) {
+              throw new WorkError(
+                'work/session-output-conflict',
+                'The current file has external changes. Refresh its versions before restoring.',
+              )
+            }
+            restoreCurrent = Object.freeze({
+              sourceTurn: latest.turn ?? spec.turn,
+              throughSeq: latest.throughSeq ?? spec.throughSeq,
+              name: latest.name,
+              bytes: existing?.bytes ?? current.data,
+              mediaType: latest.mediaType,
+              contentDigest: latest.contentDigest,
+            })
           }
           const requestedExtension = path.extname(captured.version.name).toLowerCase()
           const extension = requestedExtension === '.markdown'
@@ -3479,35 +3740,53 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
             contentDigest: captured.version.contentDigest,
           })
         }
-        if (existing) return asRevision(existing, baseVersion)
-        if (!content) {
-          throw new WorkError('work/session-output-invalid', 'The current Session output is not readable for revision.')
+        if (existing) {
+          const requestedDigest = intent === 'restore' ? baseVersion?.contentDigest ?? null : null
+          const samePendingRequest = existing.intent === intent
+            && existing.requiredContentDigest === requestedDigest
+          const settled = existingRequestSettled()
+          if (!settled && !samePendingRequest) {
+            throw new WorkError(
+              'work/session-output-invalid',
+              'Finish the current file revision before preparing a different version request.',
+            )
+          }
+          if (settled) {
+            existing.preparedAfterTurn = latestEndedTurn
+            existing.preparedAfterSeq = latestEventSeq
+            existing.retryableContentDigest = recognizedRetryDigest
+            existing.lastFailureTurn = null
+          }
+          existing.intent = intent
+          existing.requiredContentDigest = requestedDigest
+          return asRevision(existing, baseVersion)
         }
-        const preparedAfterTurn = inspected.events.reduce<number>((latest, raw) => {
-          const event = recordData(raw)
-          const data = recordData(event?.data)
-          const turn = data?.turn
-          return event?.type === 'turn/end' && typeof turn === 'number'
-            ? Math.max(latest, turn)
-            : latest
-        }, spec.turn)
-        const preparedAfterSeq = inspected.events.reduce<number>((latest, raw) => {
-          const seq = recordData(raw)?.seq
-          return typeof seq === 'number' ? Math.max(latest, seq) : latest
-        }, spec.throughSeq)
+        const content = restoreCurrent
+          ? null
+          : await readValidatedSessionOutput(inspected, spec, signal, options.sessionOutputInternals)
+        if (!content) {
+          if (!restoreCurrent) {
+            throw new WorkError('work/session-output-invalid', 'The current Session output is not readable for revision.')
+          }
+        }
+        const preparedAfterTurn = latestEndedTurn
+        const preparedAfterSeq = latestEventSeq
         const protection: RevisionProtection = {
           sessionId: spec.sessionId,
-          sourceTurn: spec.turn,
+          sourceTurn: restoreCurrent?.sourceTurn ?? spec.turn,
           preparedAfterTurn,
           preparedAfterSeq,
-          throughSeq: spec.throughSeq,
-          name: content.name,
+          throughSeq: restoreCurrent?.throughSeq ?? spec.throughSeq,
+          name: restoreCurrent?.name ?? content!.name,
           path: spec.path,
           normalizedPath,
           workspacePath,
-          bytes: Buffer.from(content.content, 'utf8'),
-          mediaType: content.mediaType,
-          contentDigest: content.contentDigest,
+          bytes: restoreCurrent?.bytes ?? Buffer.from(content!.content, 'utf8'),
+          mediaType: restoreCurrent?.mediaType ?? content!.mediaType,
+          contentDigest: restoreCurrent?.contentDigest ?? content!.contentDigest,
+          intent,
+          requiredContentDigest: intent === 'restore' ? baseVersion?.contentDigest ?? null : null,
+          retryableContentDigest: null,
           lastCheckedTurn: preparedAfterTurn,
           lastFailureTurn: null,
         }

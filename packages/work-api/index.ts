@@ -112,6 +112,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'work/resource-invalid': Record<string, never>
     'work/resource-limit': Record<string, never>
     'work/session-output-invalid': Record<string, never>
+    'work/session-output-conflict': Record<string, never>
     'work/session-output-save-failed': Record<string, never>
     'work/session-output-version-failed': Record<string, never>
     'work/session-resource-invalid': Record<string, never>

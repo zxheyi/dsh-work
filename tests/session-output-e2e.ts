@@ -209,6 +209,7 @@ async function run(): Promise<void> {
       generateBPrompt: string
       revisionFailPrompt: string
       revisionSuccessPrompt: string
+      restorePrompt: string
       workspacePath: string
     }
     const clickSession = async (title: string): Promise<void> => {
@@ -646,25 +647,103 @@ async function run(): Promise<void> {
     )
     assert.match(historicalPanel.summary, /SHA-256 [a-f0-9]{12}/u)
     assert.equal(fs.readFileSync(reportAPath, 'utf8'), '# 甲报告（已修改）\n\n修改成功。\n')
-    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] button')).find(item => item.textContent?.trim() === '基于 v1 修改'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true })()"), true)
-    const historicalDraft = await waitFor(
-      () => js<{ draft: string; focused: boolean }>("({ draft: document.querySelector('[data-composer-input]')?.textContent ?? '', focused: document.activeElement === document.querySelector('[data-composer-input]') })"),
-      value => value.draft.includes('基于 @attachment-') && value.draft.includes('（v1）修改 @report-a.md')
-        && value.focused,
-      'The v1 revision action did not bind the immutable snapshot in the native composer',
+    assert.equal(readOutputVersionRecords().filter(record =>
+      record.sessionId === baseline.sessionA && record.path === 'report-a.md').length, 2)
+
+    step = 'restore-historical-version'; report('fail')
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] button')).find(item => item.textContent?.trim() === '恢复 v1'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true })()"), true)
+    await js("new Promise(resolve => setTimeout(resolve, 500))")
+    const restorePreparation = await js<{ draft: string; status: string }>(`({
+      draft: document.querySelector('[data-composer-input]')?.textContent ?? '',
+      status: document.querySelector('.dsh-work-output-preview-actions > span')?.textContent ?? '',
+    })`)
+    const restoreDraft = restorePreparation.draft
+    assert.match(restoreDraft, /使用 @attachment-/u, restorePreparation.status)
+    assert.ok(restoreDraft.includes('（v1）的完整内容恢复 @report-a.md')
+      && restoreDraft.includes(baseline.restorePrompt))
+    const restoreReference = /使用 @([^\s]+) （v1）的完整内容恢复 @report-a\.md/u.exec(restoreDraft)?.[1]
+    assert.ok(restoreReference)
+    assert.equal(fs.readFileSync(path.join(baseline.workspacePath, restoreReference), 'utf8'), reportA)
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] button')).find(item => item.textContent?.trim() === '恢复 v1'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true })()"), true)
+    assert.equal(await waitFor(
+      () => js<string>("document.querySelector('[data-composer-input]')?.textContent ?? ''"),
+      text => text === restoreDraft,
+      'Retrying restore preparation duplicated the bound request',
+    ), restoreDraft)
+    await waitFor(
+      () => js<boolean>("Array.from(document.querySelectorAll('[data-work-output-preview] button')).some(item => item instanceof HTMLButtonElement && item.textContent?.trim() === '恢复 v1' && !item.disabled)"),
+      value => value,
+      'The retried restore preparation did not finish',
     )
-    const historicalReference = /基于 @([^\s]+)（v1）修改 @report-a\.md/u.exec(historicalDraft.draft)?.[1]
-    assert.ok(historicalReference)
-    assert.equal(fs.readFileSync(path.join(baseline.workspacePath, historicalReference), 'utf8'), reportA)
-    assert.equal(fs.readFileSync(reportAPath, 'utf8'), '# 甲报告（已修改）\n\n修改成功。\n')
     await clickSend()
     await waitFor(
       () => js<string>("document.querySelector('[data-composer-input]')?.textContent ?? ''"),
       text => text === '',
-      'The explicit v1 revision request was not consumed by native Send',
+      'The completed restore request did not clear the native composer',
+    )
+    const restoredRecords = await waitFor(
+      async () => readOutputVersionRecords().filter(record =>
+        record.sessionId === baseline.sessionA && record.path === 'report-a.md'),
+      records => records.length === 3,
+      'A completed v1 restore did not publish one new immutable version',
+    )
+    assert.deepEqual(restoredRecords.map(record => record.ordinal), [1, 2, 3])
+    assert.deepEqual(readOutputVersionBlob(restoredRecords[2]!), readOutputVersionBlob(restoredRecords[0]!))
+    assert.equal(readOutputVersionBlob(restoredRecords[1]!).toString('utf8'), '# 甲报告（已修改）\n\n修改成功。\n')
+    assert.equal(fs.readFileSync(reportAPath, 'utf8'), reportA)
+
+    await js("document.querySelector('[aria-label=\"返回会话并关闭文件预览\"]')?.click()")
+    await waitFor(
+      () => js<boolean>("document.querySelector('[data-work-output-preview]') === null"),
+      value => value,
+      'Preview did not close after restore',
+    )
+    assert.equal(await waitFor(
+      () => js<boolean>("(() => { const rows = Array.from(document.querySelectorAll('[data-work-session-output=\"report-a.md\"]')); const row = rows.at(-1); if (!(row instanceof HTMLButtonElement)) return false; row.click(); return true })()"),
+      value => value,
+      'Restored output did not appear in the conversation',
+    ), true)
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[role=\"tab\"]')).find(item => item.textContent?.startsWith('版本')); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
+    await waitFor(
+      () => js<string>("document.querySelector('[data-work-output-version=\"v3\"]')?.textContent ?? ''"),
+      text => text.includes('当前'),
+      'The restored v3 did not become current after completion',
+    )
+    assert.equal(await js<boolean>("(() => { const button = document.querySelector('[data-work-output-version=\"v2\"]'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
+    await waitFor(
+      () => js<boolean>("Boolean(document.querySelector('[data-work-output-version-detail=\"v2\"] [data-work-output-preview-markdown]'))"),
+      value => value,
+      'The preserved v2 was not readable after restoring v1',
+    )
+    fs.writeFileSync(reportAPath, '# External edit\n')
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] button')).find(item => item.textContent?.trim() === '恢复 v2'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true })()"), true)
+    await waitFor(
+      () => js<string>("document.querySelector('.dsh-work-output-preview-actions > span')?.textContent ?? ''"),
+      text => text.includes('当前文件已在工作区发生变化') && text.includes('刷新版本'),
+      'An external edit did not block restore with an explicit conflict',
     )
     assert.equal(readOutputVersionRecords().filter(record =>
-      record.sessionId === baseline.sessionA && record.path === 'report-a.md').length, 2)
+      record.sessionId === baseline.sessionA && record.path === 'report-a.md').length, 3)
+    fs.writeFileSync(reportAPath, reportA)
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] button')).find(item => item.textContent?.trim() === '基于 v2 修改'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true })()"), true)
+    const historicalDraft = await waitFor(
+      () => js<{ draft: string; focused: boolean }>("({ draft: document.querySelector('[data-composer-input]')?.textContent ?? '', focused: document.activeElement === document.querySelector('[data-composer-input]') })"),
+      value => value.draft.includes('基于 @attachment-') && value.draft.includes('（v2）修改 @report-a.md')
+        && value.focused,
+      'The v2 revision action did not bind the immutable snapshot in the native composer',
+    )
+    const historicalReference = /基于 @([^\s]+)（v2）修改 @report-a\.md/u.exec(historicalDraft.draft)?.[1]
+    assert.ok(historicalReference)
+    assert.equal(fs.readFileSync(path.join(baseline.workspacePath, historicalReference), 'utf8'), '# 甲报告（已修改）\n\n修改成功。\n')
+    assert.equal(fs.readFileSync(reportAPath, 'utf8'), reportA)
+    await clickSend()
+    await waitFor(
+      () => js<string>("document.querySelector('[data-composer-input]')?.textContent ?? ''"),
+      text => text === '',
+      'The explicit v2 revision request was not consumed by native Send',
+    )
+    assert.equal(readOutputVersionRecords().filter(record =>
+      record.sessionId === baseline.sessionA && record.path === 'report-a.md').length, 3)
     fs.writeFileSync(path.join(output, 'versions.png'), (await window.webContents.capturePage()).toPNG())
 
     step = 'responsive-keyboard-file-review'; report('fail')

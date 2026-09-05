@@ -479,6 +479,7 @@ test('prepares and inspects a Session revision without changing the Work project
           path: spec.path,
           reference: '@report.md',
           contentDigest: 'f'.repeat(64),
+          intent: 'restore',
           baseVersion: {
             ...baseVersion,
             ordinal: 1,
@@ -498,11 +499,13 @@ test('prepares and inspects a Session revision without changing the Work project
   const works = new WorksController(new Context(), model)
   const output = {
     sessionId: 'session-revision', turn: 4, throughSeq: 23, path: 'report.md', baseVersion,
+    intent: 'restore' as const,
   }
 
   const revision = await works.prepareSessionOutputRevision(output)
   assert.equal(revision.reference, '@report.md')
   assert.equal(revision.baseVersion?.versionId, baseVersion.versionId)
+  assert.equal(revision.intent, 'restore')
   assert.equal(await works.inspectSessionRevision({
     sessionId: output.sessionId, turn: 5, throughSeq: 31,
   }), null)

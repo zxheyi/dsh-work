@@ -1057,6 +1057,35 @@ test('publishes immutable Session output versions and reads historical bytes aft
       { seq: firstSeq + 2, type: 'turn/end', data: { turn, reason: { kind: 'completed' } } },
     )
   }
+  const addRevisionWrite = (
+    turn: number,
+    firstSeq: number,
+    content: string,
+    snapshotPath: string,
+  ): number => {
+    const callId = `revision-write-${String(turn)}`
+    events.push(
+      { seq: firstSeq, type: 'user/message', data: {
+        source: { kind: 'user' }, content: [{
+          type: 'text', text: `使用 @${snapshotPath} （v1）的完整内容恢复 @report.md ，保持字节一致`,
+        }],
+      } },
+      { seq: firstSeq + 1, type: 'turn/start', data: { turn } },
+      { seq: firstSeq + 2, type: 'tool/call', data: {
+        turn, callId, name: 'write',
+        arguments: JSON.stringify({ file_path: 'report.md', content }),
+      } },
+      { seq: firstSeq + 3, type: 'tool/result', surfaceOp: 'append', data: {
+        turn,
+        message: { source: { callId }, content: [{ type: 'tool-result', isError: false }] },
+      } },
+      { seq: firstSeq + 4, type: 'assistant/message', data: {
+        turn, message: { content: [{ type: 'text', text: '完成' }] },
+      } },
+      { seq: firstSeq + 5, type: 'turn/end', data: { turn, reason: { kind: 'completed' } } },
+    )
+    return firstSeq + 5
+  }
   const harness: HarnessWorkPort = {
     ...testHarness(),
     async inspectSession() { return { cwd: workspace, events } },
@@ -1131,6 +1160,93 @@ test('publishes immutable Session output versions and reads historical bytes aft
     sessionId: 'session-versioned', path: 'report.md',
   })).length, 2)
 
+  const restoreController = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    sessionOutputVersionRoot: versionRoot,
+    now: () => times.shift()!,
+    harness,
+  })
+  const restore = await restoreController.prepareSessionOutputRevision({
+    sessionId: 'session-versioned', turn: 2, throughSeq: 6, path: 'report.md', intent: 'restore',
+    baseVersion: { fileId: versions[0]!.fileId, versionId: versions[0]!.versionId },
+  })
+  assert.equal(restore.intent, 'restore')
+  assert.equal(restore.contentDigest, versions[1]!.contentDigest)
+  assert.equal(restore.baseVersion?.contentDigest, versions[0]!.contentDigest)
+  await assert.rejects(restoreController.prepareSessionOutputRevision({
+    sessionId: 'session-versioned', turn: 2, throughSeq: 6, path: 'report.md', intent: 'restore',
+    baseVersion: { fileId: versions[1]!.fileId, versionId: versions[1]!.versionId },
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-output-invalid')
+  await fs.writeFile(path.join(workspace, 'report.md'), '# External edit after preparation\n')
+  await assert.rejects(restoreController.prepareSessionOutputRevision({
+    sessionId: 'session-versioned', turn: 2, throughSeq: 6, path: 'report.md', intent: 'restore',
+    baseVersion: { fileId: versions[0]!.fileId, versionId: versions[0]!.versionId },
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-output-conflict')
+  await fs.writeFile(path.join(workspace, 'report.md'), '# Version two\n')
+
+  await fs.writeFile(path.join(workspace, 'report.md'), '# Interrupted restore\n')
+  const failedThroughSeq = addRevisionWrite(3, 7, '# Interrupted restore\n', restore.baseVersion!.path)
+  const interruptedRestart = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    sessionOutputVersionRoot: versionRoot,
+    harness,
+  })
+  assert.deepEqual(await interruptedRestart.inspectSessionOutputs({
+    sessionId: 'session-versioned', turn: 3, throughSeq: failedThroughSeq,
+  }), [])
+  assert.equal((await interruptedRestart.listSessionOutputVersions({
+    sessionId: 'session-versioned', path: 'report.md',
+  })).length, 2)
+  assert.deepEqual(await restoreController.inspectSessionRevision({
+    sessionId: 'session-versioned', turn: 3, throughSeq: failedThroughSeq,
+  }), {
+    sessionId: 'session-versioned', turn: 3, name: 'report.md', path: 'report.md',
+    reference: '@report.md', status: 'failed',
+    message: '恢复未生成选定版本的完整内容，已保留上一结果。',
+  })
+  assert.deepEqual(await restoreController.inspectSessionOutputs({
+    sessionId: 'session-versioned', turn: 3, throughSeq: failedThroughSeq,
+  }), [])
+  assert.equal((await restoreController.listSessionOutputVersions({
+    sessionId: 'session-versioned', path: 'report.md',
+  })).length, 2)
+
+  await restoreController.prepareSessionOutputRevision({
+    sessionId: 'session-versioned', turn: 3, throughSeq: failedThroughSeq, path: 'report.md', intent: 'restore',
+    baseVersion: { fileId: versions[0]!.fileId, versionId: versions[0]!.versionId },
+  })
+  await restoreController.prepareSessionOutputRevision({
+    sessionId: 'session-versioned', turn: 3, throughSeq: failedThroughSeq, path: 'report.md', intent: 'restore',
+    baseVersion: { fileId: versions[0]!.fileId, versionId: versions[0]!.versionId },
+  })
+  await fs.writeFile(path.join(workspace, 'report.md'), '# External edit during retry\n')
+  await assert.rejects(restoreController.prepareSessionOutputRevision({
+    sessionId: 'session-versioned', turn: 3, throughSeq: failedThroughSeq, path: 'report.md', intent: 'restore',
+    baseVersion: { fileId: versions[0]!.fileId, versionId: versions[0]!.versionId },
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-output-conflict')
+  await fs.writeFile(path.join(workspace, 'report.md'), '# Interrupted restore\n')
+  await assert.rejects(restoreController.prepareSessionOutputRevision({
+    sessionId: 'session-versioned', turn: 3, throughSeq: failedThroughSeq, path: 'report.md', intent: 'restore',
+    baseVersion: { fileId: versions[1]!.fileId, versionId: versions[1]!.versionId },
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-output-invalid')
+  await fs.writeFile(path.join(workspace, 'report.md'), '# Version one\n')
+  const restoredThroughSeq = addRevisionWrite(4, 13, '# Version one\n', restore.baseVersion!.path)
+  await restoreController.inspectSessionOutputs({
+    sessionId: 'session-versioned', turn: 4, throughSeq: restoredThroughSeq,
+  })
+  await restoreController.inspectSessionOutputs({
+    sessionId: 'session-versioned', turn: 4, throughSeq: restoredThroughSeq,
+  })
+  const restoredVersions = await restoreController.listSessionOutputVersions({
+    sessionId: 'session-versioned', path: 'report.md',
+  })
+  assert.deepEqual(restoredVersions.map(version => version.ordinal), [1, 2, 3])
+  assert.equal(restoredVersions[2]?.contentDigest, restoredVersions[0]?.contentDigest)
+  assert.equal((await restoreController.readSessionOutputVersion({
+    fileId: restoredVersions[1]!.fileId,
+    versionId: restoredVersions[1]!.versionId,
+  })).content, '# Version two\n')
+
   const restarted = createWorkController({
     workspaceRoot: path.join(root, 'managed'),
     sessionOutputVersionRoot: versionRoot,
@@ -1138,11 +1254,18 @@ test('publishes immutable Session output versions and reads historical bytes aft
   })
   assert.deepEqual(await restarted.listSessionOutputVersions({
     sessionId: 'session-versioned', path: 'report.md',
-  }), versions)
+  }), restoredVersions)
   assert.equal((await restarted.readSessionOutputVersion({
     fileId: versions[1]!.fileId,
     versionId: versions[1]!.versionId,
   })).content, '# Version two\n')
+  await fs.writeFile(path.join(workspace, 'report.md'), '# External edit\n')
+  await assert.rejects(restarted.prepareSessionOutputRevision({
+    sessionId: 'session-versioned', turn: 4, throughSeq: restoredThroughSeq, path: 'report.md', intent: 'restore',
+    baseVersion: { fileId: versions[0]!.fileId, versionId: versions[0]!.versionId },
+  }), (error: unknown) => error instanceof WorkError
+    && error.code === 'work/session-output-conflict'
+    && /external changes/u.test(error.message))
   await fs.rm(root, { recursive: true, force: true })
 })
 
@@ -1165,6 +1288,66 @@ test('rejects invalid revision version identities before inspecting Session or j
     baseVersion: { fileId: '../escape', versionId: 'b'.repeat(32) },
   }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-output-invalid')
   assert.equal(inspections, 0)
+})
+
+test('rejects restore when an output ancestor is replaced after the file handle opens', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-restore-parent-swap-'))
+  const workspace = path.join(root, 'workspace')
+  const originalDirectory = path.join(workspace, 'docs')
+  const movedDirectory = path.join(workspace, 'docs-original')
+  const outsideDirectory = path.join(root, 'outside')
+  const versionRoot = path.join(root, 'versions')
+  await fs.mkdir(originalDirectory, { recursive: true })
+  await fs.mkdir(outsideDirectory)
+  await fs.writeFile(path.join(originalDirectory, 'report.md'), '# Version one\n')
+  await fs.writeFile(path.join(outsideDirectory, 'report.md'), '# Version one\n')
+  const events: unknown[] = [
+    { seq: 1, type: 'tool/call', data: {
+      turn: 1, callId: 'write', name: 'write',
+      arguments: JSON.stringify({ file_path: 'docs/report.md', content: '# Version one\n' }),
+    } },
+    { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1,
+      message: { source: { callId: 'write' }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ]
+  const harness: HarnessWorkPort = {
+    ...testHarness(),
+    async inspectSession() { return { cwd: workspace, events } },
+    async inspectSessionWorkspace() { return workspace },
+  }
+  const publisher = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot, harness,
+  })
+  assert.equal((await publisher.inspectSessionOutputs({
+    sessionId: 'session-parent-swap', turn: 1, throughSeq: 3,
+  }))[0]?.path, 'docs/report.md')
+  const [version] = await publisher.listSessionOutputVersions({
+    sessionId: 'session-parent-swap', path: 'docs/report.md',
+  })
+  assert.ok(version)
+  let swapped = false
+  const restorer = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    sessionOutputVersionRoot: versionRoot,
+    harness,
+    sessionOutputInternals: {
+      async afterStableOutputOpen(target) {
+        if (swapped || !target.endsWith(`${path.sep}workspace${path.sep}docs${path.sep}report.md`)) return
+        swapped = true
+        await fs.rename(originalDirectory, movedDirectory)
+        await fs.symlink(outsideDirectory, originalDirectory, 'dir')
+      },
+    },
+  })
+  await assert.rejects(restorer.prepareSessionOutputRevision({
+    sessionId: 'session-parent-swap', turn: 1, throughSeq: 3, path: 'docs/report.md', intent: 'restore',
+    baseVersion: { fileId: version.fileId, versionId: version.versionId },
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-output-conflict')
+  assert.equal(swapped, true)
+  assert.equal(await fs.readFile(path.join(movedDirectory, 'report.md'), 'utf8'), '# Version one\n')
+  await fs.rm(root, { recursive: true, force: true })
 })
 
 test('publishes no incomplete version and recovers an interrupted immutable record', async () => {

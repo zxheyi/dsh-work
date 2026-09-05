@@ -115,6 +115,7 @@ interface SessionResourceReferenceDetail {
   readonly base?: {
     readonly path: string
     readonly ordinal: number
+    readonly intent?: 'restore'
   }
 }
 
@@ -306,14 +307,14 @@ export class LatestPreviewRequest {
   async run<Value>(
     load: () => Promise<Value>,
     ready: (value: Value) => void,
-    failed: () => void,
+    failed: (cause: unknown) => void,
   ): Promise<void> {
     const generation = ++this.generation
     try {
       const value = await load()
       if (generation === this.generation) ready(value)
-    } catch {
-      if (generation === this.generation) failed()
+    } catch (cause) {
+      if (generation === this.generation) failed(cause)
     }
   }
 
@@ -501,6 +502,12 @@ function resourceErrorMessage(error: unknown): string {
     if (typeof message === 'string' && message.length > 0) return message
   }
   return '资料复制失败，请重试。'
+}
+
+function remoteErrorCode(error: unknown): string | null {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return null
+  const code = Reflect.get(error, 'code')
+  return typeof code === 'string' ? code : null
 }
 
 function NativeSessionResourceEntry({
@@ -723,7 +730,9 @@ function NativeSessionResourceEntry({
         ? detail.base
         : null
       const insertion = base
-        ? `基于 ${resourceMention(base.path)}（v${String(base.ordinal)}）修改 ${mention}`
+        ? base.intent === 'restore'
+          ? `使用 ${resourceMention(base.path)} （v${String(base.ordinal)}）的完整内容恢复 ${mention} ，保持字节一致`
+          : `基于 ${resourceMention(base.path)}（v${String(base.ordinal)}）修改 ${mention}`
         : mention
       const current = sessionResourceDrafts.get(session.sessionId) ?? input.draft
       if (current.includes(insertion)) return
@@ -1515,6 +1524,7 @@ function NativeSessionOutputPreview({
   >({ phase: 'idle' })
   const [versionRetry, setVersionRetry] = useState(0)
   const [revisionPhase, setRevisionPhase] = useState<'idle' | 'preparing' | 'error'>('idle')
+  const [revisionError, setRevisionError] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<
     | { readonly phase: 'idle' | 'saving' | 'error' }
     | { readonly phase: 'saved'; readonly value: WorkSessionOutputSave }
@@ -1527,6 +1537,7 @@ function NativeSessionOutputPreview({
     revisionRequest.invalidate()
     setTab('content')
     setRevisionPhase('idle')
+    setRevisionError(null)
     setSaveState({ phase: 'idle' })
     setSaveOpenError(false)
     setVersionState({ phase: 'idle' })
@@ -1544,6 +1555,7 @@ function NativeSessionOutputPreview({
     revisionAbort.current = null
     revisionRequest.invalidate()
     setRevisionPhase('idle')
+    setRevisionError(null)
   }, [revisionRequest, selectedVersionId, tab])
 
   useEffect(() => {
@@ -1753,6 +1765,7 @@ function NativeSessionOutputPreview({
     revisionAbort.current = null
     revisionRequest.invalidate()
     setRevisionPhase('idle')
+    setRevisionError(null)
     setTab(next)
   }
   const changeVersion = (versionId: string): void => {
@@ -1760,7 +1773,62 @@ function NativeSessionOutputPreview({
     revisionAbort.current = null
     revisionRequest.invalidate()
     setRevisionPhase('idle')
+    setRevisionError(null)
     setSelectedVersionId(versionId)
+  }
+  const prepareRevision = (intent: 'modify' | 'restore'): void => {
+    const target = selection
+    const base = revisionBase
+    if (intent === 'restore' && !base) return
+    revisionAbort.current?.abort()
+    const abort = new AbortController()
+    revisionAbort.current = abort
+    setRevisionPhase('preparing')
+    setRevisionError(null)
+    void revisionRequest.run(
+      () => works.prepareSessionOutputRevision({
+        sessionId: target.sessionId,
+        turn: target.turn,
+        throughSeq: target.throughSeq,
+        path: target.path,
+        ...(base ? { baseVersion: { fileId: base.fileId, versionId: base.versionId } } : {}),
+        ...(intent === 'restore' ? { intent: 'restore' as const } : {}),
+      }, abort.signal),
+      revision => {
+        revisionAbort.current = null
+        if (!matchesSessionOutputSelection(preview.getSnapshot(), target)
+          || sessionId !== target.sessionId) return
+        setRevisionPhase('idle')
+        setRevisionError(null)
+        window.dispatchEvent(new CustomEvent<SessionResourceReferenceDetail>(
+          'dsh-work:reference-session-resource',
+          { detail: Object.freeze({
+            sessionId: revision.sessionId,
+            path: revision.path,
+            ...(revision.baseVersion ? { base: Object.freeze({
+              path: revision.baseVersion.path,
+              ordinal: revision.baseVersion.ordinal,
+              ...(revision.intent === 'restore' ? { intent: 'restore' as const } : {}),
+            }) } : {}),
+          }) },
+        ))
+        if (narrow) closePreview()
+      },
+      cause => {
+        revisionAbort.current = null
+        if (!matchesSessionOutputSelection(preview.getSnapshot(), target)) return
+        setRevisionError(intent === 'restore' && remoteErrorCode(cause) === 'work/session-output-conflict'
+          ? '当前文件已在工作区发生变化。请刷新版本，确认内容后重试恢复。'
+          : intent === 'restore'
+            ? cause instanceof Error && cause.message.trim().length > 0
+              ? cause.message
+              : '暂时无法准备所选版本，请重新读取后再试。'
+            : cause instanceof Error && cause.message.trim().length > 0
+            ? cause.message
+            : '无法保护当前文件，请重新读取后再试。')
+        setRevisionPhase('error')
+      },
+    )
   }
   const versionPanel = versionState.phase === 'loading' || versionState.phase === 'idle'
     ? h('div', { className: 'dsh-work-output-preview-status', role: 'status', 'aria-live': 'polite' }, '正在读取版本记录…')
@@ -1939,15 +2007,15 @@ function NativeSessionOutputPreview({
       'aria-live': 'polite',
       'aria-atomic': 'true',
       title: saveState.phase === 'saved' ? saveState.value.location : undefined,
-    }, saveState.phase === 'saved'
+    }, revisionPhase === 'error'
+      ? revisionError ?? '无法保护当前文件，请重新读取后再试。'
+      : saveState.phase === 'saved'
       ? saveOpenError
         ? `副本已保存到 ${saveState.value.location}，但暂时无法打开位置。`
         : `已保存到 ${saveState.value.location}`
       : saveState.phase === 'error'
         ? '保存结果尚未确认，请重试。'
-        : revisionPhase === 'error'
-          ? '无法保护当前文件，请重新读取后再试。'
-          : unsupported
+        : unsupported
             ? '保存会复制当前文件到受管位置'
             : tab === 'versions'
               ? '查看历史版本不会改变当前文件'
@@ -2001,51 +2069,21 @@ function NativeSessionOutputPreview({
           : tab === 'versions'
             ? '保存当前版副本'
             : '保存副本'),
+      !unsupported && revisionBase ? h('button', {
+        type: 'button',
+        className: 'is-secondary',
+        disabled: revisionPhase === 'preparing' || !selectedVersionContent,
+        onClick: () => prepareRevision('restore'),
+      }, revisionPhase === 'preparing'
+        ? '正在准备…'
+        : `恢复 v${String(revisionBase.ordinal)}`) : null,
       !unsupported ? h('button', {
         type: 'button',
         disabled: revisionPhase === 'preparing'
           || (tab === 'versions'
             ? !revisionBase || !selectedVersionContent
             : state.phase !== 'ready'),
-        onClick: () => {
-          const target = selection
-          const base = revisionBase
-          revisionAbort.current?.abort()
-          const abort = new AbortController()
-          revisionAbort.current = abort
-          setRevisionPhase('preparing')
-          void revisionRequest.run(
-            () => works.prepareSessionOutputRevision({
-              sessionId: target.sessionId,
-              turn: target.turn,
-              throughSeq: target.throughSeq,
-              path: target.path,
-              ...(base ? { baseVersion: { fileId: base.fileId, versionId: base.versionId } } : {}),
-            }, abort.signal),
-            revision => {
-              revisionAbort.current = null
-              if (!matchesSessionOutputSelection(preview.getSnapshot(), target)
-                || sessionId !== target.sessionId) return
-              setRevisionPhase('idle')
-              window.dispatchEvent(new CustomEvent<SessionResourceReferenceDetail>(
-                'dsh-work:reference-session-resource',
-                { detail: Object.freeze({
-                  sessionId: revision.sessionId,
-                  path: revision.path,
-                  ...(revision.baseVersion ? { base: Object.freeze({
-                    path: revision.baseVersion.path,
-                    ordinal: revision.baseVersion.ordinal,
-                  }) } : {}),
-                }) },
-              ))
-              if (narrow) closePreview()
-            },
-            () => {
-              revisionAbort.current = null
-              if (matchesSessionOutputSelection(preview.getSnapshot(), target)) setRevisionPhase('error')
-            },
-          )
-        },
+        onClick: () => prepareRevision('modify'),
       }, revisionPhase === 'preparing'
         ? '正在准备…'
         : revisionBase

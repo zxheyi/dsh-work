@@ -10,6 +10,7 @@ const GENERATE_A_PROMPT = '生成甲会话的两个真实文件'
 const GENERATE_B_PROMPT = '生成乙会话的一个真实文件'
 const REVISION_FAIL_PROMPT = '执行失败修改夹具'
 const REVISION_SUCCESS_PROMPT = '执行成功修改夹具'
+const RESTORE_PROMPT = '保持字节一致'
 const REPORT_A = [
   '# 甲报告',
   '',
@@ -75,6 +76,15 @@ class OutputAdapter extends LlmAdapter {
     const latestUser = [...options.messages].reverse().find(message => message?.source?.kind === 'user')
     const userPrompt = textOf(latestUser)
     if (latest?.source?.kind === 'tool') {
+      if (userPrompt.includes(RESTORE_PROMPT)) {
+        if (latest.source.callId === 'output-a-restore-read') {
+          for (const event of toolCall(0, 'output-a-restore-write', 'write', { file_path: 'report-a.md', content: REPORT_A })) yield event
+          yield { type: 'finish', reason: { kind: 'tool-calls' } }
+          return
+        }
+        yield * emitText('所选历史版本已经恢复为新的当前版本。')
+        return
+      }
       if (userPrompt.includes(REVISION_FAIL_PROMPT)) {
         if (latest.source.callId === 'output-a-revision-read-fail') {
           for (const event of toolCall(0, 'output-a-revision-empty', 'write', { file_path: 'report-a.md', content: '' })) yield event
@@ -104,6 +114,16 @@ class OutputAdapter extends LlmAdapter {
       return
     }
     const prompt = textOf(latest)
+    if (prompt.includes(RESTORE_PROMPT)) {
+      const sourcePath = referencedPath(prompt)
+      if (!sourcePath) {
+        yield * emitText('没有收到可恢复的历史快照。')
+        return
+      }
+      for (const event of toolCall(0, 'output-a-restore-read', 'read', { file_path: sourcePath })) yield event
+      yield { type: 'finish', reason: { kind: 'tool-calls' } }
+      return
+    }
     if (prompt.includes(REVISION_FAIL_PROMPT)) {
       for (const event of toolCall(0, 'output-a-revision-read-fail', 'read', { file_path: 'report-a.md' })) yield event
       yield { type: 'finish', reason: { kind: 'tool-calls' } }
@@ -184,6 +204,7 @@ export async function apply(context) {
     generateBPrompt: GENERATE_B_PROMPT,
     revisionFailPrompt: REVISION_FAIL_PROMPT,
     revisionSuccessPrompt: REVISION_SUCCESS_PROMPT,
+    restorePrompt: RESTORE_PROMPT,
     workspacePath,
   }, null, 2), { flag: 'wx' })
 }

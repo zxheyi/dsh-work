@@ -260,10 +260,10 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
   const versionSelection = { fileId: 'a'.repeat(32), versionId: 'b'.repeat(32) }
   assert.deepEqual(prepareRevisionCodec.schema.parse({
     sessionId: 'session-remote', turn: 2, throughSeq: 12, path: 'report.md',
-    baseVersion: versionSelection,
+    baseVersion: versionSelection, intent: 'restore',
   }), {
     sessionId: 'session-remote', turn: 2, throughSeq: 12, path: 'report.md',
-    baseVersion: versionSelection,
+    baseVersion: versionSelection, intent: 'restore',
   })
   assert.throws(() => prepareRevisionCodec.schema.parse({
     sessionId: 'session-remote', turn: 2, throughSeq: 12, path: 'report.md',
@@ -272,6 +272,7 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
   const revisionValue = {
     sessionId: 'session-remote', sourceTurn: 2, name: 'report.md', path: 'report.md',
     reference: '@report.md', contentDigest: 'c'.repeat(64),
+    intent: 'restore' as const,
     baseVersion: {
       ...versionSelection, ordinal: 1, path: 'attachment-v1.md', reference: '@attachment-v1.md',
       contentDigest: 'd'.repeat(64),
