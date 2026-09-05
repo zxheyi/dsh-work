@@ -90,6 +90,7 @@ export async function apply(context: WorkBundleContext): Promise<void> {
   const controller = createWorkController({
     workspaceRoot: context.dshHomePath('workspaces'),
     deliveryRoot: context.dshHomePath('deliveries'),
+    sessionOutputVersionRoot: context.dshHomePath('session-output-versions', 'v1'),
     harness: createHarnessWorkPort(context),
     store: createDomainWorkStore(domain.global),
   })

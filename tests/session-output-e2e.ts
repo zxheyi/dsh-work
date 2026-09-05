@@ -1,5 +1,6 @@
 import { app, BrowserWindow } from 'electron'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
@@ -16,6 +17,7 @@ if (!requestedNode) throw new Error('explicit standalone Node is required; no gl
 const node = requestedNode
 const output = path.resolve('artifacts/session-output')
 const reportPath = path.join(output, 'result.json')
+const versionRoot = path.join(home, 'session-output-versions', 'v1')
 fs.mkdirSync(output, { recursive: true })
 app.setPath('userData', path.join(home, 'electron'))
 app.commandLine.appendSwitch('disable-background-networking')
@@ -28,6 +30,56 @@ const report = (status: 'pass' | 'fail', detail?: string): void => {
   fs.writeFileSync(reportPath, JSON.stringify({ status, step, detail }, null, 2))
 }
 report('fail')
+
+interface OutputVersionRecord {
+  readonly fileId: string
+  readonly versionId: string
+  readonly ordinal: number
+  readonly origin: 'generated' | 'migration-baseline'
+  readonly sessionId: string
+  readonly turn: number | null
+  readonly throughSeq: number | null
+  readonly path: string
+  readonly contentDigest: string
+  readonly sources: readonly {
+    readonly path: string
+    readonly status: string
+  }[]
+}
+
+function readOutputVersionRecords(): readonly OutputVersionRecord[] {
+  const recordsRoot = path.join(versionRoot, 'records')
+  if (!fs.existsSync(recordsRoot)) return []
+  return fs.readdirSync(recordsRoot, { withFileTypes: true })
+    .filter(entry => entry.isDirectory())
+    .flatMap(entry => {
+      const directory = path.join(recordsRoot, entry.name)
+      const names = fs.readdirSync(directory)
+      return names
+        .filter(name => /^\d{6}-[a-f0-9]{32}\.json$/u.test(name))
+        .flatMap(name => {
+          const bytes = fs.readFileSync(path.join(directory, name))
+          const digest = createHash('sha256').update(bytes).digest('hex')
+          const confirmed = names.some(candidate => {
+            if (!candidate.startsWith(`${name}.`) || !candidate.endsWith('.commit')) return false
+            try {
+              const value = JSON.parse(fs.readFileSync(path.join(directory, candidate), 'utf8')) as {
+                readonly recordName?: unknown
+                readonly recordDigest?: unknown
+              }
+              return value.recordName === name && value.recordDigest === digest
+            } catch {
+              return false
+            }
+          })
+          return confirmed ? [JSON.parse(bytes.toString('utf8')) as OutputVersionRecord] : []
+        })
+    })
+}
+
+function readOutputVersionBlob(record: OutputVersionRecord): Buffer {
+  return fs.readFileSync(path.join(versionRoot, 'blobs', record.contentDigest))
+}
 
 async function reserveLoopbackPort(): Promise<number> {
   const server = net.createServer()
@@ -150,6 +202,8 @@ async function run(): Promise<void> {
       'Output fixture did not become ready',
     )
     const baseline = JSON.parse(fs.readFileSync(path.join(home, OUTPUT_TEST_BASELINE_FILE), 'utf8')) as {
+      sessionA: string
+      sessionB: string
       ordinaryPrompt: string
       generateAPrompt: string
       generateBPrompt: string
@@ -244,6 +298,26 @@ async function run(): Promise<void> {
     assert.match(reportA, /^# 甲报告/u)
     assert.equal(fs.readFileSync(path.join(baseline.workspacePath, 'report-b.csv'), 'utf8'), 'name,value\nalpha,1\n')
     assert.equal(fs.statSync(path.join(baseline.workspacePath, 'empty.md')).size, 0)
+    const initialReportAVersions = await waitFor(
+      async () => readOutputVersionRecords().filter(record =>
+        record.sessionId === baseline.sessionA && record.path === 'report-a.md'),
+      records => records.length === 1,
+      'Initial report A did not publish one immutable version',
+    )
+    assert.equal(initialReportAVersions[0]?.origin, 'generated')
+    assert.equal(initialReportAVersions[0]?.ordinal, 1)
+    assert.ok(initialReportAVersions[0]?.turn !== null)
+    assert.ok(initialReportAVersions[0]?.throughSeq !== null)
+    assert.deepEqual(readOutputVersionBlob(initialReportAVersions[0]!), Buffer.from(reportA, 'utf8'))
+    assert.ok(initialReportAVersions[0]?.sources.some(source =>
+      source.path === sourcePath && source.status === 'verified'))
+    const initialReportBVersions = readOutputVersionRecords().filter(record =>
+      record.sessionId === baseline.sessionA && record.path === 'report-b.csv')
+    assert.equal(initialReportBVersions.length, 1)
+    assert.deepEqual(
+      readOutputVersionBlob(initialReportBVersions[0]!),
+      Buffer.from('name,value\nalpha,1\n', 'utf8'),
+    )
 
     const selectAt = async (index: number): Promise<string> => {
       const source = "(() => { const buttons = document.querySelectorAll('[data-work-session-output]'); const button = buttons.item(" + String(index) + "); if (!(button instanceof HTMLButtonElement)) return ''; button.click(); return button.getAttribute('data-work-session-output') ?? '' })()"
@@ -461,6 +535,8 @@ async function run(): Promise<void> {
       'Invalid revision did not expose a retryable failure in the original Session',
     )
     assert.equal(fs.statSync(reportAPath).size, 0)
+    assert.equal(readOutputVersionRecords().filter(record =>
+      record.sessionId === baseline.sessionA && record.path === 'report-a.md').length, 1)
     assert.equal(await selectAt(0), 'report-a.md')
     await waitFor(
       () => js<string>("document.querySelector('[data-work-output-preview-markdown]')?.textContent ?? ''"),
@@ -487,6 +563,17 @@ async function run(): Promise<void> {
       'Valid retry did not publish the revised file once',
     )
     assert.equal(await js<number>("Array.from(document.querySelectorAll('[data-work-session-output]')).filter(item => item.getAttribute('data-work-session-output') === 'report-a.md').length"), 2)
+    const revisedReportAVersions = await waitFor(
+      async () => readOutputVersionRecords().filter(record =>
+        record.sessionId === baseline.sessionA && record.path === 'report-a.md')
+        .sort((left, right) => left.ordinal - right.ordinal),
+      records => records.length === 2,
+      'Successful revision did not publish a second immutable version',
+    )
+    assert.deepEqual(revisedReportAVersions.map(record => record.ordinal), [1, 2])
+    assert.notEqual(revisedReportAVersions[0]?.contentDigest, revisedReportAVersions[1]?.contentDigest)
+    assert.deepEqual(readOutputVersionBlob(revisedReportAVersions[0]!), Buffer.from(reportA, 'utf8'))
+    assert.equal(readOutputVersionBlob(revisedReportAVersions[1]!).toString('utf8'), '# 甲报告（已修改）\n\n修改成功。\n')
 
     step = 'responsive-keyboard-file-review'; report('fail')
     window.show()

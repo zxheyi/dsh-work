@@ -8,10 +8,12 @@ import type {
   WorkImportSessionResourceSpec,
   WorkInspectSessionOutputSourcesSpec,
   WorkInspectSessionOutputsSpec,
+  WorkListSessionOutputVersionsSpec,
   WorkPrepareSessionOutputRevisionSpec,
   WorkSaveSessionOutputSpec,
   WorkShowSessionOutputSaveSpec,
   WorkReadSessionOutputSpec,
+  WorkReadSessionOutputVersionSpec,
   WorkListValue,
   WorkDeliverableContent,
   WorkReadDeliverableRequest,
@@ -23,6 +25,9 @@ import type {
   WorkSessionOutputSource,
   WorkSessionOutputRevision,
   WorkSessionOutputRevisionFailure,
+  WorkSessionOutputVersion,
+  WorkSessionOutputVersionContent,
+  WorkSessionOutputVersionsValue,
   WorkSessionOutputSave,
   WorkShowSessionOutputSaveValue,
   WorkSessionOutputSourcesValue,
@@ -206,6 +211,38 @@ const sessionOutputContentSchema: z.ZodType<WorkSessionOutputContent> = z.object
   contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
   sources: z.array(sessionOutputSourceSchema).max(20),
 }).strict()
+const listSessionOutputVersionsSchema: z.ZodType<WorkListSessionOutputVersionsSpec> = z.object({
+  sessionId: z.string().min(1).max(256),
+  path: z.string().min(1).max(4096),
+}).strict()
+const readSessionOutputVersionSchema: z.ZodType<WorkReadSessionOutputVersionSpec> = z.object({
+  fileId: z.string().regex(/^[a-f0-9]{32}$/u),
+  versionId: z.string().regex(/^[a-f0-9]{32}$/u),
+}).strict()
+const sessionOutputVersionObjectSchema = z.object({
+  fileId: z.string().regex(/^[a-f0-9]{32}$/u),
+  versionId: z.string().regex(/^[a-f0-9]{32}$/u),
+  ordinal: z.number().int().positive().max(512),
+  origin: z.enum(['generated', 'migration-baseline']),
+  sessionId: z.string().min(1).max(256),
+  turn: z.number().int().nonnegative().nullable(),
+  throughSeq: z.number().int().nonnegative().nullable(),
+  name: z.string().min(1).max(512),
+  path: z.string().min(1).max(4096),
+  bytes: z.number().int().positive().max(25 * 1024 * 1024),
+  mediaType: z.string().min(1).max(128).nullable(),
+  contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+  createdAt: z.iso.datetime(),
+  sources: z.array(sessionOutputSourceSchema).max(20),
+}).strict()
+const sessionOutputVersionSchema: z.ZodType<WorkSessionOutputVersion> = sessionOutputVersionObjectSchema
+  .refine(value => (value.turn === null) === (value.throughSeq === null))
+const sessionOutputVersionsValueSchema: z.ZodType<WorkSessionOutputVersionsValue> = z.object({
+  items: z.array(sessionOutputVersionSchema).max(512),
+}).strict()
+const sessionOutputVersionContentSchema: z.ZodType<WorkSessionOutputVersionContent> = sessionOutputVersionObjectSchema.extend({
+  content: z.string().min(1).max(5 * 1024 * 1024),
+}).strict().refine(value => (value.turn === null) === (value.throughSeq === null))
 const listSchema: z.ZodType<WorkListValue> = z.object({
   items: z.array(workViewSchema).max(1),
 }).strict()
@@ -435,6 +472,48 @@ export const TYPERT_REMOTE: TypertRemoteContribution = Object.freeze({
       ),
     }),
     Object.freeze({
+      id: '@dsh-work/work-api#work/listSessionOutputVersions',
+      service: 'workApi',
+      namespace: 'work',
+      method: 'listSessionOutputVersions',
+      invocation: Object.freeze({ kind: 'direct' as const }),
+      parameters: Object.freeze([Object.freeze({
+        name: 'spec',
+        wire: 'spec',
+        source: 'json' as const,
+        codec: strict(
+          '@dsh-work/work-api#WorkListSessionOutputVersionsSpec',
+          listSessionOutputVersionsSchema,
+        ),
+      })]),
+      cancellation: Object.freeze({ parameter: 'signal' as const }),
+      result: strict(
+        '@dsh-work/work-api#WorkSessionOutputVersionsValue',
+        sessionOutputVersionsValueSchema,
+      ),
+    }),
+    Object.freeze({
+      id: '@dsh-work/work-api#work/readSessionOutputVersion',
+      service: 'workApi',
+      namespace: 'work',
+      method: 'readSessionOutputVersion',
+      invocation: Object.freeze({ kind: 'direct' as const }),
+      parameters: Object.freeze([Object.freeze({
+        name: 'spec',
+        wire: 'spec',
+        source: 'json' as const,
+        codec: strict(
+          '@dsh-work/work-api#WorkReadSessionOutputVersionSpec',
+          readSessionOutputVersionSchema,
+        ),
+      })]),
+      cancellation: Object.freeze({ parameter: 'signal' as const }),
+      result: strict(
+        '@dsh-work/work-api#WorkSessionOutputVersionContent',
+        sessionOutputVersionContentSchema,
+      ),
+    }),
+    Object.freeze({
       id: '@dsh-work/work-api#work/follow',
       service: 'workApi',
       namespace: 'work',
@@ -494,6 +573,14 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       spec: WorkShowSessionOutputSaveSpec,
       signal?: AbortSignal,
     ) => Promise<RemoteResult<WorkShowSessionOutputSaveValue>>
+    'work/listSessionOutputVersions': (
+      spec: WorkListSessionOutputVersionsSpec,
+      signal?: AbortSignal,
+    ) => Promise<RemoteResult<WorkSessionOutputVersionsValue>>
+    'work/readSessionOutputVersion': (
+      spec: WorkReadSessionOutputVersionSpec,
+      signal?: AbortSignal,
+    ) => Promise<RemoteResult<WorkSessionOutputVersionContent>>
     'work/readSessionOutput': (
       spec: WorkReadSessionOutputSpec,
       signal?: AbortSignal,
@@ -516,6 +603,8 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       inspectSessionRevision: TypertRemoteMap['work/inspectSessionRevision']
       saveSessionOutput: TypertRemoteMap['work/saveSessionOutput']
       showSessionOutputSave: TypertRemoteMap['work/showSessionOutputSave']
+      listSessionOutputVersions: TypertRemoteMap['work/listSessionOutputVersions']
+      readSessionOutputVersion: TypertRemoteMap['work/readSessionOutputVersion']
       readSessionOutput: TypertRemoteMap['work/readSessionOutput']
       list: TypertRemoteMap['work/list']
       follow: TypertRemoteMap['work/follow']

@@ -60,6 +60,8 @@ test('exports the narrow Work surface through public Typert markers', () => {
     { method: 'inspectSessionRevision', mode: 'unary' },
     { method: 'saveSessionOutput', mode: 'unary' },
     { method: 'showSessionOutputSave', mode: 'unary' },
+    { method: 'listSessionOutputVersions', mode: 'unary' },
+    { method: 'readSessionOutputVersion', mode: 'unary' },
     { method: 'readSessionOutput', mode: 'unary' },
     { method: 'list', mode: 'unary' },
     { method: 'follow', mode: 'stream' },
@@ -83,6 +85,8 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
     'work/inspectSessionRevision',
     'work/saveSessionOutput',
     'work/showSessionOutputSave',
+    'work/listSessionOutputVersions',
+    'work/readSessionOutputVersion',
     'work/follow',
   ])
   const dispatch = TYPERT_REMOTE.descriptors.find(descriptor => descriptor.method === 'dispatch')
@@ -258,6 +262,35 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
     sessionId: 'session-remote', turn: 2, name: 'report.md', path: 'report.md',
     bytes: 12, mediaType: 'text/markdown', contentDigest: 'a'.repeat(64),
     saveId: '../escape', fileName: 'report.md', location: '/managed/saved',
+  }))
+
+  const listVersions = TYPERT_REMOTE.descriptors.find(
+    descriptor => descriptor.method === 'listSessionOutputVersions',
+  )
+  const readVersion = TYPERT_REMOTE.descriptors.find(
+    descriptor => descriptor.method === 'readSessionOutputVersion',
+  )
+  assert.ok(listVersions)
+  assert.ok(readVersion)
+  const listVersionsCodec = listVersions.parameters[0]?.codec
+  const readVersionCodec = readVersion.parameters[0]?.codec
+  assert.equal(listVersionsCodec?.mode, 'strict')
+  assert.equal(readVersionCodec?.mode, 'strict')
+  if (!listVersionsCodec || listVersionsCodec.mode !== 'strict'
+    || !readVersionCodec || readVersionCodec.mode !== 'strict') {
+    throw new Error('Session output versions must publish strict request codecs')
+  }
+  assert.deepEqual(listVersionsCodec.schema.parse({
+    sessionId: 'session-remote', path: 'report.md',
+  }), { sessionId: 'session-remote', path: 'report.md' })
+  assert.throws(() => listVersionsCodec.schema.parse({
+    sessionId: 'session-remote', path: 'report.md', unexpected: true,
+  }))
+  assert.deepEqual(readVersionCodec.schema.parse({
+    fileId: 'a'.repeat(32), versionId: 'b'.repeat(32),
+  }), { fileId: 'a'.repeat(32), versionId: 'b'.repeat(32) })
+  assert.throws(() => readVersionCodec.schema.parse({
+    fileId: '../escape', versionId: 'b'.repeat(32),
   }))
 })
 

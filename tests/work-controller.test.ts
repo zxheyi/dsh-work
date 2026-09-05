@@ -1037,6 +1037,808 @@ test('serializes concurrent remote mutations and rejects the stale revision', as
   assert.deepEqual(turns, ['First client.'])
 })
 
+test('publishes immutable Session output versions and reads historical bytes after restart', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-versions-'))
+  const workspace = path.join(root, 'workspace')
+  const versionRoot = path.join(root, 'versions')
+  await fs.mkdir(workspace)
+  const events: unknown[] = []
+  const addCompletedWrite = (turn: number, firstSeq: number, content: string): void => {
+    const callId = `write-${String(turn)}`
+    events.push(
+      { seq: firstSeq, type: 'tool/call', data: {
+        turn, callId, name: 'write',
+        arguments: JSON.stringify({ file_path: 'report.md', content }),
+      } },
+      { seq: firstSeq + 1, type: 'tool/result', surfaceOp: 'append', data: {
+        turn,
+        message: { source: { callId }, content: [{ type: 'tool-result', isError: false }] },
+      } },
+      { seq: firstSeq + 2, type: 'turn/end', data: { turn, reason: { kind: 'completed' } } },
+    )
+  }
+  const harness: HarnessWorkPort = {
+    ...testHarness(),
+    async inspectSession() { return { cwd: workspace, events } },
+    async inspectSessionWorkspace() { return workspace },
+  }
+  const times = [
+    '2026-09-06T01:00:00.000Z',
+    '2026-09-06T01:00:30.000Z',
+    '2026-09-06T01:01:00.000Z',
+  ]
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    sessionOutputVersionRoot: versionRoot,
+    now: () => times.shift()!,
+    harness,
+  })
+
+  await fs.writeFile(path.join(workspace, 'report.md'), '# Version one\n')
+  addCompletedWrite(1, 1, '# Version one\n')
+  await controller.inspectSessionOutputs({ sessionId: 'session-versioned', turn: 1, throughSeq: 2 })
+  const first = await controller.listSessionOutputVersions({
+    sessionId: 'session-versioned', path: 'report.md',
+  })
+  assert.equal(first.length, 1)
+  assert.equal(first[0]?.origin, 'generated')
+  assert.equal(first[0]?.ordinal, 1)
+  assert.equal(first[0]?.contentDigest, createHash('sha256').update('# Version one\n').digest('hex'))
+  await fs.writeFile(path.join(workspace, 'report.md'), '# Drift after publication\n')
+  await controller.inspectSessionOutputs({ sessionId: 'session-versioned', turn: 1, throughSeq: 3 })
+  const retried = await controller.listSessionOutputVersions({
+    sessionId: 'session-versioned', path: 'report.md',
+  })
+  assert.equal(retried.length, 1)
+  assert.equal((await controller.readSessionOutputVersion({
+    fileId: retried[0]!.fileId, versionId: retried[0]!.versionId,
+  })).content, '# Version one\n')
+
+  await fs.writeFile(path.join(workspace, 'report.md'), '# Version two\n')
+  addCompletedWrite(2, 4, '# Version two\n')
+  await controller.inspectSessionOutputs({ sessionId: 'session-versioned', turn: 2, throughSeq: 5 })
+  const versions = await controller.listSessionOutputVersions({
+    sessionId: 'session-versioned', path: 'report.md',
+  })
+  assert.equal(versions.length, 2)
+  assert.deepEqual(versions.map(version => version.ordinal), [1, 2])
+  assert.notEqual(versions[0]?.versionId, versions[1]?.versionId)
+  assert.deepEqual((await controller.readSessionOutputVersion({
+    fileId: versions[0]!.fileId,
+    versionId: versions[0]!.versionId,
+  })).content, '# Version one\n')
+
+  const restarted = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    sessionOutputVersionRoot: versionRoot,
+    harness,
+  })
+  assert.deepEqual(await restarted.listSessionOutputVersions({
+    sessionId: 'session-versioned', path: 'report.md',
+  }), versions)
+  assert.equal((await restarted.readSessionOutputVersion({
+    fileId: versions[1]!.fileId,
+    versionId: versions[1]!.versionId,
+  })).content, '# Version two\n')
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('publishes no incomplete version and recovers an interrupted immutable record', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-version-recovery-'))
+  const workspace = path.join(root, 'workspace')
+  const versionRoot = path.join(root, 'versions')
+  await fs.mkdir(workspace)
+  await fs.writeFile(path.join(workspace, 'report.md'), '# Recover me\n')
+  const events: unknown[] = [
+    { seq: 1, type: 'tool/call', data: {
+      turn: 1, callId: 'write', name: 'write',
+      arguments: JSON.stringify({ file_path: 'report.md', content: '# Recover me\n' }),
+    } },
+    { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1,
+      message: { source: { callId: 'write' }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+  ]
+  const harness: HarnessWorkPort = {
+    ...testHarness(),
+    async inspectSession() { return { cwd: workspace, events } },
+    async inspectSessionWorkspace() { return workspace },
+  }
+  let interrupt = true
+  const interrupted = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    sessionOutputVersionRoot: versionRoot,
+    harness,
+    sessionOutputVersionInternals: {
+      afterBlobPublish() {
+        if (!interrupt) return
+        interrupt = false
+        throw new Error('injected interruption')
+      },
+    },
+  })
+  const spec = { sessionId: 'session-recovery', turn: 1, throughSeq: 2 }
+
+  assert.deepEqual(await interrupted.inspectSessionOutputs(spec), [])
+  assert.deepEqual(await interrupted.listSessionOutputVersions({
+    sessionId: spec.sessionId, path: 'report.md',
+  }), [])
+  events.push({ seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+  await assert.rejects(interrupted.inspectSessionOutputs(spec), (error: unknown) =>
+    error instanceof WorkError && error.code === 'work/session-output-version-failed')
+  const recordEntries = await fs.readdir(path.join(versionRoot, 'records'), { recursive: true })
+  assert.equal(recordEntries.some(entry => entry.endsWith('.json')), false)
+
+  const recovered = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    sessionOutputVersionRoot: versionRoot,
+    harness,
+  })
+  const versions = await recovered.listSessionOutputVersions({
+    sessionId: spec.sessionId, path: 'report.md',
+  })
+  assert.equal(versions.length, 1)
+  await recovered.inspectSessionOutputs(spec)
+  assert.equal((await recovered.listSessionOutputVersions({
+    sessionId: spec.sessionId, path: 'report.md',
+  })).length, 1)
+  assert.ok((await fs.readdir(path.join(versionRoot, 'intents', versions[0]!.fileId)))
+    .some(name => name.endsWith('.pending')))
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('recovers a published capsule and ignores a pre-publication pending file', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-version-pending-'))
+  const workspace = path.join(root, 'workspace')
+  const versionRoot = path.join(root, 'versions')
+  await fs.mkdir(workspace)
+  await fs.writeFile(path.join(workspace, 'report.md'), '# Pending recovery\n')
+  const events: unknown[] = [
+    { seq: 1, type: 'tool/call', data: {
+      turn: 1, callId: 'write', name: 'write',
+      arguments: JSON.stringify({ file_path: 'report.md', content: '# Pending recovery\n' }),
+    } },
+    { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1,
+      message: { source: { callId: 'write' }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ]
+  const harness: HarnessWorkPort = {
+    ...testHarness(),
+    async inspectSession() { return { cwd: workspace, events: [...events] } },
+    async inspectSessionWorkspace() { return workspace },
+  }
+  let interruptBeforeIntentLink = true
+  const beforeLink = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot, harness,
+    sessionOutputVersionInternals: {
+      afterPendingWrite({ targetPath }) {
+        if (!interruptBeforeIntentLink) return
+        interruptBeforeIntentLink = false
+        throw new Error('interrupt before intent link')
+      },
+    },
+  })
+  await assert.rejects(beforeLink.inspectSessionOutputs({
+    sessionId: 'session-pending', turn: 1, throughSeq: 2,
+  }))
+  const pendingFileIds = await fs.readdir(path.join(versionRoot, 'intents'))
+  assert.equal(pendingFileIds.length, 1)
+  assert.ok((await fs.readdir(path.join(versionRoot, 'intents', pendingFileIds[0]!)))
+    .some(name => name.endsWith('.pending')))
+
+  let interruptAfterIntent = true
+  const afterIntent = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot, harness,
+    sessionOutputVersionInternals: {
+      afterIntentPublish() {
+        if (!interruptAfterIntent) return
+        interruptAfterIntent = false
+        throw new Error('interrupt after intent publication')
+      },
+    },
+  })
+  await assert.rejects(afterIntent.inspectSessionOutputs({
+    sessionId: 'session-pending', turn: 1, throughSeq: 2,
+  }))
+  const recovered = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot, harness,
+  })
+  const [version] = await recovered.listSessionOutputVersions({
+    sessionId: 'session-pending', path: 'report.md',
+  })
+  assert.ok(version)
+  assert.equal((await recovered.readSessionOutputVersion({
+    fileId: version.fileId, versionId: version.versionId,
+  })).content, '# Pending recovery\n')
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('guards journal directories while recovering a published intent', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-version-recovery-swap-'))
+  const workspace = path.join(root, 'workspace')
+  const versionRoot = path.join(root, 'versions')
+  await fs.mkdir(workspace)
+  await fs.writeFile(path.join(workspace, 'report.md'), '# Recovery guard\n')
+  const events: readonly unknown[] = Object.freeze([
+    { seq: 1, type: 'tool/call', data: {
+      turn: 1, callId: 'write', name: 'write',
+      arguments: JSON.stringify({ file_path: 'report.md', content: '# Recovery guard\n' }),
+    } },
+    { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1,
+      message: { source: { callId: 'write' }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ])
+  const harness: HarnessWorkPort = {
+    ...testHarness(),
+    async inspectSession() { return { cwd: workspace, events: [...events] } },
+    async inspectSessionWorkspace() { return workspace },
+  }
+  const interrupted = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot, harness,
+    sessionOutputVersionInternals: { afterIntentPublish() { throw new Error('retain intent') } },
+  })
+  await assert.rejects(interrupted.inspectSessionOutputs({
+    sessionId: 'session-recovery-swap', turn: 1, throughSeq: 2,
+  }))
+
+  let swapped = false
+  const recovering = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot, harness,
+    sessionOutputVersionInternals: {
+      async afterPendingOpen({ targetPath }) {
+        if (swapped) return
+        swapped = true
+        await fs.rename(path.join(versionRoot, 'blobs'), path.join(versionRoot, 'blobs-original'))
+        await fs.mkdir(path.join(versionRoot, 'blobs'))
+        await fs.writeFile(path.join(versionRoot, 'blobs', 'sentinel'), 'replacement untouched')
+      },
+    },
+  })
+  await assert.rejects(recovering.listSessionOutputVersions({
+    sessionId: 'session-recovery-swap', path: 'report.md',
+  }), (error: unknown) => error instanceof WorkError
+    && error.code === 'work/session-output-version-failed')
+  assert.equal(await fs.readFile(path.join(versionRoot, 'blobs', 'sentinel'), 'utf8'), 'replacement untouched')
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('fails closed when the version journal is linked or replaced during publication', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-version-swap-'))
+  const workspace = path.join(root, 'workspace')
+  const versionRoot = path.join(root, 'versions')
+  await fs.mkdir(workspace)
+  await fs.writeFile(path.join(workspace, 'report.md'), '# Guard journal\n')
+  const events: unknown[] = [
+    { seq: 1, type: 'tool/call', data: {
+      turn: 1, callId: 'write', name: 'write',
+      arguments: JSON.stringify({ file_path: 'report.md', content: '# Guard journal\n' }),
+    } },
+    { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1,
+      message: { source: { callId: 'write' }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ]
+  const harness: HarnessWorkPort = {
+    ...testHarness(),
+    async inspectSession() { return { cwd: workspace, events } },
+    async inspectSessionWorkspace() { return workspace },
+  }
+  let replaced = false
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    sessionOutputVersionRoot: versionRoot,
+    harness,
+    sessionOutputVersionInternals: {
+      async afterIntentPublish() {
+        if (replaced) return
+        replaced = true
+        await fs.rename(path.join(versionRoot, 'records'), path.join(versionRoot, 'records-original'))
+        await fs.mkdir(path.join(versionRoot, 'records'))
+        await fs.writeFile(path.join(versionRoot, 'records', 'sentinel'), 'replacement')
+      },
+    },
+  })
+  await assert.rejects(controller.inspectSessionOutputs({
+    sessionId: 'session-swap', turn: 1, throughSeq: 2,
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-output-version-failed')
+  assert.equal(await fs.readFile(path.join(versionRoot, 'records', 'sentinel'), 'utf8'), 'replacement')
+
+  const outside = path.join(root, 'outside')
+  const linked = path.join(root, 'linked-versions')
+  await fs.mkdir(outside)
+  await fs.symlink(outside, linked)
+  const linkedController = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    sessionOutputVersionRoot: linked,
+    harness,
+  })
+  await assert.rejects(linkedController.inspectSessionOutputs({
+    sessionId: 'session-linked', turn: 1, throughSeq: 2,
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-output-version-failed')
+  assert.deepEqual(await fs.readdir(outside), [])
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('does not write or link through a version directory replaced around a pending file', async () => {
+  for (const phase of ['open', 'write'] as const) {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), `dsh-work-session-version-${phase}-swap-`))
+    const workspace = path.join(root, 'workspace')
+    const versionRoot = path.join(root, 'versions')
+    await fs.mkdir(workspace)
+    await fs.writeFile(path.join(workspace, 'report.md'), '# Guard pending\n')
+    const events: readonly unknown[] = Object.freeze([
+      { seq: 1, type: 'tool/call', data: {
+        turn: 1, callId: 'write', name: 'write',
+        arguments: JSON.stringify({ file_path: 'report.md', content: '# Guard pending\n' }),
+      } },
+      { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+        turn: 1,
+        message: { source: { callId: 'write' }, content: [{ type: 'tool-result', isError: false }] },
+      } },
+      { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+    ])
+    let swapped = false
+    const replaceIntentRoot = async ({ targetPath }: { readonly targetPath: string }): Promise<void> => {
+      if (swapped) return
+      swapped = true
+      await fs.rename(path.join(versionRoot, 'intents'), path.join(versionRoot, 'intents-original'))
+      await fs.mkdir(path.join(versionRoot, 'intents'))
+      await fs.writeFile(path.join(versionRoot, 'intents', 'sentinel'), 'replacement untouched')
+    }
+    const controller = createWorkController({
+      workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot,
+      harness: {
+        ...testHarness(),
+        async inspectSession() { return { cwd: workspace, events: [...events] } },
+        async inspectSessionWorkspace() { return workspace },
+      },
+      sessionOutputVersionInternals: phase === 'open'
+        ? { afterPendingOpen: replaceIntentRoot }
+        : { afterPendingWrite: replaceIntentRoot },
+    })
+    await assert.rejects(controller.inspectSessionOutputs({
+      sessionId: `session-${phase}-swap`, turn: 1, throughSeq: 2,
+    }), (error: unknown) => error instanceof WorkError
+      && error.code === 'work/session-output-version-failed')
+    assert.equal(
+      await fs.readFile(path.join(versionRoot, 'intents', 'sentinel'), 'utf8'),
+      'replacement untouched',
+    )
+    assert.deepEqual(await fs.readdir(path.join(versionRoot, 'blobs')), [])
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('does not expose a record linked after its records directory is replaced', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-version-link-swap-'))
+  const workspace = path.join(root, 'workspace')
+  const versionRoot = path.join(root, 'versions')
+  await fs.mkdir(workspace)
+  await fs.writeFile(path.join(workspace, 'report.md'), '# Guard final link\n')
+  const events: readonly unknown[] = Object.freeze([
+    { seq: 1, type: 'tool/call', data: {
+      turn: 1, callId: 'write', name: 'write',
+      arguments: JSON.stringify({ file_path: 'report.md', content: '# Guard final link\n' }),
+    } },
+    { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1,
+      message: { source: { callId: 'write' }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ])
+  const harness: HarnessWorkPort = {
+    ...testHarness(),
+    async inspectSession() { return { cwd: workspace, events: [...events] } },
+    async inspectSessionWorkspace() { return workspace },
+  }
+  let swapped = false
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot, harness,
+    sessionOutputVersionInternals: {
+      async beforePendingLink({ pendingPath, targetPath }) {
+        if (swapped || path.basename(path.dirname(path.dirname(targetPath))) !== 'records') return
+        swapped = true
+        const fileId = path.basename(path.dirname(targetPath))
+        await fs.rename(path.join(versionRoot, 'records'), path.join(versionRoot, 'records-original'))
+        const replacementDirectory = path.join(versionRoot, 'records', fileId)
+        await fs.mkdir(replacementDirectory, { recursive: true })
+        await fs.writeFile(path.join(replacementDirectory, path.basename(pendingPath)), 'wrong record')
+      },
+    },
+  })
+  await assert.rejects(controller.inspectSessionOutputs({
+    sessionId: 'session-link-swap', turn: 1, throughSeq: 2,
+  }), (error: unknown) => error instanceof WorkError
+    && error.code === 'work/session-output-version-failed')
+  const replacementFileId = (await fs.readdir(path.join(versionRoot, 'records')))[0]!
+  const replacementEntries = await fs.readdir(path.join(versionRoot, 'records', replacementFileId))
+  assert.ok(replacementEntries.some(name => /^\d{6}-[a-f0-9]{32}\.json$/u.test(name)))
+  assert.equal(replacementEntries.some(name => name.endsWith('.commit')), false)
+  const reader = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot, harness,
+  })
+  await assert.rejects(reader.listSessionOutputVersions({
+    sessionId: 'session-link-swap', path: 'report.md',
+  }), (error: unknown) => error instanceof WorkError
+    && error.code === 'work/session-output-version-failed')
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('recovers an unconfirmed final record after interruption', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-version-confirmation-'))
+  const workspace = path.join(root, 'workspace')
+  const versionRoot = path.join(root, 'versions')
+  await fs.mkdir(workspace)
+  await fs.writeFile(path.join(workspace, 'report.md'), '# Confirm after restart\n')
+  const events: readonly unknown[] = Object.freeze([
+    { seq: 1, type: 'tool/call', data: {
+      turn: 1, callId: 'write', name: 'write',
+      arguments: JSON.stringify({ file_path: 'report.md', content: '# Confirm after restart\n' }),
+    } },
+    { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1,
+      message: { source: { callId: 'write' }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ])
+  const harness: HarnessWorkPort = {
+    ...testHarness(),
+    async inspectSession() { return { cwd: workspace, events: [...events] } },
+    async inspectSessionWorkspace() { return workspace },
+  }
+  const interrupted = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot, harness,
+    sessionOutputVersionInternals: { afterRecordPublish() { throw new Error('before confirmation') } },
+  })
+  await assert.rejects(interrupted.inspectSessionOutputs({
+    sessionId: 'session-confirmation', turn: 1, throughSeq: 2,
+  }))
+  const fileId = (await fs.readdir(path.join(versionRoot, 'records')))[0]!
+  const interruptedEntries = await fs.readdir(path.join(versionRoot, 'records', fileId))
+  assert.ok(interruptedEntries.some(name => /^\d{6}-[a-f0-9]{32}\.json$/u.test(name)))
+  assert.equal(interruptedEntries.some(name => name.endsWith('.commit')), false)
+
+  const recovered = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot, harness,
+  })
+  const versions = await recovered.listSessionOutputVersions({
+    sessionId: 'session-confirmation', path: 'report.md',
+  })
+  assert.equal(versions.length, 1)
+  assert.ok((await fs.readdir(path.join(versionRoot, 'records', fileId)))
+    .some(name => name.endsWith('.commit')))
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('does not attribute later Workspace bytes to an earlier unobserved Turn', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-version-frontier-'))
+  const workspace = path.join(root, 'workspace')
+  await fs.mkdir(workspace)
+  await fs.writeFile(path.join(workspace, 'report.md'), '# Later bytes\n')
+  const pair = (turn: number, seq: number, content: string) => [
+    { seq, type: 'tool/call', data: {
+      turn, callId: `write-${String(turn)}`, name: 'write',
+      arguments: JSON.stringify({ file_path: 'report.md', content }),
+    } },
+    { seq: seq + 1, type: 'tool/result', surfaceOp: 'append', data: {
+      turn,
+      message: { source: { callId: `write-${String(turn)}` }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+    { seq: seq + 2, type: 'turn/end', data: { turn, reason: { kind: 'completed' } } },
+  ]
+  const events = [
+    ...pair(1, 1, '# Earlier bytes\n'),
+    ...pair(2, 4, '# Later bytes\n'),
+  ]
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    sessionOutputVersionRoot: path.join(root, 'versions'),
+    harness: {
+      ...testHarness(),
+      async inspectSession() { return { cwd: workspace, events } },
+      async inspectSessionWorkspace() { return workspace },
+    },
+  })
+
+  await controller.inspectSessionOutputs({ sessionId: 'session-late', turn: 1, throughSeq: 2 })
+  assert.deepEqual(await controller.listSessionOutputVersions({
+    sessionId: 'session-late', path: 'report.md',
+  }), [])
+  await controller.inspectSessionOutputs({ sessionId: 'session-late', turn: 2, throughSeq: 5 })
+  const versions = await controller.listSessionOutputVersions({
+    sessionId: 'session-late', path: 'report.md',
+  })
+  assert.equal(versions.length, 1)
+  assert.equal(versions[0]?.turn, 2)
+  assert.equal((await controller.readSessionOutputVersion({
+    fileId: versions[0]!.fileId,
+    versionId: versions[0]!.versionId,
+  })).content, '# Later bytes\n')
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('reinspects the live Session frontier before publishing captured edit bytes', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-version-live-frontier-'))
+  const workspace = path.join(root, 'workspace')
+  await fs.mkdir(workspace)
+  await fs.writeFile(path.join(workspace, 'report.md'), '# Earlier edit\n')
+  const earlierEvents: readonly unknown[] = Object.freeze([
+    { seq: 1, type: 'tool/call', data: {
+      turn: 1, callId: 'edit-1', name: 'edit',
+      arguments: JSON.stringify({ file_path: 'report.md', old_string: 'old', new_string: 'new' }),
+    } },
+    { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1,
+      message: { source: { callId: 'edit-1' }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ])
+  const laterEvents: readonly unknown[] = Object.freeze([
+    ...earlierEvents,
+    { seq: 4, type: 'user/message', data: {
+      source: { kind: 'user' }, content: [{ type: 'text', text: 'Start another edit' }],
+    } },
+    { seq: 5, type: 'turn/start', data: { turn: 2 } },
+  ])
+  let liveEvents = earlierEvents
+  let advanced = false
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    sessionOutputVersionRoot: path.join(root, 'versions'),
+    harness: {
+      ...testHarness(),
+      async inspectSession() { return { cwd: workspace, events: [...liveEvents] } },
+      async inspectSessionWorkspace() { return workspace },
+    },
+    sessionOutputVersionInternals: {
+      async beforeOutputCapture() {
+        if (advanced) return
+        advanced = true
+        await fs.writeFile(path.join(workspace, 'report.md'), '# Later edit\n')
+        liveEvents = laterEvents
+      },
+    },
+  })
+
+  await controller.inspectSessionOutputs({ sessionId: 'session-live-frontier', turn: 1, throughSeq: 2 })
+  assert.deepEqual(await controller.listSessionOutputVersions({
+    sessionId: 'session-live-frontier', path: 'report.md',
+  }), [])
+  assert.equal(await fs.readFile(path.join(workspace, 'report.md'), 'utf8'), '# Later edit\n')
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('freezes verified source metadata with the generated file version', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-version-source-'))
+  const sessionId = 'session-version-source'
+  const sourceBytes = Buffer.from('# Source evidence\n')
+  const sourceDigest = createHash('sha256').update(sourceBytes).digest('hex')
+  const sourcePath = `attachment-${createHash('sha256').update(sessionId).digest('hex').slice(0, 12)}-${sourceDigest.slice(0, 12)}-brief.md`
+  await fs.writeFile(path.join(root, sourcePath), sourceBytes)
+  await fs.writeFile(path.join(root, 'report.md'), '# Report from source\n')
+  const events: unknown[] = [
+    { seq: 1, type: 'user/message', data: {
+      source: { kind: 'user' }, content: [{ type: 'text', text: `Use @${sourcePath}` }],
+    } },
+    { seq: 2, type: 'turn/start', data: { turn: 1 } },
+    { seq: 3, type: 'tool/call', data: {
+      turn: 1, callId: 'read-source', name: 'read',
+      arguments: JSON.stringify({ file_path: sourcePath }),
+    } },
+    { seq: 4, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1,
+      message: { source: { callId: 'read-source' }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+    { seq: 5, type: 'tool/call', data: {
+      turn: 1, callId: 'write-report', name: 'write',
+      arguments: JSON.stringify({ file_path: 'report.md', content: '# Report from source\n' }),
+    } },
+    { seq: 6, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1,
+      message: { source: { callId: 'write-report' }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+    { seq: 7, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ]
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    sessionOutputVersionRoot: path.join(root, 'versions'),
+    harness: {
+      ...testHarness(),
+      async inspectSession() { return { cwd: root, events } },
+      async inspectSessionWorkspace() { return root },
+    },
+  })
+
+  await controller.inspectSessionOutputs({ sessionId, turn: 1, throughSeq: 6 })
+  const [version] = await controller.listSessionOutputVersions({ sessionId, path: 'report.md' })
+  assert.deepEqual(version?.sources.map(source => ({
+    path: source.path,
+    status: source.status,
+    contentDigest: source.contentDigest,
+  })), [{ path: sourcePath, status: 'verified', contentDigest: sourceDigest }])
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('rejects version 513 while preserving the bounded 512-record history', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-version-limit-'))
+  const workspace = path.join(root, 'workspace')
+  await fs.mkdir(workspace)
+  let events: readonly unknown[] = []
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    sessionOutputVersionRoot: path.join(root, 'versions'),
+    harness: {
+      ...testHarness(),
+      async inspectSession() { return { cwd: workspace, events: [...events] } },
+      async inspectSessionWorkspace() { return workspace },
+    },
+  })
+  const inspectTurn = async (turn: number): Promise<void> => {
+    const content = `# Version ${String(turn)}\n`
+    await fs.writeFile(path.join(workspace, 'report.md'), content)
+    events = Object.freeze([
+      { seq: 1, type: 'tool/call', data: {
+        turn, callId: `write-${String(turn)}`, name: 'write',
+        arguments: JSON.stringify({ file_path: 'report.md', content }),
+      } },
+      { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+        turn,
+        message: { source: { callId: `write-${String(turn)}` }, content: [{ type: 'tool-result', isError: false }] },
+      } },
+      { seq: 3, type: 'turn/end', data: { turn, reason: { kind: 'completed' } } },
+    ])
+    await controller.inspectSessionOutputs({ sessionId: 'session-limit', turn, throughSeq: 2 })
+  }
+  await inspectTurn(1)
+  const [first] = await controller.listSessionOutputVersions({
+    sessionId: 'session-limit', path: 'report.md',
+  })
+  assert.ok(first)
+  const recordsDirectory = path.join(root, 'versions', 'records', first.fileId)
+  for (let turn = 2; turn <= 512; turn++) {
+    const versionId = createHash('sha256')
+      .update(`session-output-version-v1\0${first.fileId}\0generated\0${String(turn)}\0${String(3)}`)
+      .digest('hex')
+      .slice(0, 32)
+    const recordName = `${String(turn).padStart(6, '0')}-${versionId}.json`
+    const recordBytes = Buffer.from(JSON.stringify({
+        ...first,
+        versionId,
+        ordinal: turn,
+        turn,
+        createdAt: new Date(Date.UTC(2026, 8, 6, 0, 0, turn)).toISOString(),
+      }))
+    await fs.writeFile(path.join(recordsDirectory, recordName), recordBytes)
+    const turnHex = turn.toString(16)
+    const confirmationId = `${turnHex.padStart(8, '0')}-0000-4000-8000-${turnHex.padStart(12, '0')}`
+    await fs.writeFile(
+      path.join(recordsDirectory, `${recordName}.${confirmationId}.commit`),
+      JSON.stringify({
+        protocol: 1,
+        recordName,
+        recordDigest: createHash('sha256').update(recordBytes).digest('hex'),
+      }),
+    )
+  }
+  assert.equal((await controller.listSessionOutputVersions({
+    sessionId: 'session-limit', path: 'report.md',
+  })).length, 512)
+  await assert.rejects(inspectTurn(513), (error: unknown) =>
+    error instanceof WorkError && error.code === 'work/session-output-version-failed')
+  const retained = await controller.listSessionOutputVersions({
+    sessionId: 'session-limit', path: 'report.md',
+  })
+  assert.equal(retained.length, 512)
+  assert.equal(retained.at(-1)?.ordinal, 512)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('creates one explicit legacy baseline only from retained deliverable bytes', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-version-baseline-'))
+  const workspace = path.join(root, 'workspace')
+  await fs.mkdir(path.join(workspace, 'deliverables'), { recursive: true })
+  await fs.writeFile(path.join(workspace, 'deliverables', 'result.md'), '# Retained legacy result\n')
+  const legacy = {
+    workId: 'legacy-work', revision: 7, title: 'Legacy', goal: 'Retain actual bytes.',
+    workspace: { workspaceId: 'legacy-workspace', path: workspace },
+    primarySession: { sessionId: 'legacy-session', turnCount: 4 },
+    resources: [], deliverable: { kind: 'file' as const, path: 'deliverables/result.md' },
+    status: 'completed' as const, execution: 'idle' as const, lastFailure: null,
+    lastMutationId: null, lastMutationDigest: null, importSource: null,
+  }
+  const harness: HarnessWorkPort = {
+    ...testHarness(),
+    async ensureWorkspace(request) { return { workspaceId: 'legacy-workspace', path: request.path } },
+    async ensurePrimarySession(request) { return { sessionId: request.sessionId } },
+    async inspectSessionWorkspace() { return workspace },
+  }
+  const versionRoot = path.join(root, 'versions')
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    sessionOutputVersionRoot: versionRoot,
+    store: createMemoryWorkStore(legacy),
+    now: () => '2026-09-06T02:00:00.000Z',
+    harness,
+  })
+  await controller.initialize()
+  await controller.initialize()
+  const versions = await controller.listSessionOutputVersions({
+    sessionId: 'legacy-session', path: 'deliverables/result.md',
+  })
+  assert.equal(versions.length, 1)
+  assert.deepEqual({
+    origin: versions[0]?.origin,
+    turn: versions[0]?.turn,
+    throughSeq: versions[0]?.throughSeq,
+  }, { origin: 'migration-baseline', turn: null, throughSeq: null })
+  assert.equal((await controller.readSessionOutputVersion({
+    fileId: versions[0]!.fileId,
+    versionId: versions[0]!.versionId,
+  })).content, '# Retained legacy result\n')
+
+  await fs.unlink(path.join(workspace, 'deliverables', 'result.md'))
+  const missing = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    sessionOutputVersionRoot: path.join(root, 'missing-versions'),
+    store: createMemoryWorkStore(legacy),
+    harness,
+  })
+  await missing.initialize()
+  assert.deepEqual(await missing.listSessionOutputVersions({
+    sessionId: 'legacy-session', path: 'deliverables/result.md',
+  }), [])
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('does not baseline a legacy deliverable replaced during bounded capture', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-version-baseline-race-'))
+  const workspace = path.join(root, 'workspace')
+  const deliverables = path.join(workspace, 'deliverables')
+  const candidate = path.join(deliverables, 'result.md')
+  const retained = path.join(deliverables, 'retained.md')
+  const outside = path.join(root, 'outside.md')
+  await fs.mkdir(deliverables, { recursive: true })
+  await fs.writeFile(candidate, '# Original legacy result\n')
+  await fs.writeFile(outside, '# Outside bytes stay untouched\n')
+  const legacy = {
+    workId: 'legacy-race', revision: 3, title: 'Legacy race', goal: 'Reject changed bytes.',
+    workspace: { workspaceId: 'legacy-race-workspace', path: workspace },
+    primarySession: { sessionId: 'legacy-race-session', turnCount: 2 },
+    resources: [], deliverable: { kind: 'file' as const, path: 'deliverables/result.md' },
+    status: 'completed' as const, execution: 'idle' as const, lastFailure: null,
+    lastMutationId: null, lastMutationDigest: null, importSource: null,
+  }
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    sessionOutputVersionRoot: path.join(root, 'versions'),
+    store: createMemoryWorkStore(legacy),
+    harness: {
+      ...testHarness(),
+      async ensureWorkspace(request) { return { workspaceId: legacy.workspace.workspaceId, path: request.path } },
+      async ensurePrimarySession(request) { return { sessionId: request.sessionId } },
+      async inspectSessionWorkspace() { return workspace },
+    },
+    sessionOutputVersionInternals: {
+      async afterLegacyFirstStat() {
+        await fs.rename(candidate, retained)
+        await fs.symlink(outside, candidate)
+      },
+    },
+  })
+
+  await controller.initialize()
+  assert.deepEqual(await controller.listSessionOutputVersions({
+    sessionId: legacy.primarySession.sessionId, path: legacy.deliverable.path,
+  }), [])
+  assert.equal(await fs.readFile(outside, 'utf8'), '# Outside bytes stay untouched\n')
+  await fs.rm(root, { recursive: true, force: true })
+})
+
 test('copies supported text resources into the addressed Session Workspace without changing the source', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-resource-'))
   const workspace = path.join(root, 'workspace')

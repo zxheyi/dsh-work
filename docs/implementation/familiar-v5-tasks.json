@@ -297,7 +297,7 @@
       "files": "packages/work-domain/index.ts；packages/work-api/index.ts；packages/work-api/remote.ts；docs/decisions/",
       "verification": "快照集成、逐中断点恢复、重启持久化、旧数据 fixture",
       "limits": "Work revision 不是文件版本；不把同名覆盖包装成历史。",
-      "status": "pending"
+      "status": "verified"
     },
     {
       "id": "T16",

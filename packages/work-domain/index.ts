@@ -17,6 +17,7 @@ export type WorkErrorCode =
   | 'work/resource-limit'
   | 'work/session-output-invalid'
   | 'work/session-output-save-failed'
+  | 'work/session-output-version-failed'
   | 'work/session-resource-invalid'
   | 'work/turn-failed'
 
@@ -198,6 +199,37 @@ export interface ShowSessionOutputSaveSpec {
   readonly contentDigest: string
 }
 
+export interface ListSessionOutputVersionsSpec {
+  readonly sessionId: string
+  readonly path: string
+}
+
+export interface ReadSessionOutputVersionSpec {
+  readonly fileId: string
+  readonly versionId: string
+}
+
+export interface SessionOutputVersion {
+  readonly fileId: string
+  readonly versionId: string
+  readonly ordinal: number
+  readonly origin: 'generated' | 'migration-baseline'
+  readonly sessionId: string
+  readonly turn: number | null
+  readonly throughSeq: number | null
+  readonly name: string
+  readonly path: string
+  readonly bytes: number
+  readonly mediaType: string | null
+  readonly contentDigest: string
+  readonly createdAt: string
+  readonly sources: readonly SessionOutputSource[]
+}
+
+export interface SessionOutputVersionContent extends SessionOutputVersion {
+  readonly content: string
+}
+
 export interface WorkFileDeliverable {
   readonly kind: 'file'
   readonly path: string
@@ -233,6 +265,14 @@ export interface WorkController {
   ): Promise<SessionOutputRevisionFailure | null>
   saveSessionOutput(spec: SaveSessionOutputSpec, signal?: AbortSignal): Promise<SessionOutputSave>
   showSessionOutputSave(spec: ShowSessionOutputSaveSpec, signal?: AbortSignal): Promise<void>
+  listSessionOutputVersions(
+    spec: ListSessionOutputVersionsSpec,
+    signal?: AbortSignal,
+  ): Promise<readonly SessionOutputVersion[]>
+  readSessionOutputVersion(
+    spec: ReadSessionOutputVersionSpec,
+    signal?: AbortSignal,
+  ): Promise<SessionOutputVersionContent>
   readSessionOutput(spec: ReadSessionOutputSpec, signal?: AbortSignal): Promise<SessionOutputContent>
   follow(signal?: AbortSignal): AsyncIterable<WorkFollowFrame>
   dispatch(request: DispatchWorkRequest, signal?: AbortSignal): Promise<WorkSnapshot>
@@ -304,6 +344,7 @@ export interface WorkControllerOptions {
   readonly now?: () => string
   readonly workspaceRoot: string
   readonly deliveryRoot?: string
+  readonly sessionOutputVersionRoot?: string
   readonly harness: HarnessWorkPort
   readonly store?: WorkStore
   readonly sessionResourceInternals?: {
@@ -326,6 +367,25 @@ export interface WorkControllerOptions {
       readonly pendingPath: string
       readonly targetPath: string
     }) => void | Promise<void>
+  }
+  readonly sessionOutputVersionInternals?: {
+    readonly beforeOutputCapture?: (path: string) => void | Promise<void>
+    readonly afterPendingOpen?: (paths: {
+      readonly pendingPath: string
+      readonly targetPath: string
+    }) => void | Promise<void>
+    readonly afterPendingWrite?: (paths: {
+      readonly pendingPath: string
+      readonly targetPath: string
+    }) => void | Promise<void>
+    readonly beforePendingLink?: (paths: {
+      readonly pendingPath: string
+      readonly targetPath: string
+    }) => void | Promise<void>
+    readonly afterLegacyFirstStat?: (path: string) => void | Promise<void>
+    readonly afterIntentPublish?: () => void | Promise<void>
+    readonly afterBlobPublish?: () => void | Promise<void>
+    readonly afterRecordPublish?: () => void | Promise<void>
   }
 }
 
@@ -405,6 +465,8 @@ const MAX_SESSION_OUTPUT_FILES = 64
 const MAX_SESSION_OUTPUT_SOURCES = 20
 const MAX_SESSION_OUTPUT_PREVIEW_BYTES = 5 * 1024 * 1024
 const MAX_SESSION_OUTPUT_SAVE_BYTES = 25 * 1024 * 1024
+const MAX_SESSION_OUTPUT_VERSIONS = 512
+const SESSION_OUTPUT_VERSION_PROTOCOL = 1
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u
 
 function isSafeResourceName(name: string): boolean {
@@ -771,6 +833,21 @@ function sessionMutationPath(name: unknown, argumentsRaw: unknown): string | nul
     && typeof args.new_str === 'string'
     ? target
     : null
+}
+
+function sessionMutationExpectedBytes(name: unknown, argumentsRaw: unknown): Buffer | null {
+  if (typeof name !== 'string' || typeof argumentsRaw !== 'string') return null
+  try {
+    const args = recordData(JSON.parse(argumentsRaw) as unknown)
+    if (!args) return null
+    if (name === 'write' && typeof args.content === 'string') return Buffer.from(args.content, 'utf8')
+    if (name === 'str_replace_editor'
+      && args.command === 'create'
+      && typeof args.file_text === 'string') return Buffer.from(args.file_text, 'utf8')
+    return null
+  } catch {
+    return null
+  }
 }
 
 function sessionOutputMediaType(filePath: string): string | null {
@@ -1278,6 +1355,93 @@ interface CapturedSessionOutput {
   readonly normalizedPath: string
   readonly data: Buffer
   readonly contentDigest: string
+}
+
+interface CapturedLegacyDeliverable {
+  readonly normalizedPath: string
+  readonly name: string
+  readonly data: Buffer
+  readonly contentDigest: string
+}
+
+async function captureLegacyDeliverable(
+  work: WorkSnapshot,
+  internals?: WorkControllerOptions['sessionOutputVersionInternals'],
+): Promise<CapturedLegacyDeliverable> {
+  const requestedPath = work.deliverable?.path
+  if (!requestedPath || path.posix.extname(requestedPath).toLowerCase() !== '.md') {
+    throw new WorkError('work/deliverable-invalid', 'The retained legacy deliverable is not Markdown.')
+  }
+  let workspacePath: string
+  let workspaceIdentity: Awaited<ReturnType<typeof fs.stat>>
+  try {
+    workspacePath = await fs.realpath(work.workspace.path)
+    workspaceIdentity = await fs.stat(workspacePath, { bigint: true })
+    if (!workspaceIdentity.isDirectory()) throw new Error('legacy Workspace is not a directory')
+  } catch (cause) {
+    throw new WorkError('work/deliverable-invalid', 'The retained legacy Workspace is not readable.', { cause })
+  }
+  const normalizedPath = normalizedWorkspacePath(workspacePath, work.workspace.path, requestedPath)
+  if (!normalizedPath) {
+    throw new WorkError('work/deliverable-invalid', 'The retained legacy deliverable is outside its Workspace.')
+  }
+  const candidate = path.resolve(workspacePath, normalizedPath)
+  try {
+    const handle = await fs.open(
+      candidate,
+      fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK,
+    )
+    try {
+      const first = await handle.stat({ bigint: true })
+      if (!first.isFile() || first.size < 1n
+        || first.size > BigInt(MAX_WORK_MARKDOWN_DELIVERABLE_BYTES)) {
+        throw new Error('legacy deliverable is not a bounded regular file')
+      }
+      const resolved = await fs.realpath(candidate)
+      const relative = path.relative(workspacePath, resolved)
+      const current = await fs.lstat(candidate, { bigint: true })
+      if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)
+        || current.dev !== first.dev || current.ino !== first.ino || current.size !== first.size) {
+        throw new Error('legacy deliverable identity is invalid')
+      }
+      await internals?.afterLegacyFirstStat?.(candidate)
+      const data = Buffer.allocUnsafe(Number(first.size))
+      let offset = 0
+      while (offset < data.byteLength) {
+        const { bytesRead } = await handle.read(data, offset, data.byteLength - offset, offset)
+        if (bytesRead === 0) break
+        offset += bytesRead
+      }
+      const second = await handle.stat({ bigint: true })
+      const finalPath = await fs.lstat(candidate, { bigint: true })
+      const finalWorkspace = await fs.stat(workspacePath, { bigint: true })
+      if (offset !== data.byteLength
+        || second.dev !== first.dev || second.ino !== first.ino || second.size !== first.size
+        || second.mtimeNs !== first.mtimeNs || second.ctimeNs !== first.ctimeNs
+        || finalPath.dev !== second.dev || finalPath.ino !== second.ino || finalPath.size !== second.size
+        || !finalWorkspace.isDirectory()
+        || finalWorkspace.dev !== workspaceIdentity.dev || finalWorkspace.ino !== workspaceIdentity.ino
+        || await fs.realpath(work.workspace.path) !== workspacePath) {
+        throw new Error('legacy deliverable changed during capture')
+      }
+      new TextDecoder('utf-8', { fatal: true }).decode(data)
+      return Object.freeze({
+        normalizedPath,
+        name: path.basename(normalizedPath),
+        data,
+        contentDigest: createHash('sha256').update(data).digest('hex'),
+      })
+    } finally {
+      await handle.close()
+    }
+  } catch (cause) {
+    if (cause instanceof WorkError) throw cause
+    throw new WorkError(
+      'work/deliverable-invalid',
+      'The retained legacy deliverable could not be captured safely.',
+      { cause },
+    )
+  }
 }
 
 async function captureValidatedSessionOutput(
@@ -1881,6 +2045,680 @@ async function resolveSessionOutputSave(
   return directory
 }
 
+interface SessionOutputVersionCandidate {
+  readonly origin: SessionOutputVersion['origin']
+  readonly sessionId: string
+  readonly turn: number | null
+  readonly throughSeq: number | null
+  readonly name: string
+  readonly path: string
+  readonly normalizedPath: string
+  readonly bytes: number
+  readonly mediaType: string | null
+  readonly contentDigest: string
+  readonly createdAt: string
+  readonly sources: readonly SessionOutputSource[]
+  readonly data: Buffer
+}
+
+interface SessionOutputVersionCapsule {
+  readonly protocol: 1
+  readonly version: SessionOutputVersion
+  readonly dataBase64: string
+}
+
+function versionError(message: string, options?: ErrorOptions): WorkError {
+  return new WorkError('work/session-output-version-failed', message, options)
+}
+
+function sessionOutputFileId(sessionId: string, normalizedPath: string): string {
+  return createHash('sha256')
+    .update(`session-output-file\0${sessionId}\0${normalizedPath}`)
+    .digest('hex')
+    .slice(0, 32)
+}
+
+function sessionOutputVersionId(
+  fileId: string,
+  origin: SessionOutputVersion['origin'],
+  turn: number | null,
+  throughSeq: number | null,
+): string {
+  return createHash('sha256')
+    .update(`session-output-version-v1\0${fileId}\0${origin}\0${String(turn)}\0${String(throughSeq)}`)
+    .digest('hex')
+    .slice(0, 32)
+}
+
+function freezeSessionOutputSource(source: SessionOutputSource): SessionOutputSource {
+  return Object.freeze({ ...source })
+}
+
+function freezeSessionOutputVersion(version: SessionOutputVersion): SessionOutputVersion {
+  return Object.freeze({
+    ...version,
+    sources: Object.freeze(version.sources.map(freezeSessionOutputSource)),
+  })
+}
+
+function parseSessionOutputSource(value: unknown): SessionOutputSource | null {
+  const source = recordData(value)
+  if (!source || Object.keys(source).sort().join(',') !== [
+    'bytes', 'contentDigest', 'mediaType', 'name', 'path', 'reference', 'sessionId', 'status', 'turn',
+  ].sort().join(',')) return null
+  if (typeof source.sessionId !== 'string' || source.sessionId.length < 1 || source.sessionId.length > 256
+    || !Number.isSafeInteger(source.turn) || (source.turn as number) < 0
+    || typeof source.name !== 'string' || source.name.length < 1 || source.name.length > 200
+    || typeof source.path !== 'string' || source.path.length < 1 || source.path.length > 4096
+    || typeof source.reference !== 'string' || source.reference.length < 2 || source.reference.length > 4099
+    || (source.bytes !== null && (!Number.isSafeInteger(source.bytes) || (source.bytes as number) < 1
+      || (source.bytes as number) > MAX_WORK_FILE_RESOURCE_BYTES))
+    || (source.mediaType !== null && (typeof source.mediaType !== 'string'
+      || source.mediaType.length < 1 || source.mediaType.length > 128))
+    || (source.contentDigest !== null && (typeof source.contentDigest !== 'string'
+      || !/^[a-f0-9]{64}$/u.test(source.contentDigest)))
+    || !['verified', 'unverified', 'missing', 'changed', 'inaccessible'].includes(String(source.status))) return null
+  return freezeSessionOutputSource(source as unknown as SessionOutputSource)
+}
+
+function parseSessionOutputVersion(value: unknown): SessionOutputVersion | null {
+  const version = recordData(value)
+  if (!version || Object.keys(version).sort().join(',') !== [
+    'bytes', 'contentDigest', 'createdAt', 'fileId', 'mediaType', 'name', 'ordinal', 'origin', 'path',
+    'sessionId', 'sources', 'throughSeq', 'turn', 'versionId',
+  ].sort().join(',')) return null
+  if (typeof version.fileId !== 'string' || !/^[a-f0-9]{32}$/u.test(version.fileId)
+    || typeof version.versionId !== 'string' || !/^[a-f0-9]{32}$/u.test(version.versionId)
+    || !Number.isSafeInteger(version.ordinal) || (version.ordinal as number) < 1
+    || (version.ordinal as number) > MAX_SESSION_OUTPUT_VERSIONS
+    || !['generated', 'migration-baseline'].includes(String(version.origin))
+    || typeof version.sessionId !== 'string' || version.sessionId.length < 1 || version.sessionId.length > 256
+    || (version.turn !== null && (!Number.isSafeInteger(version.turn) || (version.turn as number) < 0))
+    || (version.throughSeq !== null
+      && (!Number.isSafeInteger(version.throughSeq) || (version.throughSeq as number) < 0))
+    || ((version.turn === null) !== (version.throughSeq === null))
+    || typeof version.name !== 'string' || version.name.length < 1 || version.name.length > 512
+    || typeof version.path !== 'string' || version.path.length < 1 || version.path.length > 4096
+    || !Number.isSafeInteger(version.bytes) || (version.bytes as number) < 1
+    || (version.bytes as number) > MAX_SESSION_OUTPUT_SAVE_BYTES
+    || (version.mediaType !== null && (typeof version.mediaType !== 'string'
+      || version.mediaType.length < 1 || version.mediaType.length > 128))
+    || typeof version.contentDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(version.contentDigest)
+    || typeof version.createdAt !== 'string' || !Number.isFinite(Date.parse(version.createdAt))
+    || !Array.isArray(version.sources) || version.sources.length > MAX_SESSION_OUTPUT_SOURCES) return null
+  const sources = version.sources.map(parseSessionOutputSource)
+  if (sources.some(source => source === null)) return null
+  const parsed = freezeSessionOutputVersion({
+    ...(version as unknown as SessionOutputVersion),
+    sources: sources as readonly SessionOutputSource[],
+  })
+  if (parsed.versionId !== sessionOutputVersionId(
+    parsed.fileId, parsed.origin, parsed.turn, parsed.throughSeq,
+  )) return null
+  return parsed
+}
+
+function parseVersionCapsule(value: unknown): SessionOutputVersionCapsule | null {
+  const capsule = recordData(value)
+  if (!capsule || Object.keys(capsule).sort().join(',') !== 'dataBase64,protocol,version'
+    || capsule.protocol !== SESSION_OUTPUT_VERSION_PROTOCOL
+    || typeof capsule.dataBase64 !== 'string') return null
+  const version = parseSessionOutputVersion(capsule.version)
+  if (!version) return null
+  const data = Buffer.from(capsule.dataBase64, 'base64')
+  if (data.toString('base64') !== capsule.dataBase64
+    || data.byteLength !== version.bytes
+    || createHash('sha256').update(data).digest('hex') !== version.contentDigest) return null
+  return Object.freeze({ protocol: 1, version, dataBase64: capsule.dataBase64 })
+}
+
+async function ensureVersionDirectory(directory: string, recursive = false): Promise<void> {
+  try {
+    await fs.mkdir(directory, recursive ? { recursive: true } : undefined)
+  } catch (cause) {
+    if (!(cause instanceof Error && 'code' in cause && cause.code === 'EEXIST')) {
+      throw versionError('The Session output version directory could not be created.', { cause })
+    }
+  }
+  const stat = await fs.lstat(directory)
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw versionError('The Session output version directory is not a plain directory.')
+  }
+}
+
+async function readVersionFile(filePath: string, maximumBytes: number): Promise<Buffer> {
+  const handle = await fs.open(
+    filePath,
+    fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK,
+  )
+  try {
+    const first = await handle.stat({ bigint: true })
+    if (!first.isFile() || first.size < 1n || first.size > BigInt(maximumBytes)) {
+      throw new Error('version file is not a bounded regular file')
+    }
+    const data = Buffer.allocUnsafe(Number(first.size))
+    let offset = 0
+    while (offset < data.byteLength) {
+      const { bytesRead } = await handle.read(data, offset, data.byteLength - offset, offset)
+      if (bytesRead === 0) break
+      offset += bytesRead
+    }
+    const second = await handle.stat({ bigint: true })
+    const current = await fs.lstat(filePath, { bigint: true })
+    if (offset !== data.byteLength
+      || second.dev !== first.dev || second.ino !== first.ino || second.size !== first.size
+      || second.mtimeNs !== first.mtimeNs || second.ctimeNs !== first.ctimeNs
+      || current.dev !== second.dev || current.ino !== second.ino || current.size !== second.size) {
+      throw new Error('version file changed while being read')
+    }
+    return data
+  } finally {
+    await handle.close()
+  }
+}
+
+async function publishExclusiveVersionFile(
+  target: string,
+  data: Buffer,
+  maximumBytes: number,
+  internals?: WorkControllerOptions['sessionOutputVersionInternals'],
+): Promise<void> {
+  if (data.byteLength < 1 || data.byteLength > maximumBytes) throw new Error('version publication is not bounded')
+  const directory = path.dirname(target)
+  const identity = await fs.stat(directory, { bigint: true })
+  if (!identity.isDirectory() || await fs.realpath(directory) !== directory) {
+    throw new Error('version publication directory is not stable')
+  }
+  const pending = path.join(directory, `.${path.basename(target)}.${randomUUID()}.pending`)
+  const assertDirectory = async (): Promise<void> => {
+    const current = await fs.stat(directory, { bigint: true })
+    if (!current.isDirectory() || current.dev !== identity.dev || current.ino !== identity.ino
+      || await fs.realpath(directory) !== directory) throw new Error('version publication directory changed')
+  }
+  const handle = await fs.open(
+      pending,
+      fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY | fsConstants.O_NOFOLLOW,
+      0o600,
+    )
+  let pendingIdentity: { readonly dev: bigint; readonly ino: bigint } | null = null
+  try {
+    const opened = await handle.stat({ bigint: true })
+    pendingIdentity = Object.freeze({ dev: opened.dev, ino: opened.ino })
+    await internals?.afterPendingOpen?.({ pendingPath: pending, targetPath: target })
+    await assertDirectory()
+    const openedPath = await fs.lstat(pending, { bigint: true })
+    if (!openedPath.isFile() || openedPath.isSymbolicLink()
+      || openedPath.dev !== opened.dev || openedPath.ino !== opened.ino) {
+      throw new Error('version pending path changed before write')
+    }
+    await handle.writeFile(data)
+    await handle.sync()
+    const written = await handle.stat({ bigint: true })
+    if (written.dev !== opened.dev || written.ino !== opened.ino
+      || written.size !== BigInt(data.byteLength)) throw new Error('version pending write is incomplete')
+  } finally {
+    await handle.close()
+  }
+  await internals?.afterPendingWrite?.({ pendingPath: pending, targetPath: target })
+  await assertDirectory()
+  const pendingPathIdentity = await fs.lstat(pending, { bigint: true })
+  if (!pendingIdentity || !pendingPathIdentity.isFile() || pendingPathIdentity.isSymbolicLink()
+    || pendingPathIdentity.dev !== pendingIdentity.dev || pendingPathIdentity.ino !== pendingIdentity.ino) {
+    throw new Error('version pending path changed before publication')
+  }
+  await internals?.beforePendingLink?.({ pendingPath: pending, targetPath: target })
+  let linked = false
+  try {
+    await fs.link(pending, target)
+    linked = true
+  } catch (cause) {
+    if (!(cause instanceof Error && 'code' in cause && cause.code === 'EEXIST')) throw cause
+    const existing = await readVersionFile(target, maximumBytes)
+    if (!existing.equals(data)) throw new Error('immutable version publication conflicts with existing bytes')
+  }
+  await assertDirectory()
+  const [publishedPending, publishedTarget] = await Promise.all([
+    fs.lstat(pending, { bigint: true }),
+    fs.lstat(target, { bigint: true }),
+  ])
+  if (!publishedPending.isFile() || publishedPending.isSymbolicLink()
+    || !publishedTarget.isFile() || publishedTarget.isSymbolicLink()
+    || publishedPending.dev !== pendingIdentity.dev || publishedPending.ino !== pendingIdentity.ino
+    || (linked && (publishedTarget.dev !== pendingIdentity.dev || publishedTarget.ino !== pendingIdentity.ino))) {
+    throw new Error('immutable version publication identity could not be verified')
+  }
+  // Pending hard links are retained and ignored. After a parent can change, path-based removal
+  // cannot prove that the directory entry still names the inode opened by this process.
+}
+
+const VERSION_RECORD_BYTES = 256 * 1024
+const VERSION_CONFIRMATION_BYTES = 4 * 1024
+const VERSION_CAPSULE_BYTES = Math.ceil(MAX_SESSION_OUTPUT_SAVE_BYTES / 3) * 4 + VERSION_RECORD_BYTES
+const VERSION_RECORD_NAME = /^\d{6}-[a-f0-9]{32}\.json$/u
+const VERSION_INTENT_NAME = /^[a-f0-9]{32}\.json$/u
+const VERSION_PENDING_UUID = '[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}'
+const VERSION_RECORD_PENDING_NAME = new RegExp(
+  `^\\.\\d{6}-[a-f0-9]{32}\\.json\\.${VERSION_PENDING_UUID}\\.pending$`,
+  'u',
+)
+const VERSION_CONFIRMATION_NAME = new RegExp(
+  `^\\d{6}-[a-f0-9]{32}\\.json\\.${VERSION_PENDING_UUID}\\.commit$`,
+  'u',
+)
+const VERSION_INTENT_PENDING_NAME = new RegExp(
+  `^\\.[a-f0-9]{32}\\.json\\.${VERSION_PENDING_UUID}\\.pending$`,
+  'u',
+)
+
+interface SessionOutputVersionConfirmation {
+  readonly protocol: 1
+  readonly recordName: string
+  readonly recordDigest: string
+}
+
+function parseVersionConfirmation(value: unknown): SessionOutputVersionConfirmation | null {
+  const confirmation = recordData(value)
+  if (!confirmation || Object.keys(confirmation).sort().join(',') !== 'protocol,recordDigest,recordName'
+    || confirmation.protocol !== SESSION_OUTPUT_VERSION_PROTOCOL
+    || typeof confirmation.recordName !== 'string' || !VERSION_RECORD_NAME.test(confirmation.recordName)
+    || typeof confirmation.recordDigest !== 'string'
+    || !/^[a-f0-9]{64}$/u.test(confirmation.recordDigest)) return null
+  return Object.freeze({
+    protocol: 1,
+    recordName: confirmation.recordName,
+    recordDigest: confirmation.recordDigest,
+  })
+}
+
+async function publishVersionConfirmation(
+  directory: string,
+  recordName: string,
+  recordBytes: Buffer,
+): Promise<void> {
+  const identity = await fs.stat(directory, { bigint: true })
+  if (!identity.isDirectory() || await fs.realpath(directory) !== directory) {
+    throw new Error('version confirmation directory is not stable')
+  }
+  const name = `${recordName}.${randomUUID()}.commit`
+  const target = path.join(directory, name)
+  const confirmation = Buffer.from(JSON.stringify({
+    protocol: SESSION_OUTPUT_VERSION_PROTOCOL,
+    recordName,
+    recordDigest: createHash('sha256').update(recordBytes).digest('hex'),
+  }), 'utf8')
+  const handle = await fs.open(
+    target,
+    fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY | fsConstants.O_NOFOLLOW,
+    0o600,
+  )
+  try {
+    const opened = await handle.stat({ bigint: true })
+    const currentDirectory = await fs.stat(directory, { bigint: true })
+    const openedPath = await fs.lstat(target, { bigint: true })
+    if (!currentDirectory.isDirectory()
+      || currentDirectory.dev !== identity.dev || currentDirectory.ino !== identity.ino
+      || await fs.realpath(directory) !== directory
+      || !openedPath.isFile() || openedPath.isSymbolicLink()
+      || openedPath.dev !== opened.dev || openedPath.ino !== opened.ino) {
+      throw new Error('version confirmation path changed before write')
+    }
+    await handle.writeFile(confirmation)
+    await handle.sync()
+    const written = await handle.stat({ bigint: true })
+    const finalDirectory = await fs.stat(directory, { bigint: true })
+    const finalPath = await fs.lstat(target, { bigint: true })
+    if (written.dev !== opened.dev || written.ino !== opened.ino
+      || written.size !== BigInt(confirmation.byteLength)
+      || !finalDirectory.isDirectory()
+      || finalDirectory.dev !== identity.dev || finalDirectory.ino !== identity.ino
+      || await fs.realpath(directory) !== directory
+      || !finalPath.isFile() || finalPath.isSymbolicLink()
+      || finalPath.dev !== written.dev || finalPath.ino !== written.ino
+      || finalPath.size !== written.size) {
+      throw new Error('version confirmation could not be verified')
+    }
+  } finally {
+    await handle.close()
+  }
+}
+
+async function openVersionJournal(versionRoot: string): Promise<{
+  readonly root: string
+  readonly intents: string
+  readonly blobs: string
+  readonly records: string
+}> {
+  await ensureVersionDirectory(versionRoot, true)
+  const root = await fs.realpath(versionRoot)
+  const intents = path.join(root, 'intents')
+  const blobs = path.join(root, 'blobs')
+  const records = path.join(root, 'records')
+  for (const directory of [intents, blobs, records]) await ensureVersionDirectory(directory)
+  return Object.freeze({ root, intents, blobs, records })
+}
+
+async function versionDirectoryGuard(directories: readonly string[]): Promise<() => Promise<void>> {
+  const identities = await Promise.all(directories.map(async directory => {
+    const stat = await fs.stat(directory, { bigint: true })
+    if (!stat.isDirectory() || await fs.realpath(directory) !== directory) {
+      throw new Error('version directory is not stable')
+    }
+    return Object.freeze({ directory, dev: stat.dev, ino: stat.ino })
+  }))
+  return async () => {
+    for (const identity of identities) {
+      const current = await fs.stat(identity.directory, { bigint: true })
+      if (!current.isDirectory() || current.dev !== identity.dev || current.ino !== identity.ino
+        || await fs.realpath(identity.directory) !== identity.directory) {
+        throw new Error('version directory changed during publication')
+      }
+    }
+  }
+}
+
+async function listVersionRecordsByFileId(
+  journal: Awaited<ReturnType<typeof openVersionJournal>>,
+  fileId: string,
+): Promise<readonly SessionOutputVersion[]> {
+  const directory = path.join(journal.records, fileId)
+  await ensureVersionDirectory(directory)
+  const names = await fs.readdir(directory)
+  const records = names.filter(name => VERSION_RECORD_NAME.test(name))
+  const confirmations = names.filter(name => VERSION_CONFIRMATION_NAME.test(name)).sort()
+  if (records.length > MAX_SESSION_OUTPUT_VERSIONS
+    || confirmations.length > MAX_SESSION_OUTPUT_VERSIONS * 8
+    || names.some(name => !VERSION_RECORD_NAME.test(name)
+      && !VERSION_RECORD_PENDING_NAME.test(name)
+      && !VERSION_CONFIRMATION_NAME.test(name))) {
+    throw versionError('The Session output version record set is invalid.')
+  }
+  const versions: SessionOutputVersion[] = []
+  const committedIds = new Set<string>()
+  for (const confirmationName of confirmations) {
+    let confirmation: SessionOutputVersionConfirmation | null = null
+    try {
+      confirmation = parseVersionConfirmation(JSON.parse(
+        (await readVersionFile(
+          path.join(directory, confirmationName), VERSION_CONFIRMATION_BYTES,
+        )).toString('utf8'),
+      ) as unknown)
+    } catch {
+      // A process can stop while writing a randomized confirmation attempt.
+    }
+    if (!confirmation || !confirmationName.startsWith(`${confirmation.recordName}.`)) continue
+    const name = confirmation.recordName
+    let parsed: SessionOutputVersion | null = null
+    try {
+      const recordBytes = await readVersionFile(path.join(directory, name), VERSION_RECORD_BYTES)
+      if (createHash('sha256').update(recordBytes).digest('hex') !== confirmation.recordDigest) continue
+      parsed = parseSessionOutputVersion(JSON.parse(recordBytes.toString('utf8')) as unknown)
+    } catch (cause) {
+      throw versionError('A Session output version record is unreadable.', { cause })
+    }
+    const matched = /^(\d{6})-([a-f0-9]{32})\.json$/u.exec(name)
+    if (!parsed || parsed.fileId !== fileId || Number(matched?.[1]) !== parsed.ordinal
+      || matched?.[2] !== parsed.versionId) {
+      throw versionError('A Session output version record is invalid.')
+    }
+    if (committedIds.has(parsed.versionId)) continue
+    committedIds.add(parsed.versionId)
+    versions.push(parsed)
+  }
+  if (versions.length > MAX_SESSION_OUTPUT_VERSIONS) {
+    throw versionError('The Session output version record set exceeds its bounded limit.')
+  }
+  versions.sort((left, right) => left.ordinal - right.ordinal)
+  if (new Set(versions.map(version => version.ordinal)).size !== versions.length) {
+    throw versionError('Session output version ordinals conflict.')
+  }
+  return Object.freeze(versions)
+}
+
+async function commitVersionCapsule(
+  journal: Awaited<ReturnType<typeof openVersionJournal>>,
+  intentPath: string,
+  capsule: SessionOutputVersionCapsule,
+  signal?: AbortSignal,
+  internals?: WorkControllerOptions['sessionOutputVersionInternals'],
+  assertDirectories?: () => Promise<void>,
+): Promise<SessionOutputVersion> {
+  const data = Buffer.from(capsule.dataBase64, 'base64')
+  const recordsDirectory = path.join(journal.records, capsule.version.fileId)
+  await ensureVersionDirectory(recordsDirectory)
+  const blobPath = path.join(journal.blobs, capsule.version.contentDigest)
+  signal?.throwIfAborted()
+  await assertDirectories?.()
+  await publishExclusiveVersionFile(blobPath, data, MAX_SESSION_OUTPUT_SAVE_BYTES, internals)
+  await internals?.afterBlobPublish?.()
+  signal?.throwIfAborted()
+  await assertDirectories?.()
+  const recordName = `${String(capsule.version.ordinal).padStart(6, '0')}-${capsule.version.versionId}.json`
+  const recordPath = path.join(recordsDirectory, recordName)
+  const recordBytes = Buffer.from(JSON.stringify(capsule.version), 'utf8')
+  await publishExclusiveVersionFile(
+    recordPath,
+    recordBytes,
+    VERSION_RECORD_BYTES,
+    internals,
+  )
+  await internals?.afterRecordPublish?.()
+  await assertDirectories?.()
+  await publishVersionConfirmation(recordsDirectory, recordName, recordBytes)
+  await assertDirectories?.()
+  // The completed intent remains an inert recovery capsule. Path-based deletion cannot prove
+  // identity after a parent directory replacement, while the final record is authoritative.
+  return capsule.version
+}
+
+async function recoverVersionIntentsForFile(
+  journal: Awaited<ReturnType<typeof openVersionJournal>>,
+  fileId: string,
+  signal?: AbortSignal,
+  internals?: WorkControllerOptions['sessionOutputVersionInternals'],
+): Promise<void> {
+  const directory = path.join(journal.intents, fileId)
+  const recordsDirectory = path.join(journal.records, fileId)
+  await ensureVersionDirectory(directory)
+  await ensureVersionDirectory(recordsDirectory)
+  const assertDirectories = await versionDirectoryGuard([
+    journal.root, journal.intents, journal.blobs, journal.records, directory, recordsDirectory,
+  ])
+  const entries = (await fs.readdir(directory)).sort()
+  const names = entries.filter(name => VERSION_INTENT_NAME.test(name))
+  if (names.length > MAX_SESSION_OUTPUT_VERSIONS
+    || entries.some(name => !VERSION_INTENT_NAME.test(name) && !VERSION_INTENT_PENDING_NAME.test(name))) {
+    throw versionError('The Session output version intent set is invalid.')
+  }
+  const committedIds = new Set((await listVersionRecordsByFileId(journal, fileId))
+    .map(version => version.versionId))
+  for (const name of names) {
+    if (committedIds.has(name.slice(0, -'.json'.length))) continue
+    let capsule: SessionOutputVersionCapsule | null = null
+    const intentPath = path.join(directory, name)
+    try {
+      capsule = parseVersionCapsule(JSON.parse(
+        (await readVersionFile(intentPath, VERSION_CAPSULE_BYTES)).toString('utf8'),
+      ) as unknown)
+    } catch (cause) {
+      throw versionError('A Session output version intent is unreadable.', { cause })
+    }
+    if (!capsule || capsule.version.fileId !== fileId || `${capsule.version.versionId}.json` !== name) {
+      throw versionError('A Session output version intent is invalid.')
+    }
+    await assertDirectories()
+    await commitVersionCapsule(journal, intentPath, capsule, signal, internals, assertDirectories)
+    committedIds.add(capsule.version.versionId)
+  }
+}
+
+async function publishSessionOutputVersion(
+  versionRoot: string,
+  candidate: SessionOutputVersionCandidate,
+  signal?: AbortSignal,
+  internals?: WorkControllerOptions['sessionOutputVersionInternals'],
+): Promise<SessionOutputVersion> {
+  signal?.throwIfAborted()
+  const journal = await openVersionJournal(versionRoot)
+  const fileId = sessionOutputFileId(candidate.sessionId, candidate.normalizedPath)
+  const versionId = sessionOutputVersionId(fileId, candidate.origin, candidate.turn, candidate.throughSeq)
+  const recordsDirectory = path.join(journal.records, fileId)
+  const intentsDirectory = path.join(journal.intents, fileId)
+  await ensureVersionDirectory(recordsDirectory)
+  await ensureVersionDirectory(intentsDirectory)
+  const assertDirectories = await versionDirectoryGuard([
+    journal.root, journal.intents, journal.blobs, journal.records, recordsDirectory, intentsDirectory,
+  ])
+  const existingRecords = await listVersionRecordsByFileId(journal, fileId)
+  const existing = existingRecords.find(version => version.versionId === versionId)
+  if (existing) return existing
+  const intentPath = path.join(intentsDirectory, `${versionId}.json`)
+  let capsule: SessionOutputVersionCapsule | null = null
+  try {
+    capsule = parseVersionCapsule(JSON.parse(
+      (await readVersionFile(intentPath, VERSION_CAPSULE_BYTES)).toString('utf8'),
+    ) as unknown)
+  } catch (cause) {
+    if (!(cause instanceof Error && 'code' in cause && cause.code === 'ENOENT')) {
+      throw versionError('The Session output version intent is unreadable.', { cause })
+    }
+  }
+  if (!capsule) {
+    const intentEntries = await fs.readdir(intentsDirectory)
+    const intentNames = intentEntries.filter(name => VERSION_INTENT_NAME.test(name))
+    if (intentNames.length > MAX_SESSION_OUTPUT_VERSIONS
+      || intentEntries.some(name => !VERSION_INTENT_NAME.test(name)
+        && !VERSION_INTENT_PENDING_NAME.test(name))) {
+      throw versionError('The Session output version intent set is invalid.')
+    }
+    let maximumOrdinal = existingRecords.reduce((maximum, version) => Math.max(maximum, version.ordinal), 0)
+    const committedIds = new Set(existingRecords.map(version => version.versionId))
+    for (const name of intentNames) {
+      if (committedIds.has(name.slice(0, -'.json'.length))) continue
+      try {
+        const other = parseVersionCapsule(JSON.parse(
+          (await readVersionFile(path.join(intentsDirectory, name), VERSION_CAPSULE_BYTES)).toString('utf8'),
+        ) as unknown)
+        if (!other || other.version.fileId !== fileId) throw new Error('invalid version intent')
+        maximumOrdinal = Math.max(maximumOrdinal, other.version.ordinal)
+      } catch (cause) {
+        throw versionError('A Session output version intent is invalid.', { cause })
+      }
+    }
+    if (maximumOrdinal >= MAX_SESSION_OUTPUT_VERSIONS) {
+      throw versionError('The Session output version history has reached its bounded limit.')
+    }
+    const version = freezeSessionOutputVersion({
+      fileId,
+      versionId,
+      ordinal: maximumOrdinal + 1,
+      origin: candidate.origin,
+      sessionId: candidate.sessionId,
+      turn: candidate.turn,
+      throughSeq: candidate.throughSeq,
+      name: candidate.name,
+      path: candidate.path,
+      bytes: candidate.bytes,
+      mediaType: candidate.mediaType,
+      contentDigest: candidate.contentDigest,
+      createdAt: candidate.createdAt,
+      sources: candidate.sources,
+    })
+    capsule = Object.freeze({ protocol: 1, version, dataBase64: candidate.data.toString('base64') })
+    const capsuleBytes = Buffer.from(JSON.stringify(capsule), 'utf8')
+    await publishExclusiveVersionFile(intentPath, capsuleBytes, VERSION_CAPSULE_BYTES, internals)
+    capsule = parseVersionCapsule(JSON.parse((await readVersionFile(
+      intentPath, VERSION_CAPSULE_BYTES,
+    )).toString('utf8')) as unknown)
+    if (!capsule) throw versionError('The Session output version intent could not be verified.')
+  }
+  if (capsule.version.fileId !== fileId || capsule.version.versionId !== versionId
+    || capsule.version.sessionId !== candidate.sessionId
+    || capsule.version.path !== candidate.path) {
+    throw versionError('The Session output version intent conflicts with the requested event.')
+  }
+  await internals?.afterIntentPublish?.()
+  await assertDirectories()
+  return commitVersionCapsule(journal, intentPath, capsule, signal, internals, assertDirectories)
+}
+
+function completedTurnFrontierSeq(
+  events: readonly unknown[],
+  turn: number,
+): number | null {
+  let latestSeq = -1
+  let completedSeq = -1
+  for (const raw of events) {
+    const event = recordData(raw)
+    const data = recordData(event?.data)
+    const seq = event?.seq
+    if (typeof seq !== 'number' || !Number.isSafeInteger(seq) || seq < 0) continue
+    latestSeq = Math.max(latestSeq, seq)
+    const reason = recordData(data?.reason)
+    if (event?.type === 'turn/end' && data?.turn === turn && reason?.kind === 'completed') {
+      completedSeq = Math.max(completedSeq, seq)
+    }
+  }
+  return completedSeq >= 0 && completedSeq === latestSeq ? completedSeq : null
+}
+
+function expectedSessionOutputDigest(
+  inspected: { readonly cwd: string; readonly events: readonly unknown[] },
+  spec: InspectSessionOutputsSpec,
+  normalizedPath: string,
+): string | null {
+  const workspacePath = path.resolve(inspected.cwd)
+  const calls = new Map<string, { readonly path: string; readonly expected: Buffer | null }>()
+  let expected: Buffer | null = null
+  for (const raw of inspected.events) {
+    const event = recordData(raw)
+    const data = recordData(event?.data)
+    const seq = event?.seq
+    if (!event || !data || data.turn !== spec.turn || typeof seq !== 'number' || seq > spec.throughSeq) continue
+    if (event.type === 'tool/call' && typeof data.callId === 'string') {
+      const producedPath = sessionMutationPath(data.name, data.arguments)
+      if (producedPath) calls.set(data.callId, {
+        path: producedPath,
+        expected: sessionMutationExpectedBytes(data.name, data.arguments),
+      })
+      continue
+    }
+    if (event.type !== 'tool/result' || event.surfaceOp !== 'append') continue
+    const message = recordData(data.message)
+    const source = recordData(message?.source)
+    const content = Array.isArray(message?.content) ? message.content : []
+    const result = recordData(content[0])
+    if (typeof source?.callId !== 'string' || result?.type !== 'tool-result' || result.isError === true) continue
+    const call = calls.get(source.callId)
+    if (!call || normalizedWorkspacePath(workspacePath, inspected.cwd, call.path) !== normalizedPath) continue
+    expected = call.expected
+  }
+  return expected ? createHash('sha256').update(expected).digest('hex') : null
+}
+
+async function readSessionOutputVersionRecord(
+  versionRoot: string,
+  spec: ReadSessionOutputVersionSpec,
+): Promise<{ readonly version: SessionOutputVersion; readonly data: Buffer }> {
+  if (!/^[a-f0-9]{32}$/u.test(spec.fileId) || !/^[a-f0-9]{32}$/u.test(spec.versionId)) {
+    throw versionError('The Session output version identity is invalid.')
+  }
+  const journal = await openVersionJournal(versionRoot)
+  const versions = await listVersionRecordsByFileId(journal, spec.fileId)
+  const version = versions.find(candidate => candidate.versionId === spec.versionId)
+  if (!version) throw versionError('The Session output version is not available.')
+  let data: Buffer
+  try {
+    data = await readVersionFile(path.join(journal.blobs, version.contentDigest), MAX_SESSION_OUTPUT_SAVE_BYTES)
+  } catch (cause) {
+    throw versionError('The Session output version bytes are unreadable.', { cause })
+  }
+  if (data.byteLength !== version.bytes
+    || createHash('sha256').update(data).digest('hex') !== version.contentDigest) {
+    throw versionError('The Session output version bytes do not match their record.')
+  }
+  return Object.freeze({ version, data })
+}
+
 export function createWorkController(options: WorkControllerOptions): WorkController {
   const createId = options.createId ?? randomUUID
   const createSessionId = options.createSessionId ?? randomUUID
@@ -1888,6 +2726,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
   const now = options.now ?? (() => new Date().toISOString())
   const store = options.store ?? createMemoryWorkStore()
   const deliveryRoot = options.deliveryRoot ?? path.join(options.workspaceRoot, '.dsh-work-deliveries')
+  const versionRoot = options.sessionOutputVersionRoot
   interface RevisionProtection {
     readonly sessionId: string
     readonly sourceTurn: number
@@ -1911,6 +2750,18 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
     const prior = revisionQueue
     let release!: () => void
     revisionQueue = new Promise<void>(resolve => { release = resolve })
+    await prior
+    try {
+      return await operation()
+    } finally {
+      release()
+    }
+  }
+  let versionQueue: Promise<void> = Promise.resolve()
+  const withVersionLock = async <Value>(operation: () => Promise<Value>): Promise<Value> => {
+    const prior = versionQueue
+    let release!: () => void
+    versionQueue = new Promise<void>(resolve => { release = resolve })
     await prior
     try {
       return await operation()
@@ -2039,6 +2890,139 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
     }
     return null
   }
+  const publishGeneratedVersions = async (
+    inspected: { readonly cwd: string; readonly events: readonly unknown[] },
+    spec: InspectSessionOutputsSpec,
+    outputs: readonly SessionOutputFile[],
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    if (!versionRoot || outputs.length < 1
+      || completedTurnFrontierSeq(inspected.events, spec.turn) === null) return
+    const inspectCurrentFrontier = async (): Promise<number | null> => {
+      let current: Awaited<ReturnType<NonNullable<HarnessWorkPort['inspectSession']>>>
+      try {
+        current = await options.harness.inspectSession!(spec.sessionId, signal)
+      } catch (cause) {
+        if (signal?.aborted) throw cause
+        throw versionError('The Session event frontier could not be revalidated.', { cause })
+      }
+      if (current.cwd !== inspected.cwd) return null
+      return completedTurnFrontierSeq(current.events, spec.turn)
+    }
+    const hasPublishedVersion = async (
+      output: SessionOutputFile,
+      frontier: number,
+    ): Promise<boolean> => {
+      try {
+        const workspacePath = await fs.realpath(inspected.cwd)
+        const normalizedPath = normalizedWorkspacePath(workspacePath, inspected.cwd, output.path)
+        if (!normalizedPath) return false
+        const fileId = sessionOutputFileId(spec.sessionId, normalizedPath)
+        const versionId = sessionOutputVersionId(fileId, 'generated', spec.turn, frontier)
+        const journal = await openVersionJournal(versionRoot)
+        await recoverVersionIntentsForFile(
+          journal, fileId, signal, options.sessionOutputVersionInternals,
+        )
+        return (await listVersionRecordsByFileId(journal, fileId))
+          .some(version => version.versionId === versionId)
+      } catch (cause) {
+        if (signal?.aborted || cause instanceof WorkError) throw cause
+        throw versionError('The existing Session output version could not be checked safely.', { cause })
+      }
+    }
+    await withVersionLock(async () => {
+      for (const output of outputs) {
+        signal?.throwIfAborted()
+        const initialFrontier = await inspectCurrentFrontier()
+        if (initialFrontier === null) return
+        if (await hasPublishedVersion(output, initialFrontier)) continue
+        await options.sessionOutputVersionInternals?.beforeOutputCapture?.(output.path)
+        let captured: CapturedSessionOutput
+        try {
+          captured = await captureValidatedSessionOutput(
+            inspected,
+            { ...spec, path: output.path },
+            signal,
+            options.sessionOutputInternals,
+          )
+        } catch (cause) {
+          if (signal?.aborted) throw cause
+          throw versionError('The completed Session output could not be frozen.', { cause })
+        }
+        const capturedFrontier = await inspectCurrentFrontier()
+        if (capturedFrontier === null) return
+        const expectedDigest = expectedSessionOutputDigest(
+          inspected,
+          spec,
+          captured.normalizedPath,
+        )
+        if (expectedDigest && expectedDigest !== captured.contentDigest) {
+          throw versionError('The completed Session output bytes do not match its full-content write.')
+        }
+        let sources: readonly SessionOutputSource[]
+        try {
+          sources = await validatedSessionOutputSources(
+            inspected,
+            spec,
+            signal,
+            options.sessionOutputInternals,
+          )
+        } catch (cause) {
+          if (signal?.aborted) throw cause
+          throw versionError('The completed Session output sources could not be frozen.', { cause })
+        }
+        const publicationFrontier = await inspectCurrentFrontier()
+        if (publicationFrontier === null || publicationFrontier !== capturedFrontier) return
+        try {
+          await publishSessionOutputVersion(versionRoot, {
+            origin: 'generated',
+            sessionId: spec.sessionId,
+            turn: spec.turn,
+            throughSeq: publicationFrontier,
+            name: captured.output.name,
+            path: captured.output.path,
+            normalizedPath: captured.normalizedPath,
+            bytes: captured.data.byteLength,
+            mediaType: captured.output.mediaType,
+            contentDigest: captured.contentDigest,
+            createdAt: now(),
+            sources,
+            data: captured.data,
+          }, signal, options.sessionOutputVersionInternals)
+        } catch (cause) {
+          if (signal?.aborted || cause instanceof WorkError) throw cause
+          throw versionError('The completed Session output version could not be published.', { cause })
+        }
+      }
+    })
+  }
+  const publishLegacyBaseline = async (restored: WorkSnapshot): Promise<void> => {
+    if (!versionRoot || !restored.deliverable) return
+    let captured: CapturedLegacyDeliverable
+    try {
+      captured = await captureLegacyDeliverable(restored, options.sessionOutputVersionInternals)
+    } catch (cause) {
+      if (cause instanceof WorkError && cause.code === 'work/deliverable-invalid') return
+      throw cause
+    }
+    await withVersionLock(async () => {
+      await publishSessionOutputVersion(versionRoot, {
+      origin: 'migration-baseline',
+      sessionId: restored.primarySession.sessionId,
+      turn: null,
+      throughSeq: null,
+      name: captured.name,
+      path: captured.normalizedPath,
+      normalizedPath: captured.normalizedPath,
+      bytes: captured.data.byteLength,
+      mediaType: 'text/markdown',
+      contentDigest: captured.contentDigest,
+      createdAt: now(),
+      sources: Object.freeze([]),
+      data: captured.data,
+      }, undefined, options.sessionOutputVersionInternals)
+    })
+  }
   let work: WorkSnapshot | null = null
   const followers = new Set<{
     readonly frames: WorkFollowFrame[]
@@ -2073,6 +3057,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
       throw new WorkError('work/recovery-conflict', 'Harness resolved a different Primary Session during Work recovery.')
     }
     work = freezeSnapshot(restored)
+    await publishLegacyBaseline(restored)
   }
 
   let initialization: Promise<void> | null = null
@@ -2341,6 +3326,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
             mediaType: protection.mediaType,
           }))
         }
+        await publishGeneratedVersions(inspected, spec, outputs, signal)
         return Object.freeze(visible)
       })
     },
@@ -2530,6 +3516,69 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
           { cause },
         )
       }
+    },
+
+    async listSessionOutputVersions(spec, signal) {
+      await ready()
+      if (!versionRoot || !options.harness.inspectSessionWorkspace
+        || typeof spec.sessionId !== 'string' || spec.sessionId.length < 1 || spec.sessionId.length > 256
+        || typeof spec.path !== 'string' || spec.path.length < 1 || spec.path.length > 4096) {
+        throw versionError('Session output version history is not available for this file.')
+      }
+      let workspaceInput: string
+      let workspacePath: string
+      try {
+        workspaceInput = await options.harness.inspectSessionWorkspace(spec.sessionId, signal)
+        workspacePath = await fs.realpath(workspaceInput)
+      } catch (cause) {
+        if (signal?.aborted) throw cause
+        throw versionError('The Session Workspace for version history is not readable.', { cause })
+      }
+      const normalizedPath = normalizedWorkspacePath(workspacePath, workspaceInput, spec.path)
+      if (!normalizedPath) throw versionError('The Session output version path is invalid.')
+      const fileId = sessionOutputFileId(spec.sessionId, normalizedPath)
+      return withVersionLock(async () => {
+        try {
+          const journal = await openVersionJournal(versionRoot)
+          await recoverVersionIntentsForFile(journal, fileId, signal, options.sessionOutputVersionInternals)
+          return await listVersionRecordsByFileId(journal, fileId)
+        } catch (cause) {
+          if (signal?.aborted || cause instanceof WorkError) throw cause
+          throw versionError('The Session output version history could not be recovered safely.', { cause })
+        }
+      })
+    },
+
+    async readSessionOutputVersion(spec, signal) {
+      await ready()
+      if (!versionRoot) throw versionError('Session output version history is not available.')
+      return withVersionLock(async () => {
+        if (!/^[a-f0-9]{32}$/u.test(spec.fileId) || !/^[a-f0-9]{32}$/u.test(spec.versionId)) {
+          throw versionError('The Session output version identity is invalid.')
+        }
+        let captured: Awaited<ReturnType<typeof readSessionOutputVersionRecord>>
+        try {
+          const journal = await openVersionJournal(versionRoot)
+          await recoverVersionIntentsForFile(
+            journal, spec.fileId, signal, options.sessionOutputVersionInternals,
+          )
+          captured = await readSessionOutputVersionRecord(versionRoot, spec)
+        } catch (cause) {
+          if (signal?.aborted || cause instanceof WorkError) throw cause
+          throw versionError('The Session output version could not be recovered safely.', { cause })
+        }
+        signal?.throwIfAborted()
+        if (captured.data.byteLength > MAX_SESSION_OUTPUT_PREVIEW_BYTES) {
+          throw versionError('The Session output version is too large to preview.')
+        }
+        let content: string
+        try {
+          content = new TextDecoder('utf-8', { fatal: true }).decode(captured.data)
+        } catch (cause) {
+          throw versionError('The Session output version is not readable UTF-8 text.', { cause })
+        }
+        return Object.freeze({ ...captured.version, content })
+      })
     },
 
     async readSessionOutput(spec, signal) {

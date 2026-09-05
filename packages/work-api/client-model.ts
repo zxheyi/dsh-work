@@ -15,10 +15,12 @@ import type {
   WorkImportSessionResourceSpec,
   WorkInspectSessionOutputSourcesSpec,
   WorkInspectSessionOutputsSpec,
+  WorkListSessionOutputVersionsSpec,
   WorkPrepareSessionOutputRevisionSpec,
   WorkSaveSessionOutputSpec,
   WorkShowSessionOutputSaveSpec,
   WorkReadSessionOutputSpec,
+  WorkReadSessionOutputVersionSpec,
   WorkRemoteFollowFrame,
   WorkView,
   WorkShowDeliveryValue,
@@ -28,6 +30,9 @@ import type {
   WorkSessionOutputSource,
   WorkSessionOutputRevision,
   WorkSessionOutputRevisionFailure,
+  WorkSessionOutputVersion,
+  WorkSessionOutputVersionContent,
+  WorkSessionOutputVersionsValue,
   WorkSessionOutputSave,
   WorkShowSessionOutputSaveValue,
   WorkSessionOutputSourcesValue,
@@ -75,6 +80,14 @@ export interface WorkClientRemote {
     spec: WorkReadSessionOutputSpec,
     signal?: AbortSignal,
   ): Promise<RemoteResult<WorkSessionOutputContent>>
+  listSessionOutputVersions(
+    spec: WorkListSessionOutputVersionsSpec,
+    signal?: AbortSignal,
+  ): Promise<RemoteResult<WorkSessionOutputVersionsValue>>
+  readSessionOutputVersion(
+    spec: WorkReadSessionOutputVersionSpec,
+    signal?: AbortSignal,
+  ): Promise<RemoteResult<WorkSessionOutputVersionContent>>
   list(): Promise<RemoteResult<WorkListValue>>
   follow(signal?: AbortSignal): AsyncIterable<WorkRemoteFollowFrame>
 }
@@ -130,6 +143,14 @@ export interface IWorks {
     spec: WorkReadSessionOutputSpec,
     signal?: AbortSignal,
   ): Promise<WorkSessionOutputContent>
+  listSessionOutputVersions(
+    spec: WorkListSessionOutputVersionsSpec,
+    signal?: AbortSignal,
+  ): Promise<readonly WorkSessionOutputVersion[]>
+  readSessionOutputVersion(
+    spec: WorkReadSessionOutputVersionSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkSessionOutputVersionContent>
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -237,6 +258,20 @@ export class ClientWorkModel implements WorkSource {
     signal?: AbortSignal,
   ): Promise<RemoteResult<WorkSessionOutputContent>> {
     return this.remote.readSessionOutput(spec, signal)
+  }
+
+  listSessionOutputVersions(
+    spec: WorkListSessionOutputVersionsSpec,
+    signal?: AbortSignal,
+  ): Promise<RemoteResult<WorkSessionOutputVersionsValue>> {
+    return this.remote.listSessionOutputVersions(spec, signal)
+  }
+
+  readSessionOutputVersion(
+    spec: WorkReadSessionOutputVersionSpec,
+    signal?: AbortSignal,
+  ): Promise<RemoteResult<WorkSessionOutputVersionContent>> {
+    return this.remote.readSessionOutputVersion(spec, signal)
   }
 
   replaceBaseline(value: WorkListValue): void {
@@ -433,6 +468,24 @@ export class WorksController extends Service implements IWorks {
     signal?: AbortSignal,
   ): Promise<WorkSessionOutputContent> {
     const result = await this.model.readSessionOutput(spec, signal)
+    if (!result.ok) throw result.error
+    return result.value
+  }
+
+  async listSessionOutputVersions(
+    spec: WorkListSessionOutputVersionsSpec,
+    signal?: AbortSignal,
+  ): Promise<readonly WorkSessionOutputVersion[]> {
+    const result = await this.model.listSessionOutputVersions(spec, signal)
+    if (!result.ok) throw result.error
+    return result.value.items
+  }
+
+  async readSessionOutputVersion(
+    spec: WorkReadSessionOutputVersionSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkSessionOutputVersionContent> {
+    const result = await this.model.readSessionOutputVersion(spec, signal)
     if (!result.ok) throw result.error
     return result.value
   }

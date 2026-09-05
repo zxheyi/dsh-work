@@ -102,6 +102,21 @@ function successfulRemote(overrides: Partial<WorkClientRemote> = {}): WorkClient
     async showSessionOutputSave() {
       return { ok: true as const, value: { shown: true as const } }
     },
+    async listSessionOutputVersions() {
+      return { ok: true as const, value: { items: [] } }
+    },
+    async readSessionOutputVersion() {
+      return {
+        ok: true as const,
+        value: {
+          fileId: 'f'.repeat(32), versionId: 'e'.repeat(32), ordinal: 1,
+          origin: 'generated' as const, sessionId: 'session-client', turn: 1, throughSeq: 2,
+          name: 'report.md', path: 'report.md', bytes: 9, mediaType: 'text/markdown',
+          contentDigest: 'd'.repeat(64), createdAt: '2026-09-06T00:00:00.000Z', sources: [],
+          content: '# Report\n',
+        },
+      }
+    },
     async readSessionOutput() {
       return {
         ok: true as const,
@@ -516,6 +531,40 @@ test('saves and opens a Session output without changing the Work projection', as
   assert.deepEqual(received, [
     ['save', output],
     ['show', { saveId: saved.saveId, fileName: saved.fileName, contentDigest: saved.contentDigest }],
+  ])
+  assert.deepEqual(model.getSnapshot().items, [view(1)])
+})
+
+test('lists and reads immutable Session output versions without changing Work state', async () => {
+  const received: unknown[] = []
+  const version = {
+    fileId: 'a'.repeat(32), versionId: 'b'.repeat(32), ordinal: 1,
+    origin: 'generated' as const, sessionId: 'session-version', turn: 2, throughSeq: 9,
+    name: 'report.md', path: 'report.md', bytes: 9, mediaType: 'text/markdown',
+    contentDigest: 'c'.repeat(64), createdAt: '2026-09-06T00:00:00.000Z', sources: [],
+  }
+  const model = new ClientWorkModel(successfulRemote({
+    async listSessionOutputVersions(spec) {
+      received.push(['list', spec])
+      return { ok: true, value: { items: [version] } }
+    },
+    async readSessionOutputVersion(spec) {
+      received.push(['read', spec])
+      return { ok: true, value: { ...version, content: '# Report\n' } }
+    },
+  }))
+  model.replaceBaseline({ items: [view(1)] })
+  const works = new WorksController(new Context(), model)
+
+  assert.deepEqual(await works.listSessionOutputVersions({
+    sessionId: version.sessionId, path: version.path,
+  }), [version])
+  assert.equal((await works.readSessionOutputVersion({
+    fileId: version.fileId, versionId: version.versionId,
+  })).content, '# Report\n')
+  assert.deepEqual(received, [
+    ['list', { sessionId: 'session-version', path: 'report.md' }],
+    ['read', { fileId: version.fileId, versionId: version.versionId }],
   ])
   assert.deepEqual(model.getSnapshot().items, [view(1)])
 })

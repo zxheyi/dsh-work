@@ -7,7 +7,9 @@ import {
   type DispatchWorkRequest,
   type InspectSessionOutputsSpec,
   type InspectSessionOutputSourcesSpec,
+  type ListSessionOutputVersionsSpec,
   type ReadSessionOutputSpec,
+  type ReadSessionOutputVersionSpec,
   type PrepareSessionOutputRevisionSpec,
   type ImportSessionResourceSpec,
   type ImportConversationSpec,
@@ -17,6 +19,8 @@ import {
   type SessionOutputSource,
   type SessionOutputRevision,
   type SessionOutputRevisionFailure,
+  type SessionOutputVersion,
+  type SessionOutputVersionContent,
   type SaveSessionOutputSpec,
   type SessionOutputSave,
   type ShowSessionOutputSaveSpec,
@@ -38,13 +42,17 @@ export type WorkImportSessionResourceSpec = ImportSessionResourceSpec
 export type WorkSessionFileResource = SessionFileResource
 export type WorkInspectSessionOutputsSpec = InspectSessionOutputsSpec
 export type WorkInspectSessionOutputSourcesSpec = InspectSessionOutputSourcesSpec
+export type WorkListSessionOutputVersionsSpec = ListSessionOutputVersionsSpec
 export type WorkSessionOutputFile = SessionOutputFile
 export type WorkSessionOutputSource = SessionOutputSource
 export type WorkReadSessionOutputSpec = ReadSessionOutputSpec
+export type WorkReadSessionOutputVersionSpec = ReadSessionOutputVersionSpec
 export type WorkSessionOutputContent = SessionOutputContent
 export type WorkPrepareSessionOutputRevisionSpec = PrepareSessionOutputRevisionSpec
 export type WorkSessionOutputRevision = SessionOutputRevision
 export type WorkSessionOutputRevisionFailure = SessionOutputRevisionFailure
+export type WorkSessionOutputVersion = SessionOutputVersion
+export type WorkSessionOutputVersionContent = SessionOutputVersionContent
 export type WorkSaveSessionOutputSpec = SaveSessionOutputSpec
 export type WorkSessionOutputSave = SessionOutputSave
 export type WorkShowSessionOutputSaveSpec = ShowSessionOutputSaveSpec
@@ -58,6 +66,7 @@ export interface WorkShowDeliveryValue { readonly shown: true }
 export interface WorkShowSessionOutputSaveValue { readonly shown: true }
 export interface WorkSessionOutputsValue { readonly items: readonly WorkSessionOutputFile[] }
 export interface WorkSessionOutputSourcesValue { readonly items: readonly WorkSessionOutputSource[] }
+export interface WorkSessionOutputVersionsValue { readonly items: readonly WorkSessionOutputVersion[] }
 
 export interface WorkView {
   readonly workId: string
@@ -104,6 +113,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'work/resource-limit': Record<string, never>
     'work/session-output-invalid': Record<string, never>
     'work/session-output-save-failed': Record<string, never>
+    'work/session-output-version-failed': Record<string, never>
     'work/session-resource-invalid': Record<string, never>
     'work/turn-failed': Record<string, never>
   }
@@ -240,6 +250,22 @@ export class WorkRemoteController extends TypertRemoteService {
     })
   }
 
+  listSessionOutputVersions(
+    spec: WorkListSessionOutputVersionsSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkSessionOutputVersionsValue> {
+    return workResult(async () => Object.freeze({
+      items: await this.controller.listSessionOutputVersions(spec, signal),
+    }))
+  }
+
+  readSessionOutputVersion(
+    spec: WorkReadSessionOutputVersionSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkSessionOutputVersionContent> {
+    return workResult(() => this.controller.readSessionOutputVersion(spec, signal))
+  }
+
   readSessionOutput(
     spec: WorkReadSessionOutputSpec,
     signal?: AbortSignal,
@@ -258,7 +284,7 @@ export class WorkRemoteController extends TypertRemoteService {
   }
 }
 
-type RemoteMethodName = 'create' | 'importConversation' | 'dispatch' | 'readDeliverable' | 'showDelivery' | 'importSessionResource' | 'inspectSessionOutputs' | 'inspectSessionOutputSources' | 'prepareSessionOutputRevision' | 'inspectSessionRevision' | 'saveSessionOutput' | 'showSessionOutputSave' | 'readSessionOutput' | 'list' | 'follow'
+type RemoteMethodName = 'create' | 'importConversation' | 'dispatch' | 'readDeliverable' | 'showDelivery' | 'importSessionResource' | 'inspectSessionOutputs' | 'inspectSessionOutputSources' | 'prepareSessionOutputRevision' | 'inspectSessionRevision' | 'saveSessionOutput' | 'showSessionOutputSave' | 'listSessionOutputVersions' | 'readSessionOutputVersion' | 'readSessionOutput' | 'list' | 'follow'
 type RemoteMethod = (this: WorkRemoteController, ...args: unknown[]) => unknown
 type RemoteDecorator = (
   method: RemoteMethod,
@@ -295,6 +321,8 @@ installRemoteMarker('prepareSessionOutputRevision', Remote as RemoteDecorator)
 installRemoteMarker('inspectSessionRevision', Remote as RemoteDecorator)
 installRemoteMarker('saveSessionOutput', Remote as RemoteDecorator)
 installRemoteMarker('showSessionOutputSave', Remote as RemoteDecorator)
+installRemoteMarker('listSessionOutputVersions', Remote as RemoteDecorator)
+installRemoteMarker('readSessionOutputVersion', Remote as RemoteDecorator)
 installRemoteMarker('readSessionOutput', Remote as RemoteDecorator)
 installRemoteMarker('list', Remote as RemoteDecorator)
 installRemoteMarker('follow', Remote({ mode: 'stream' }) as RemoteDecorator)
