@@ -1108,6 +1108,29 @@ test('publishes immutable Session output versions and reads historical bytes aft
     versionId: versions[0]!.versionId,
   })).content, '# Version one\n')
 
+  await assert.rejects(controller.prepareSessionOutputRevision({
+    sessionId: 'other-session', turn: 2, throughSeq: 6, path: 'report.md',
+    baseVersion: { fileId: versions[0]!.fileId, versionId: versions[0]!.versionId },
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-output-invalid')
+  const revision = await controller.prepareSessionOutputRevision({
+    sessionId: 'session-versioned', turn: 2, throughSeq: 6, path: 'report.md',
+    baseVersion: { fileId: versions[0]!.fileId, versionId: versions[0]!.versionId },
+  })
+  assert.equal(revision.contentDigest, versions[1]!.contentDigest)
+  assert.deepEqual(revision.baseVersion, {
+    fileId: versions[0]!.fileId,
+    versionId: versions[0]!.versionId,
+    ordinal: 1,
+    path: `attachment-${createHash('sha256').update('session-versioned').digest('hex').slice(0, 12)}-${versions[0]!.contentDigest.slice(0, 12)}-version-${versions[0]!.fileId.slice(0, 8)}-v1-${versions[0]!.contentDigest.slice(0, 12)}.md`,
+    reference: `@attachment-${createHash('sha256').update('session-versioned').digest('hex').slice(0, 12)}-${versions[0]!.contentDigest.slice(0, 12)}-version-${versions[0]!.fileId.slice(0, 8)}-v1-${versions[0]!.contentDigest.slice(0, 12)}.md`,
+    contentDigest: versions[0]!.contentDigest,
+  })
+  assert.equal(await fs.readFile(path.join(workspace, revision.baseVersion!.path), 'utf8'), '# Version one\n')
+  assert.equal(await fs.readFile(path.join(workspace, 'report.md'), 'utf8'), '# Version two\n')
+  assert.equal((await controller.listSessionOutputVersions({
+    sessionId: 'session-versioned', path: 'report.md',
+  })).length, 2)
+
   const restarted = createWorkController({
     workspaceRoot: path.join(root, 'managed'),
     sessionOutputVersionRoot: versionRoot,
@@ -1121,6 +1144,27 @@ test('publishes immutable Session output versions and reads historical bytes aft
     versionId: versions[1]!.versionId,
   })).content, '# Version two\n')
   await fs.rm(root, { recursive: true, force: true })
+})
+
+test('rejects invalid revision version identities before inspecting Session or journal paths', async () => {
+  let inspections = 0
+  const controller = createWorkController({
+    workspaceRoot: '/managed',
+    sessionOutputVersionRoot: '/versions',
+    harness: {
+      ...testHarness(),
+      async inspectSession() {
+        inspections++
+        throw new Error('must not inspect')
+      },
+    },
+  })
+
+  await assert.rejects(controller.prepareSessionOutputRevision({
+    sessionId: 'session-invalid-version', turn: 1, throughSeq: 2, path: 'report.md',
+    baseVersion: { fileId: '../escape', versionId: 'b'.repeat(32) },
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-output-invalid')
+  assert.equal(inspections, 0)
 })
 
 test('publishes no incomplete version and recovers an interrupted immutable record', async () => {

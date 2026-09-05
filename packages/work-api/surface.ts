@@ -22,6 +22,8 @@ import type {
   WorkSessionOutputSource,
   WorkSessionOutputRevisionFailure,
   WorkSessionOutputSave,
+  WorkSessionOutputVersion,
+  WorkSessionOutputVersionContent,
   WorkView,
 } from './index.ts'
 import type { WorkDeliverableContent } from './index.ts'
@@ -108,6 +110,10 @@ interface NativeSessionOutputsProps extends WorkSurfaceInjected {
 interface SessionResourceReferenceDetail {
   readonly sessionId: string
   readonly path: string
+  readonly base?: {
+    readonly path: string
+    readonly ordinal: number
+  }
 }
 
 interface SessionOutputPreviewSelection extends WorkSessionOutputFile {
@@ -707,10 +713,20 @@ function NativeSessionResourceEntry({
       const detail = event.detail as Partial<SessionResourceReferenceDetail>
       if (detail.sessionId !== session.sessionId || typeof detail.path !== 'string') return
       const mention = resourceMention(detail.path)
+      const base = typeof detail.base === 'object' && detail.base
+        && typeof detail.base.path === 'string'
+        && typeof detail.base.ordinal === 'number'
+        && Number.isSafeInteger(detail.base.ordinal)
+        && detail.base.ordinal > 0
+        ? detail.base
+        : null
+      const insertion = base
+        ? `基于 ${resourceMention(base.path)}（v${String(base.ordinal)}）修改 ${mention}`
+        : mention
       const current = sessionResourceDrafts.get(session.sessionId) ?? input.draft
-      if (current.includes(mention)) return
+      if (current.includes(insertion)) return
       const separator = current.trim().length > 0 ? ' ' : ''
-      const next = `${current}${separator}${mention} `
+      const next = `${current}${separator}${insertion} `
       sessionResourceDrafts.set(session.sessionId, next)
       publishRecoveryContext(session.sessionId, next)
       inputActions.setDraft(next)
@@ -1367,7 +1383,7 @@ function NativeSessionOutputs({ matched, openFile, sessionId, works }: NativeSes
     h('small', null, outputSize(file.bytes))))))) : null)
 }
 
-function safeMarkdownContent(content: WorkSessionOutputContent): ReactNode {
+function safeMarkdownContent(content: Pick<WorkSessionOutputContent, 'content'>): ReactNode {
   const plan = planSafeMarkdownRender(content.content)
   if (plan.mode === 'plain') {
     return h('article', {
@@ -1399,6 +1415,52 @@ function safeMarkdownContent(content: WorkSessionOutputContent): ReactNode {
   }))
 }
 
+export function sessionOutputVersionSummary(content: string): string {
+  let offset = 0
+  while (offset <= content.length) {
+    const newline = content.indexOf('\n', offset)
+    const end = newline < 0 ? content.length : newline
+    let start = offset
+    while (start < end) {
+      const character = content[start]
+      if (character !== ' ' && character !== '\t' && character !== '\r') break
+      start++
+    }
+    if (start < end) {
+      const sample = content.slice(start, Math.min(end, start + 256))
+        .replace(/^#{1,6}\s+/u, '')
+        .replace(/^[-*+]\s+/u, '')
+        .replace(/^\d+[.)]\s+/u, '')
+        .replace(/^>\s*/u, '')
+        .trim()
+      if (sample.length > 0) return sample.length > 100 ? `${sample.slice(0, 100)}…` : sample
+    }
+    if (newline < 0) break
+    offset = newline + 1
+  }
+  return '该版本没有可显示的文字摘要'
+}
+
+export function matchesSessionOutputVersionSelection(
+  selected: Pick<WorkSessionOutputVersion, 'fileId' | 'versionId'> | null,
+  content: Pick<WorkSessionOutputVersionContent, 'fileId' | 'versionId'>,
+): boolean {
+  return selected?.fileId === content.fileId && selected.versionId === content.versionId
+}
+
+function sessionOutputVersionTime(createdAt: string): string {
+  const instant = new Date(createdAt)
+  if (!Number.isFinite(instant.valueOf())) return createdAt
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(instant).replaceAll('/', '-')
+}
+
 function NativeSessionOutputPreview({
   closePreview,
   preview,
@@ -1408,9 +1470,12 @@ function NativeSessionOutputPreview({
   const closeButton = useRef<HTMLButtonElement>(null)
   const narrow = useSyncExternalStore(subscribeNarrowPreview, narrowPreviewSnapshot, () => false)
   const selection = useSyncExternalStore(preview.subscribe, preview.getSnapshot, preview.getSnapshot)
-  const [tab, setTab] = useState<'content' | 'sources'>('content')
+  const [tab, setTab] = useState<'content' | 'sources' | 'versions'>('content')
   const [retry, setRetry] = useState(0)
   const request = useMemo(() => new LatestPreviewRequest(), [])
+  const versionRequest = useMemo(() => new LatestPreviewRequest(), [])
+  const revisionRequest = useMemo(() => new LatestPreviewRequest(), [])
+  const revisionAbort = useRef<AbortController | null>(null)
   const [state, setState] = useState<
     | { readonly phase: 'idle' }
     | { readonly phase: 'loading' }
@@ -1421,6 +1486,16 @@ function NativeSessionOutputPreview({
     | { readonly phase: 'idle' | 'loading' | 'error' }
     | { readonly phase: 'ready'; readonly sources: readonly WorkSessionOutputSource[] }
   >({ phase: 'idle' })
+  const [versionState, setVersionState] = useState<
+    | { readonly phase: 'idle' | 'loading' | 'error' }
+    | { readonly phase: 'ready'; readonly versions: readonly WorkSessionOutputVersion[] }
+  >({ phase: 'idle' })
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null)
+  const [versionContentState, setVersionContentState] = useState<
+    | { readonly phase: 'idle' | 'loading' | 'error' }
+    | { readonly phase: 'ready'; readonly content: WorkSessionOutputVersionContent }
+  >({ phase: 'idle' })
+  const [versionRetry, setVersionRetry] = useState(0)
   const [revisionPhase, setRevisionPhase] = useState<'idle' | 'preparing' | 'error'>('idle')
   const [saveState, setSaveState] = useState<
     | { readonly phase: 'idle' | 'saving' | 'error' }
@@ -1429,11 +1504,26 @@ function NativeSessionOutputPreview({
   const [saveOpenError, setSaveOpenError] = useState(false)
 
   useEffect(() => {
+    revisionAbort.current?.abort()
+    revisionAbort.current = null
+    revisionRequest.invalidate()
     setTab('content')
     setRevisionPhase('idle')
     setSaveState({ phase: 'idle' })
     setSaveOpenError(false)
-  }, [selection?.path, selection?.sessionId, selection?.throughSeq, selection?.turn])
+    setVersionState({ phase: 'idle' })
+    setSelectedVersionId(null)
+    setVersionContentState({ phase: 'idle' })
+  }, [revisionRequest, selection?.path, selection?.sessionId, selection?.throughSeq, selection?.turn])
+
+  useEffect(() => () => revisionAbort.current?.abort(), [])
+
+  useEffect(() => {
+    revisionAbort.current?.abort()
+    revisionAbort.current = null
+    revisionRequest.invalidate()
+    setRevisionPhase('idle')
+  }, [revisionRequest, selectedVersionId, tab])
 
   useEffect(() => {
     if (!selection || !narrow) return
@@ -1484,12 +1574,135 @@ function NativeSessionOutputPreview({
   }, [selection, sessionId, works])
 
   useEffect(() => {
+    if (!selection || selection.sessionId !== sessionId) {
+      setVersionState({ phase: 'idle' })
+      setSelectedVersionId(null)
+      return
+    }
+    if (tab !== 'versions') return
+    const abort = new AbortController()
+    setVersionState({ phase: 'loading' })
+    void works.listSessionOutputVersions({
+      sessionId: selection.sessionId,
+      path: selection.path,
+    }, abort.signal).then(versions => {
+      if (abort.signal.aborted) return
+      setVersionState({ phase: 'ready', versions })
+      setSelectedVersionId(current => versions.some(version => version.versionId === current)
+        ? current
+        : versions.at(-1)?.versionId ?? null)
+    }).catch(() => {
+      if (!abort.signal.aborted) setVersionState({ phase: 'error' })
+    })
+    return () => abort.abort()
+  }, [selection, sessionId, tab, versionRetry, works])
+
+  useEffect(() => {
+    if (tab !== 'versions' || versionState.phase !== 'ready' || !selectedVersionId) {
+      setVersionContentState({ phase: 'idle' })
+      versionRequest.invalidate()
+      return
+    }
+    const selected = versionState.versions.find(version => version.versionId === selectedVersionId)
+    if (!selected) {
+      setVersionContentState({ phase: 'idle' })
+      return
+    }
+    const abort = new AbortController()
+    setVersionContentState({ phase: 'loading' })
+    void versionRequest.run(
+      () => works.readSessionOutputVersion({
+        fileId: selected.fileId,
+        versionId: selected.versionId,
+      }, abort.signal),
+      content => setVersionContentState({ phase: 'ready', content }),
+      () => setVersionContentState({ phase: 'error' }),
+    )
+    return () => {
+      versionRequest.invalidate()
+      abort.abort()
+    }
+  }, [selectedVersionId, tab, versionRequest, versionRetry, versionState, works])
+
+  useEffect(() => {
     if (selection && selection.sessionId !== sessionId) closePreview()
   }, [closePreview, selection, sessionId])
 
   if (!selection) return null
   const unsupported = selection.mediaType !== 'text/markdown'
   const previewSources = sourceState.phase === 'ready' ? sourceState.sources : Object.freeze([])
+  const versions = versionState.phase === 'ready' ? versionState.versions : Object.freeze([])
+  const selectedVersion = versions.find(version => version.versionId === selectedVersionId) ?? null
+  const newestVersionId = versions.at(-1)?.versionId ?? null
+  const revisionBase = tab === 'versions' ? selectedVersion : null
+  const selectedVersionContent = versionContentState.phase === 'ready'
+    && matchesSessionOutputVersionSelection(selectedVersion, versionContentState.content)
+    ? versionContentState.content
+    : null
+  const changeTab = (next: 'content' | 'sources' | 'versions'): void => {
+    revisionAbort.current?.abort()
+    revisionAbort.current = null
+    revisionRequest.invalidate()
+    setRevisionPhase('idle')
+    setTab(next)
+  }
+  const changeVersion = (versionId: string): void => {
+    revisionAbort.current?.abort()
+    revisionAbort.current = null
+    revisionRequest.invalidate()
+    setRevisionPhase('idle')
+    setSelectedVersionId(versionId)
+  }
+  const versionPanel = versionState.phase === 'loading' || versionState.phase === 'idle'
+    ? h('div', { className: 'dsh-work-output-preview-status', role: 'status', 'aria-live': 'polite' }, '正在读取版本记录…')
+    : versionState.phase === 'error'
+      ? h('div', { className: 'dsh-work-output-preview-empty', role: 'alert' },
+        h('strong', null, '暂时无法读取版本记录'),
+        h('p', null, '版本记录没有改变，可以重新读取。'),
+        h('button', { type: 'button', onClick: () => setVersionRetry(value => value + 1) }, '重试'))
+      : versions.length < 1
+        ? h('div', { className: 'dsh-work-output-preview-empty' },
+          h('strong', null, '还没有可查看的历史版本'),
+          h('p', null, '文件在成功生成后会留下不可变版本。'))
+        : h('div', { className: 'dsh-work-output-preview-versions' },
+          h('div', { className: 'dsh-work-output-preview-version-list', 'aria-label': '历史版本' },
+            ...[...versions].reverse().map(version => h('button', {
+              type: 'button',
+              key: version.versionId,
+              className: version.versionId === selectedVersionId ? 'is-selected' : undefined,
+              'aria-pressed': version.versionId === selectedVersionId,
+              'data-work-output-version': `v${String(version.ordinal)}`,
+              onClick: () => changeVersion(version.versionId),
+            },
+            h('span', { className: 'dsh-work-output-preview-version-title' },
+              h('strong', null, `v${String(version.ordinal)}`),
+              version.versionId === newestVersionId
+                ? h('small', { className: 'is-current' }, '当前')
+                : null),
+            h('span', { className: 'dsh-work-output-preview-version-meta', title: version.createdAt },
+              version.turn === null ? '既有成果基线' : `第 ${String(version.turn)} 回合`,
+              ' · ', sessionOutputVersionTime(version.createdAt),
+              ' · ', outputSize(version.bytes))))),
+          h('div', {
+            className: 'dsh-work-output-preview-version-detail',
+            'data-work-output-version-detail': selectedVersion ? `v${String(selectedVersion.ordinal)}` : undefined,
+          }, versionContentState.phase === 'error'
+              ? h('div', { className: 'dsh-work-output-preview-empty', role: 'alert' },
+                h('strong', null, '暂时无法读取所选版本'),
+                h('p', null, '版本记录没有改变，可以重新读取。'),
+                h('button', { type: 'button', onClick: () => setVersionRetry(value => value + 1) }, '重试'))
+              : !selectedVersionContent
+                ? h('div', { className: 'dsh-work-output-preview-status', role: 'status', 'aria-live': 'polite' }, '正在读取所选版本…')
+                : h('div', null,
+                h('div', { className: 'dsh-work-output-preview-version-summary' },
+                  h('span', null, '内容摘要'),
+                  h('strong', null, sessionOutputVersionSummary(selectedVersionContent.content)),
+                  h('small', null,
+                    `SHA-256 ${selectedVersionContent.contentDigest.slice(0, 12)} · `,
+                    selectedVersionContent.sources.length > 0
+                      ? `${String(selectedVersionContent.sources.length)} 个来源`
+                      : '无明确来源')),
+                safeMarkdownContent(selectedVersionContent))))
   return h('section', {
     className: 'dsh-work-output-preview',
     'data-work-output-preview': selection.path,
@@ -1537,19 +1750,31 @@ function NativeSessionOutputPreview({
       type: 'button',
       role: 'tab',
       'aria-selected': tab === 'content',
-      onClick: () => setTab('content'),
+      onClick: () => changeTab('content'),
     }, '内容'),
     h('button', {
       type: 'button',
       role: 'tab',
       'aria-selected': tab === 'sources',
-      onClick: () => setTab('sources'),
-    }, `来源${previewSources.length > 0 ? ` ${String(previewSources.length)}` : ''}`)),
+      onClick: () => changeTab('sources'),
+    }, `来源${previewSources.length > 0 ? ` ${String(previewSources.length)}` : ''}`),
+    h('button', {
+      type: 'button',
+      role: 'tab',
+      'aria-selected': tab === 'versions',
+      onClick: () => changeTab('versions'),
+    }, `版本${versions.length > 0 ? ` ${String(versions.length)}` : ''}`)),
   h('div', { className: 'dsh-work-output-preview-meta' },
-    h('span', null, `第 ${String(selection.turn)} 回合生成`),
-    h('span', null, outputSize(selection.bytes))),
+    h('span', null, tab === 'versions' && selectedVersion
+      ? selectedVersion.turn === null ? '既有成果基线' : `第 ${String(selectedVersion.turn)} 回合生成`
+      : `第 ${String(selection.turn)} 回合生成`),
+    h('span', null, outputSize(tab === 'versions' && selectedVersion
+      ? selectedVersion.bytes
+      : selection.bytes))),
   h('div', { className: 'dsh-work-output-preview-body' },
-    tab === 'sources'
+    tab === 'versions'
+      ? versionPanel
+      : tab === 'sources'
       ? sourceState.phase === 'loading' || sourceState.phase === 'idle'
         ? h('div', { className: 'dsh-work-output-preview-status', role: 'status', 'aria-live': 'polite' }, '正在核对资料来源…')
         : sourceState.phase === 'error'
@@ -1614,7 +1839,9 @@ function NativeSessionOutputPreview({
           ? '无法保护当前文件，请重新读取后再试。'
           : unsupported
             ? '保存会复制当前文件到受管位置'
-            : '保存和修改互不影响'),
+            : tab === 'versions'
+              ? '查看历史版本不会改变当前文件'
+              : '保存和修改互不影响'),
     h('div', { className: 'dsh-work-output-preview-action-buttons' },
       saveState.phase === 'saved' ? h('button', {
         type: 'button',
@@ -1661,32 +1888,59 @@ function NativeSessionOutputPreview({
         ? '正在保存…'
         : saveState.phase === 'error'
           ? '重试保存'
-          : '保存副本'),
+          : tab === 'versions'
+            ? '保存当前版副本'
+            : '保存副本'),
       !unsupported ? h('button', {
         type: 'button',
-        disabled: state.phase !== 'ready' || revisionPhase === 'preparing',
+        disabled: revisionPhase === 'preparing'
+          || (tab === 'versions'
+            ? !revisionBase || !selectedVersionContent
+            : state.phase !== 'ready'),
         onClick: () => {
           const target = selection
+          const base = revisionBase
+          revisionAbort.current?.abort()
+          const abort = new AbortController()
+          revisionAbort.current = abort
           setRevisionPhase('preparing')
-          void works.prepareSessionOutputRevision({
-            sessionId: target.sessionId,
-            turn: target.turn,
-            throughSeq: target.throughSeq,
-            path: target.path,
-          }).then(revision => {
-            if (!matchesSessionOutputSelection(preview.getSnapshot(), target)
-              || sessionId !== target.sessionId) return
-            setRevisionPhase('idle')
-            window.dispatchEvent(new CustomEvent<SessionResourceReferenceDetail>(
-              'dsh-work:reference-session-resource',
-              { detail: Object.freeze({ sessionId: revision.sessionId, path: revision.path }) },
-            ))
-            if (narrow) closePreview()
-          }).catch(() => {
-            if (matchesSessionOutputSelection(preview.getSnapshot(), target)) setRevisionPhase('error')
-          })
+          void revisionRequest.run(
+            () => works.prepareSessionOutputRevision({
+              sessionId: target.sessionId,
+              turn: target.turn,
+              throughSeq: target.throughSeq,
+              path: target.path,
+              ...(base ? { baseVersion: { fileId: base.fileId, versionId: base.versionId } } : {}),
+            }, abort.signal),
+            revision => {
+              revisionAbort.current = null
+              if (!matchesSessionOutputSelection(preview.getSnapshot(), target)
+                || sessionId !== target.sessionId) return
+              setRevisionPhase('idle')
+              window.dispatchEvent(new CustomEvent<SessionResourceReferenceDetail>(
+                'dsh-work:reference-session-resource',
+                { detail: Object.freeze({
+                  sessionId: revision.sessionId,
+                  path: revision.path,
+                  ...(revision.baseVersion ? { base: Object.freeze({
+                    path: revision.baseVersion.path,
+                    ordinal: revision.baseVersion.ordinal,
+                  }) } : {}),
+                }) },
+              ))
+              if (narrow) closePreview()
+            },
+            () => {
+              revisionAbort.current = null
+              if (matchesSessionOutputSelection(preview.getSnapshot(), target)) setRevisionPhase('error')
+            },
+          )
         },
-      }, revisionPhase === 'preparing' ? '正在准备…' : '要求修改') : null)))
+      }, revisionPhase === 'preparing'
+        ? '正在准备…'
+        : revisionBase
+          ? `基于 v${String(revisionBase.ordinal)} 修改`
+          : '要求修改') : null)))
 }
 
 const styles = `
@@ -1777,6 +2031,20 @@ body[data-ds-dark-theme] {
 .dsh-work-output-preview-actions button { flex: 0 0 auto; padding: 8px 14px; border: 1px solid var(--work-accent); border-radius: 8px; color: white; background: var(--work-accent); cursor: pointer; font: 600 13px/18px var(--work-font); }
 .dsh-work-output-preview-actions button.is-secondary { border-color: var(--work-border-strong); color: var(--work-text); background: var(--work-surface); }
 .dsh-work-output-preview-actions button:disabled { cursor: default; opacity: .55; }
+.dsh-work-output-preview-versions { display: grid; grid-template-columns: 160px minmax(0, 1fr); min-height: 100%; border: 1px solid var(--work-border); border-radius: 10px; overflow: hidden; }
+.dsh-work-output-preview-version-list { display: flex; flex-direction: column; gap: 4px; padding: 8px; border-right: 1px solid var(--work-border); background: var(--work-surface-subtle); }
+.dsh-work-output-preview-version-list > button { display: grid; gap: 4px; padding: 10px; border: 1px solid transparent; border-radius: 8px; color: var(--work-text); background: transparent; text-align: left; cursor: pointer; font-family: var(--work-font); }
+.dsh-work-output-preview-version-list > button:hover { background: var(--work-surface); }
+.dsh-work-output-preview-version-list > button.is-selected { border-color: var(--work-accent); background: var(--work-surface); box-shadow: inset 0 0 0 1px var(--work-accent); }
+.dsh-work-output-preview-version-title { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.dsh-work-output-preview-version-title strong { font-size: 13px; }
+.dsh-work-output-preview-version-title small.is-current { padding: 2px 5px; border-radius: 999px; color: var(--work-accent); background: var(--work-accent-subtle); font-size: 9px; font-weight: 700; }
+.dsh-work-output-preview-version-meta { color: var(--work-faint); font-size: 10px; line-height: 15px; }
+.dsh-work-output-preview-version-detail { min-width: 0; padding: 18px; }
+.dsh-work-output-preview-version-summary { display: grid; gap: 5px; margin-bottom: 18px; padding: 12px 14px; border: 1px solid var(--work-border); border-radius: 8px; background: var(--work-surface-subtle); }
+.dsh-work-output-preview-version-summary span { color: var(--work-faint); font-size: 10px; font-weight: 700; }
+.dsh-work-output-preview-version-summary strong { font-size: 12px; line-height: 18px; }
+.dsh-work-output-preview-version-summary small { color: var(--work-faint); font-size: 10px; }
 .dsh-work-output-preview-sources { display: grid; gap: 12px; }
 .dsh-work-output-preview-source { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: 10px 12px; padding: 14px; border: 1px solid var(--work-border); border-radius: 10px; background: var(--work-surface-subtle); }
 .dsh-work-output-preview-source-main { display: flex; min-width: 0; align-items: center; gap: 10px; }
@@ -1826,6 +2094,9 @@ body[data-ds-dark-theme] {
   .dsh-work-output-preview-actions > span { white-space: normal; }
   .dsh-work-output-preview-action-buttons { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dsh-work-output-preview-actions button { min-width: 0; padding-inline: 8px; }
+  .dsh-work-output-preview-versions { grid-template-columns: 1fr; }
+  .dsh-work-output-preview-version-list { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--work-border); }
+  .dsh-work-output-preview-version-list > button { min-width: 132px; }
   .dsh-work-output-preview-source { grid-template-columns: 1fr; }
   .dsh-work-output-preview-source > button { justify-self: start; }
 }

@@ -163,6 +163,25 @@ const readSessionOutputSchema: z.ZodType<WorkReadSessionOutputSpec> = z.object({
   throughSeq: z.number().int().nonnegative(),
   path: z.string().min(1).max(4096),
 }).strict()
+const sessionOutputVersionIdentitySchema = z.object({
+  fileId: z.string().regex(/^[a-f0-9]{32}$/u),
+  versionId: z.string().regex(/^[a-f0-9]{32}$/u),
+}).strict()
+const prepareSessionOutputRevisionSchema: z.ZodType<WorkPrepareSessionOutputRevisionSpec> = z.object({
+  sessionId: z.string().min(1).max(256),
+  turn: z.number().int().nonnegative(),
+  throughSeq: z.number().int().nonnegative(),
+  path: z.string().min(1).max(4096),
+  baseVersion: sessionOutputVersionIdentitySchema.optional(),
+}).strict()
+const sessionOutputRevisionBaseVersionSchema = z.object({
+  fileId: z.string().regex(/^[a-f0-9]{32}$/u),
+  versionId: z.string().regex(/^[a-f0-9]{32}$/u),
+  ordinal: z.number().int().positive().max(512),
+  path: z.string().min(1).max(4096),
+  reference: z.string().min(2).max(4099),
+  contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+}).strict()
 const sessionOutputRevisionSchema: z.ZodType<WorkSessionOutputRevision> = z.object({
   sessionId: z.string().min(1).max(256),
   sourceTurn: z.number().int().nonnegative(),
@@ -170,6 +189,7 @@ const sessionOutputRevisionSchema: z.ZodType<WorkSessionOutputRevision> = z.obje
   path: z.string().min(1).max(4096),
   reference: z.string().min(2).max(4099),
   contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+  baseVersion: sessionOutputRevisionBaseVersionSchema.optional(),
 }).strict()
 const sessionOutputRevisionFailureSchema: z.ZodType<WorkSessionOutputRevisionFailure> = z.object({
   sessionId: z.string().min(1).max(256),
@@ -216,8 +236,8 @@ const listSessionOutputVersionsSchema: z.ZodType<WorkListSessionOutputVersionsSp
   path: z.string().min(1).max(4096),
 }).strict()
 const readSessionOutputVersionSchema: z.ZodType<WorkReadSessionOutputVersionSpec> = z.object({
-  fileId: z.string().regex(/^[a-f0-9]{32}$/u),
-  versionId: z.string().regex(/^[a-f0-9]{32}$/u),
+  fileId: sessionOutputVersionIdentitySchema.shape.fileId,
+  versionId: sessionOutputVersionIdentitySchema.shape.versionId,
 }).strict()
 const sessionOutputVersionObjectSchema = z.object({
   fileId: z.string().regex(/^[a-f0-9]{32}$/u),
@@ -415,7 +435,7 @@ export const TYPERT_REMOTE: TypertRemoteContribution = Object.freeze({
         name: 'spec',
         wire: 'spec',
         source: 'json' as const,
-        codec: strict('@dsh-work/work-api#WorkPrepareSessionOutputRevisionSpec', readSessionOutputSchema),
+        codec: strict('@dsh-work/work-api#WorkPrepareSessionOutputRevisionSpec', prepareSessionOutputRevisionSchema),
       })]),
       cancellation: Object.freeze({ parameter: 'signal' as const }),
       result: strict('@dsh-work/work-api#WorkSessionOutputRevision', sessionOutputRevisionSchema),

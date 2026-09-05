@@ -317,7 +317,7 @@
       "files": "packages/work-api/surface.ts；packages/work-api/client-model.ts；packages/work-domain/index.ts",
       "verification": "版本读取/修订输入集成、历史选择 E2E/截图",
       "limits": "展示的摘要需可追溯，不伪造历史时间或作者。",
-      "status": "pending"
+      "status": "verified"
     },
     {
       "id": "T17",

@@ -245,6 +245,44 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
     sessionId: 'session-remote', turn: 2, throughSeq: 12, path: 'report.md',
   }), { sessionId: 'session-remote', turn: 2, throughSeq: 12, path: 'report.md' })
 
+  const prepareRevision = TYPERT_REMOTE.descriptors.find(
+    descriptor => descriptor.method === 'prepareSessionOutputRevision',
+  )
+  assert.ok(prepareRevision)
+  const prepareRevisionCodec = prepareRevision.parameters[0]?.codec
+  const prepareRevisionResultCodec = prepareRevision.result
+  assert.equal(prepareRevisionCodec?.mode, 'strict')
+  assert.equal(prepareRevisionResultCodec.mode, 'strict')
+  if (!prepareRevisionCodec || prepareRevisionCodec.mode !== 'strict'
+    || prepareRevisionResultCodec.mode !== 'strict') {
+    throw new Error('Session output revision must publish strict codecs')
+  }
+  const versionSelection = { fileId: 'a'.repeat(32), versionId: 'b'.repeat(32) }
+  assert.deepEqual(prepareRevisionCodec.schema.parse({
+    sessionId: 'session-remote', turn: 2, throughSeq: 12, path: 'report.md',
+    baseVersion: versionSelection,
+  }), {
+    sessionId: 'session-remote', turn: 2, throughSeq: 12, path: 'report.md',
+    baseVersion: versionSelection,
+  })
+  assert.throws(() => prepareRevisionCodec.schema.parse({
+    sessionId: 'session-remote', turn: 2, throughSeq: 12, path: 'report.md',
+    baseVersion: { ...versionSelection, ordinal: 1 },
+  }))
+  const revisionValue = {
+    sessionId: 'session-remote', sourceTurn: 2, name: 'report.md', path: 'report.md',
+    reference: '@report.md', contentDigest: 'c'.repeat(64),
+    baseVersion: {
+      ...versionSelection, ordinal: 1, path: 'attachment-v1.md', reference: '@attachment-v1.md',
+      contentDigest: 'd'.repeat(64),
+    },
+  }
+  assert.deepEqual(prepareRevisionResultCodec.schema.parse(revisionValue), revisionValue)
+  assert.throws(() => prepareRevisionResultCodec.schema.parse({
+    ...revisionValue,
+    baseVersion: { ...revisionValue.baseVersion, inventedAuthor: 'someone' },
+  }))
+
   const saveOutput = TYPERT_REMOTE.descriptors.find(
     descriptor => descriptor.method === 'saveSessionOutput',
   )

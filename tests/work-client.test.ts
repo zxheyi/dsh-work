@@ -466,6 +466,7 @@ test('loads auditable sources for the exact Session Turn without mutating Work s
 
 test('prepares and inspects a Session revision without changing the Work projection', async () => {
   const received: unknown[] = []
+  const baseVersion = { fileId: 'a'.repeat(32), versionId: 'b'.repeat(32) }
   const model = new ClientWorkModel(successfulRemote({
     async prepareSessionOutputRevision(spec) {
       received.push(['prepare', spec])
@@ -478,6 +479,13 @@ test('prepares and inspects a Session revision without changing the Work project
           path: spec.path,
           reference: '@report.md',
           contentDigest: 'f'.repeat(64),
+          baseVersion: {
+            ...baseVersion,
+            ordinal: 1,
+            path: 'attachment-v1.md',
+            reference: '@attachment-v1.md',
+            contentDigest: 'e'.repeat(64),
+          },
         },
       }
     },
@@ -488,9 +496,13 @@ test('prepares and inspects a Session revision without changing the Work project
   }))
   model.replaceBaseline({ items: [view(1)] })
   const works = new WorksController(new Context(), model)
-  const output = { sessionId: 'session-revision', turn: 4, throughSeq: 23, path: 'report.md' }
+  const output = {
+    sessionId: 'session-revision', turn: 4, throughSeq: 23, path: 'report.md', baseVersion,
+  }
 
-  assert.equal((await works.prepareSessionOutputRevision(output)).reference, '@report.md')
+  const revision = await works.prepareSessionOutputRevision(output)
+  assert.equal(revision.reference, '@report.md')
+  assert.equal(revision.baseVersion?.versionId, baseVersion.versionId)
   assert.equal(await works.inspectSessionRevision({
     sessionId: output.sessionId, turn: 5, throughSeq: 31,
   }), null)

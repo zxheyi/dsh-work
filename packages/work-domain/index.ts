@@ -157,7 +157,18 @@ export interface SessionOutputContent extends SessionOutputFile {
   readonly sources: readonly SessionOutputSource[]
 }
 
-export interface PrepareSessionOutputRevisionSpec extends ReadSessionOutputSpec {}
+export interface PrepareSessionOutputRevisionSpec extends ReadSessionOutputSpec {
+  readonly baseVersion?: ReadSessionOutputVersionSpec | undefined
+}
+
+export interface SessionOutputRevisionBaseVersion {
+  readonly fileId: string
+  readonly versionId: string
+  readonly ordinal: number
+  readonly path: string
+  readonly reference: string
+  readonly contentDigest: string
+}
 
 export interface SessionOutputRevision {
   readonly sessionId: string
@@ -166,6 +177,7 @@ export interface SessionOutputRevision {
   readonly path: string
   readonly reference: string
   readonly contentDigest: string
+  readonly baseVersion?: SessionOutputRevisionBaseVersion | undefined
 }
 
 export interface SessionOutputRevisionFailure {
@@ -2771,13 +2783,17 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
   }
   const revisionKey = (sessionId: string, normalizedPath: string): string => `${sessionId}\0${normalizedPath}`
   const revisionTurnKey = (sessionId: string, turn: number): string => `${sessionId}\0${String(turn)}`
-  const asRevision = (value: RevisionProtection): SessionOutputRevision => Object.freeze({
+  const asRevision = (
+    value: RevisionProtection,
+    baseVersion?: SessionOutputRevisionBaseVersion,
+  ): SessionOutputRevision => Object.freeze({
     sessionId: value.sessionId,
     sourceTurn: value.sourceTurn,
     name: value.name,
     path: value.path,
     reference: /\s/u.test(value.path) ? `@"${value.path}"` : `@${value.path}`,
     contentDigest: value.contentDigest,
+    ...(baseVersion ? { baseVersion } : {}),
   })
   const revisionFailure = (
     value: RevisionProtection,
@@ -3352,6 +3368,11 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
     },
 
     async prepareSessionOutputRevision(spec, signal) {
+      if (spec.baseVersion
+        && (!/^[a-f0-9]{32}$/u.test(spec.baseVersion.fileId)
+          || !/^[a-f0-9]{32}$/u.test(spec.baseVersion.versionId))) {
+        throw new WorkError('work/session-output-invalid', 'The selected version identity is invalid.')
+      }
       if (!options.harness.inspectSession) {
         throw new WorkError(
           'work/session-output-invalid',
@@ -3382,14 +3403,86 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         }
         const key = revisionKey(spec.sessionId, normalizedPath)
         const existing = revisionProtections.get(key)
-        if (existing) return asRevision(existing)
         if ([...revisionProtections.values()].some(installed => installed.sessionId === spec.sessionId)) {
-          throw new WorkError(
-            'work/session-output-invalid',
-            'Finish or retry the current file revision before modifying another file.',
-          )
+          if (!existing) {
+            throw new WorkError(
+              'work/session-output-invalid',
+              'Finish or retry the current file revision before modifying another file.',
+            )
+          }
         }
-        const content = await readValidatedSessionOutput(inspected, spec, signal, options.sessionOutputInternals)
+        const content = existing
+          ? null
+          : await readValidatedSessionOutput(inspected, spec, signal, options.sessionOutputInternals)
+        let baseVersion: SessionOutputRevisionBaseVersion | undefined
+        if (spec.baseVersion) {
+          if (!versionRoot) {
+            throw new WorkError('work/session-output-invalid', 'Session output version history is not available.')
+          }
+          let captured: Awaited<ReturnType<typeof readSessionOutputVersionRecord>>
+          try {
+            captured = await withVersionLock(async () => {
+              const journal = await openVersionJournal(versionRoot)
+              await recoverVersionIntentsForFile(
+                journal, spec.baseVersion!.fileId, signal, options.sessionOutputVersionInternals,
+              )
+              return readSessionOutputVersionRecord(versionRoot, spec.baseVersion!)
+            })
+          } catch (cause) {
+            if (signal?.aborted) throw cause
+            throw new WorkError(
+              'work/session-output-invalid',
+              'The selected Session output version is not readable for revision.',
+              { cause },
+            )
+          }
+          const versionPath = normalizedWorkspacePath(workspacePath, inspected.cwd, captured.version.path)
+          if (captured.version.sessionId !== spec.sessionId || versionPath !== normalizedPath) {
+            throw new WorkError(
+              'work/session-output-invalid',
+              'The selected version does not belong to this Session output.',
+            )
+          }
+          const requestedExtension = path.extname(captured.version.name).toLowerCase()
+          const extension = requestedExtension === '.markdown'
+            ? '.md'
+            : SUPPORTED_SESSION_RESOURCE_EXTENSIONS.has(requestedExtension)
+              ? requestedExtension
+              : '.txt'
+          const snapshotName = [
+            `version-${captured.version.fileId.slice(0, 8)}`,
+            `v${String(captured.version.ordinal)}`,
+            `${captured.version.contentDigest.slice(0, 12)}${extension}`,
+          ].join('-')
+          let resource: SessionFileResource
+          try {
+            resource = await persistSessionResource(inspected.cwd, {
+              sessionId: spec.sessionId,
+              name: snapshotName,
+              mediaType: captured.version.mediaType ?? undefined,
+              dataBase64: captured.data.toString('base64'),
+            }, signal, options.sessionResourceInternals)
+          } catch (cause) {
+            if (signal?.aborted) throw cause
+            throw new WorkError(
+              'work/session-output-invalid',
+              'The selected version could not be prepared inside the Session Workspace.',
+              { cause },
+            )
+          }
+          baseVersion = Object.freeze({
+            fileId: captured.version.fileId,
+            versionId: captured.version.versionId,
+            ordinal: captured.version.ordinal,
+            path: resource.path,
+            reference: /\s/u.test(resource.path) ? `@"${resource.path}"` : `@${resource.path}`,
+            contentDigest: captured.version.contentDigest,
+          })
+        }
+        if (existing) return asRevision(existing, baseVersion)
+        if (!content) {
+          throw new WorkError('work/session-output-invalid', 'The current Session output is not readable for revision.')
+        }
         const preparedAfterTurn = inspected.events.reduce<number>((latest, raw) => {
           const event = recordData(raw)
           const data = recordData(event?.data)
@@ -3419,7 +3512,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
           lastFailureTurn: null,
         }
         revisionProtections.set(key, protection)
-        return asRevision(protection)
+        return asRevision(protection, baseVersion)
       })
     },
 

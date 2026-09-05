@@ -3,9 +3,11 @@ import test from 'node:test'
 
 import {
   LatestPreviewRequest,
+  matchesSessionOutputVersionSelection,
   matchesSessionOutputSelection,
   parseSafeMarkdown,
   planSafeMarkdownRender,
+  sessionOutputVersionSummary,
 } from '../packages/work-api/surface.ts'
 import {
   matchesWorkRecoveryOutput,
@@ -105,6 +107,24 @@ test('falls back to one plain-text node for structurally dense Markdown', () => 
   assert.deepEqual(planSafeMarkdownRender(source), { mode: 'plain', content: source })
 })
 
+test('derives a bounded version summary only from the stored content', () => {
+  assert.equal(sessionOutputVersionSummary('\n# Verified title\nBody'), 'Verified title')
+  assert.equal(sessionOutputVersionSummary('> quoted source'), 'quoted source')
+  assert.equal(sessionOutputVersionSummary('   \n'), '该版本没有可显示的文字摘要')
+  assert.equal(sessionOutputVersionSummary(`# ${'a'.repeat(120)}`).length, 101)
+  assert.equal(sessionOutputVersionSummary(`${'\n'.repeat(50_000)}# Late title`), 'Late title')
+})
+
+test('renders historical content only when its full identity matches the selected version', () => {
+  const selected = { fileId: 'a'.repeat(32), versionId: 'b'.repeat(32) }
+  assert.equal(matchesSessionOutputVersionSelection(selected, selected), true)
+  assert.equal(matchesSessionOutputVersionSelection(selected, {
+    fileId: selected.fileId,
+    versionId: 'c'.repeat(32),
+  }), false)
+  assert.equal(matchesSessionOutputVersionSelection(null, selected), false)
+})
+
 test('commits only the latest preview read when an older request finishes last', async () => {
   const request = new LatestPreviewRequest()
   const commits: string[] = []
@@ -139,6 +159,23 @@ test('invalidating a preview request suppresses its late failure', async () => {
 
   request.invalidate()
   rejectRead(new Error('late failure'))
+  await pending
+
+  assert.deepEqual(commits, [])
+})
+
+test('switching versions invalidates a late revision success before it can update the composer', async () => {
+  const request = new LatestPreviewRequest()
+  const commits: string[] = []
+  let resolveRevision!: (value: string) => void
+  const pending = request.run(
+    () => new Promise<string>(resolve => { resolveRevision = resolve }),
+    value => commits.push(value),
+    () => commits.push('error'),
+  )
+
+  request.invalidate()
+  resolveRevision('v1-reference')
   await pending
 
   assert.deepEqual(commits, [])

@@ -575,6 +575,44 @@ async function run(): Promise<void> {
     assert.deepEqual(readOutputVersionBlob(revisedReportAVersions[0]!), Buffer.from(reportA, 'utf8'))
     assert.equal(readOutputVersionBlob(revisedReportAVersions[1]!).toString('utf8'), '# 甲报告（已修改）\n\n修改成功。\n')
 
+    step = 'historical-version-revision'; report('fail')
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] [role=tab]')).find(item => item.textContent?.trim().startsWith('版本')); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
+    await waitFor(
+      () => js<string[]>("Array.from(document.querySelectorAll('[data-work-output-version]')).map(item => item.getAttribute('data-work-output-version') ?? '')"),
+      values => values.length === 2 && values.includes('v1') && values.includes('v2'),
+      'Version tab did not show both immutable report versions',
+    )
+    assert.match(await js<string>("document.querySelector('[data-work-output-version=\"v2\"]')?.textContent ?? ''"), /当前/u)
+    assert.equal(await js<boolean>("(() => { const button = document.querySelector('[data-work-output-version=\"v1\"]'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
+    const historicalPanel = await waitFor(
+      () => js<string>("document.querySelector('[data-work-output-version-detail=\"v1\"]')?.textContent ?? ''"),
+      text => text.includes('甲报告') && text.includes('本周结论已经整理完成。')
+        && text.includes('内容摘要') && !text.includes('修改成功'),
+      'Selecting v1 did not render its exact historical content and derived summary',
+    )
+    assert.match(historicalPanel, /SHA-256 [a-f0-9]{12}/u)
+    assert.equal(fs.readFileSync(reportAPath, 'utf8'), '# 甲报告（已修改）\n\n修改成功。\n')
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] button')).find(item => item.textContent?.trim() === '基于 v1 修改'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true })()"), true)
+    const historicalDraft = await waitFor(
+      () => js<{ draft: string; focused: boolean }>("({ draft: document.querySelector('[data-composer-input]')?.textContent ?? '', focused: document.activeElement === document.querySelector('[data-composer-input]') })"),
+      value => value.draft.includes('基于 @attachment-') && value.draft.includes('（v1）修改 @report-a.md')
+        && value.focused,
+      'The v1 revision action did not bind the immutable snapshot in the native composer',
+    )
+    const historicalReference = /基于 @([^\s]+)（v1）修改 @report-a\.md/u.exec(historicalDraft.draft)?.[1]
+    assert.ok(historicalReference)
+    assert.equal(fs.readFileSync(path.join(baseline.workspacePath, historicalReference), 'utf8'), reportA)
+    assert.equal(fs.readFileSync(reportAPath, 'utf8'), '# 甲报告（已修改）\n\n修改成功。\n')
+    await clickSend()
+    await waitFor(
+      () => js<string>("document.querySelector('[data-composer-input]')?.textContent ?? ''"),
+      text => text === '',
+      'The explicit v1 revision request was not consumed by native Send',
+    )
+    assert.equal(readOutputVersionRecords().filter(record =>
+      record.sessionId === baseline.sessionA && record.path === 'report-a.md').length, 2)
+    fs.writeFileSync(path.join(output, 'versions.png'), (await window.webContents.capturePage()).toPNG())
+
     step = 'responsive-keyboard-file-review'; report('fail')
     window.show()
     window.focus()
@@ -655,7 +693,7 @@ async function run(): Promise<void> {
 
     await openByKeyboardAt(736)
     const tabOrder: string[] = []
-    for (let index = 0; index < 5; index++) {
+    for (let index = 0; index < 6; index++) {
       await pressKey('Tab')
       tabOrder.push(await js<string>(
         "document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.trim() || ''",
@@ -663,6 +701,7 @@ async function run(): Promise<void> {
     }
     assert.equal(tabOrder[0], '内容')
     assert.ok(tabOrder[1]?.startsWith('来源'))
+    assert.ok(tabOrder[2]?.startsWith('版本'))
     assert.ok(tabOrder.includes('保存副本'))
     assert.ok(tabOrder.includes('要求修改'))
     assert.equal(tabOrder.at(-1), '返回会话并关闭文件预览')
@@ -683,7 +722,7 @@ async function run(): Promise<void> {
     await openByKeyboardAt(390)
     assert.equal(await js<string>("document.querySelector('.dsh-work-output-preview-close-label')?.textContent ?? ''"), '返回会话')
     fs.writeFileSync(path.join(output, 'responsive-390.png'), (await window.webContents.capturePage()).toPNG())
-    for (let index = 0; index < 4; index++) await pressKey('Tab')
+    for (let index = 0; index < 5; index++) await pressKey('Tab')
     assert.equal(await js<string>("document.activeElement?.textContent?.trim() ?? ''"), '要求修改')
     await pressKey('Enter')
     await waitFor(
@@ -707,6 +746,7 @@ async function run(): Promise<void> {
       value => value,
       '390px source tab did not expose a reference action',
     )
+    await pressKey('Tab')
     await pressKey('Tab')
     assert.equal(await js<string>("document.activeElement?.textContent?.trim() ?? ''"), '在输入框引用')
     await pressKey('Enter')
