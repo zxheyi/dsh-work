@@ -83,4 +83,12 @@ T01-T22 cover the main product implementation. D01-D03 remain follow-on epics fr
 - Empty Profiles retain both native “选择工作区” and “添加工作区” entries. Resource verification also proves adding a file to the existing Work does not call Workspace creation again.
 - Verification: `pnpm typecheck`, `pnpm test` (131/131) and `pnpm check` passed; `DSH_WORK_NODE=<locked-node> pnpm test:workspace-sessions` passed empty, create and restore phases. The desktop evidence confirms one Workspace row, two distinct Session IDs, unchanged legacy bytes, no legacy homepage, and the bounded legacy deliverable preview.
 
+### T05 Session selection, search and archive
+
+- Kept selection, per-Session drafts, search, archive membership and navigation inside the locked alpha.2 Workspace/Session client. DSH Work adds no parallel selected-Session state and no Session persistence copy.
+- Added a disposable real-Host fixture with two Sessions, distinct prompts, responses and durable records in one Workspace. The desktop acceptance switches both directions, proves each conversation excludes the other's messages, and proves each unsent draft returns only with its owning Session.
+- Native title search locates and opens the intended Session. The minimal fixture Profile reports Host content search as unavailable and the UI exposes its built-in name-only fallback; this slice does not claim content search passed. A separate no-match step captures the explicit empty state and exits through the native clear action.
+- Archiving the selected Session is observed from the Host Workspace registry. Its persisted Session records still contain both original messages, and both pre-existing Workspace files retain their original byte digests while the archived row leaves the active tree.
+- Verification: `pnpm typecheck` passed; `DSH_WORK_NODE=<locked-node> pnpm test:session-navigation` passed selection isolation, per-Session drafts, title search/open, no-result exit and archive preservation. Screenshots are written to ignored `artifacts/session-navigation/`.
+
 Further entries record actual commands and results, not intended verification. Human usability, Windows and live-model evidence must remain explicitly pending until obtained.

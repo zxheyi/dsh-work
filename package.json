@@ -24,6 +24,8 @@
     "test:conversation": "node scripts/run-native-conversation-test.mjs",
     "pretest:workspace-sessions": "pnpm build",
     "test:workspace-sessions": "node scripts/run-workspace-sessions-test.mjs",
+    "pretest:session-navigation": "pnpm build",
+    "test:session-navigation": "node scripts/run-session-navigation-test.mjs",
     "predesktop": "pnpm build",
     "desktop": "electron dist/apps/desktop/main.js",
     "verify:local": "node scripts/verify-local.mjs artifacts/runtime/context.json --desktop"

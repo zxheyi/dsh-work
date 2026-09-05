@@ -100,7 +100,7 @@
       "files": "packages/work-api/surface.ts；packages/work-api/client-model.ts；公开导航服务",
       "verification": "选择态集成、搜索/归档/草稿 E2E、空态截图",
       "limits": "公共能力不足时回到 T02 的兼容性核验，不复制 Session 存储。",
-      "status": "pending"
+      "status": "verified"
     },
     {
       "id": "T06",
