@@ -58,6 +58,19 @@ function successfulRemote(overrides: Partial<WorkClientRemote> = {}): WorkClient
     async showDelivery(): Promise<RemoteResult<{ readonly shown: true }>> {
       return { ok: true, value: { shown: true } }
     },
+    async importSessionResource() {
+      return {
+        ok: true as const,
+        value: {
+          sessionId: 'session-client',
+          name: 'notes.md',
+          path: 'attachments/session/notes.md',
+          bytes: 8,
+          mediaType: 'text/markdown',
+          contentDigest: 'b'.repeat(64),
+        },
+      }
+    },
     async list(): Promise<RemoteResult<WorkListValue>> {
       return { ok: true, value: { items: [view(1)] } }
     },
@@ -217,4 +230,38 @@ test('shows a delivered Work through ctx.works', async () => {
   await works.showDelivery('work-client')
 
   assert.deepEqual(shown, ['work-client'])
+})
+
+test('imports a resource for the addressed Session without mutating the Work list', async () => {
+  const received: unknown[] = []
+  const model = new ClientWorkModel(successfulRemote({
+    async importSessionResource(spec) {
+      received.push(spec)
+      return {
+        ok: true,
+        value: {
+          sessionId: spec.sessionId,
+          name: spec.name,
+          path: 'attachment-session-digest-notes.md',
+          bytes: 5,
+          mediaType: spec.mediaType ?? null,
+          contentDigest: 'c'.repeat(64),
+        },
+      }
+    },
+  }))
+  model.replaceBaseline({ items: [view(1)] })
+  const works = new WorksController(new Context(), model)
+  const spec = {
+    sessionId: 'session-addressed',
+    name: 'notes.md',
+    mediaType: 'text/markdown',
+    dataBase64: 'aGVsbG8=',
+  }
+
+  const resource = await works.importSessionResource(spec)
+
+  assert.deepEqual(received, [spec])
+  assert.equal(resource.sessionId, 'session-addressed')
+  assert.deepEqual(model.getSnapshot().items, [view(1)])
 })

@@ -31,6 +31,26 @@ interface WorkSidebarProps extends WorkSurfaceInjected {
 const h = createElement
 const MAX_RESOURCE_FILES = 20
 const MAX_RESOURCE_FILE_BYTES = 25 * 1024 * 1024
+const SUPPORTED_SESSION_RESOURCE = /\.(?:csv|json|md|txt)$/iu
+
+interface SessionResourceEntryState {
+  readonly id: string
+  readonly file: File
+  readonly abort: AbortController
+  readonly status: 'copying' | 'ready' | 'failed'
+  readonly path: string | null
+  readonly mention: string | null
+  readonly error: string | null
+}
+
+interface NativeSessionResourceProps extends WorkSurfaceInjected {
+  readonly session: { readonly sessionId: string }
+  readonly input: { readonly draft: string; readonly phase: string }
+  readonly inputActions: { readonly setDraft: (text: string) => void }
+}
+
+const sessionResourceEntries = new Map<string, readonly SessionResourceEntryState[]>()
+const sessionResourceDrafts = new Map<string, string>()
 
 const shortcuts = Object.freeze([
   Object.freeze({
@@ -199,6 +219,274 @@ async function fileBase64(file: File): Promise<string> {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
   }
   return btoa(binary)
+}
+
+function resourceMention(resourcePath: string): string {
+  return /\s/u.test(resourcePath) ? `@"${resourcePath}"` : `@${resourcePath}`
+}
+
+function resourceErrorMessage(error: unknown): string {
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    const message = Reflect.get(error, 'message')
+    if (typeof message === 'string' && message.length > 0) return message
+  }
+  return '资料复制失败，请重试。'
+}
+
+function NativeSessionResourceEntry({
+  works,
+  session,
+  input,
+  inputActions,
+}: NativeSessionResourceProps): ReactNode {
+  const picker = useRef<HTMLInputElement>(null)
+  const activeSessionId = useRef(session.sessionId)
+  const previousDraft = useRef(input.draft)
+  const [entries, setEntries] = useState<readonly SessionResourceEntryState[]>(
+    () => sessionResourceEntries.get(session.sessionId) ?? Object.freeze([]),
+  )
+  const [dropActive, setDropActive] = useState(false)
+  activeSessionId.current = session.sessionId
+  sessionResourceDrafts.set(session.sessionId, input.draft)
+
+  useEffect(() => {
+    const prior = previousDraft.current
+    previousDraft.current = input.draft
+    if (prior.length < 1 || input.draft.length > 0) return
+    const retained = (sessionResourceEntries.get(session.sessionId) ?? [])
+      .filter(entry => entry.status !== 'ready' || !entry.mention || !prior.includes(entry.mention))
+    if (retained.length === entries.length) return
+    const next = Object.freeze(retained)
+    sessionResourceEntries.set(session.sessionId, next)
+    setEntries(next)
+  }, [entries.length, input.draft, session.sessionId])
+
+  useEffect(() => {
+    setEntries(sessionResourceEntries.get(session.sessionId) ?? Object.freeze([]))
+    setDropActive(false)
+  }, [session.sessionId])
+
+  const updateEntries = useCallback((
+    targetSessionId: string,
+    update: (current: readonly SessionResourceEntryState[]) => readonly SessionResourceEntryState[],
+  ): void => {
+    const next = Object.freeze(update(sessionResourceEntries.get(targetSessionId) ?? Object.freeze([])))
+    sessionResourceEntries.set(targetSessionId, next)
+    if (activeSessionId.current === targetSessionId) setEntries(next)
+  }, [])
+
+  const importFile = useCallback(async (file: File, reuseId?: string): Promise<void> => {
+    const targetSessionId = session.sessionId
+    const id = reuseId ?? globalThis.crypto.randomUUID()
+    const abort = new AbortController()
+    const failed = (message: string, replaceCurrent = false): void => updateEntries(targetSessionId, current => {
+      const installed = current.find(entry => entry.id === id)
+      if (!replaceCurrent && installed?.abort !== abort) return current
+      return [
+        ...current.filter(entry => entry.id !== id),
+        Object.freeze({ id, file, abort, status: 'failed' as const, path: null, mention: null, error: message }),
+      ]
+    })
+    if (!SUPPORTED_SESSION_RESOURCE.test(file.name)) {
+      failed('当前仅支持 Markdown、TXT、CSV 和 JSON 文件。', true)
+      return
+    }
+    if (file.size < 1 || file.size > MAX_RESOURCE_FILE_BYTES) {
+      failed('文件必须非空且不能超过 25 MiB。', true)
+      return
+    }
+    updateEntries(targetSessionId, current => [
+      ...current.filter(entry => entry.id !== id),
+      Object.freeze({ id, file, abort, status: 'copying' as const, path: null, mention: null, error: null }),
+    ])
+    try {
+      const resource = await works.importSessionResource({
+        sessionId: targetSessionId,
+        name: file.name,
+        ...(file.type ? { mediaType: file.type } : {}),
+        dataBase64: await fileBase64(file),
+      }, abort.signal)
+      const installed = sessionResourceEntries.get(targetSessionId)?.find(entry => entry.id === id)
+      if (installed?.abort !== abort || installed.status !== 'copying') return
+      const mention = resourceMention(resource.path)
+      updateEntries(targetSessionId, current => current.map(entry => entry.id === id
+        ? Object.freeze({ ...entry, status: 'ready' as const, path: resource.path, mention })
+        : entry))
+      const targetDraft = sessionResourceDrafts.get(targetSessionId) ?? ''
+      const separator = targetDraft.trim().length > 0 ? ' ' : ''
+      const nextDraft = `${targetDraft}${separator}${mention} `
+      sessionResourceDrafts.set(targetSessionId, nextDraft)
+      inputActions.setDraft(nextDraft)
+    } catch (error) {
+      failed(resourceErrorMessage(error))
+    }
+  }, [inputActions, session.sessionId, updateEntries, works])
+
+  const importFiles = useCallback((files: readonly File[]): void => {
+    for (const file of files.slice(0, 10)) void importFile(file)
+    const overflow = files[10]
+    if (!overflow) return
+    const abort = new AbortController()
+    updateEntries(session.sessionId, current => [
+      ...current,
+      Object.freeze({
+        id: globalThis.crypto.randomUUID(),
+        file: overflow,
+        abort,
+        status: 'failed' as const,
+        path: null,
+        mention: null,
+        error: '一次最多添加 10 个资料，其余文件未复制。',
+      }),
+    ])
+  }, [importFile, session.sessionId, updateEntries])
+
+  useEffect(() => {
+    const nonImageItems = (event: DragEvent): readonly DataTransferItem[] =>
+      Array.from(event.dataTransfer?.items ?? [])
+        .filter(item => item.kind === 'file' && !item.type.startsWith('image/'))
+    const claim = (event: DragEvent): boolean => {
+      if (nonImageItems(event).length < 1) return false
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation()
+      return true
+    }
+    const onDragEnter = (event: DragEvent): void => {
+      if (!claim(event)) return
+      setDropActive(true)
+    }
+    const onDragOver = (event: DragEvent): void => {
+      if (!claim(event)) return
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+      setDropActive(true)
+    }
+    const onDragLeave = (event: DragEvent): void => {
+      if (event.relatedTarget === null) setDropActive(false)
+    }
+    const onDrop = (event: DragEvent): void => {
+      const files = Array.from(event.dataTransfer?.files ?? []).filter(file => !file.type.startsWith('image/'))
+      if (files.length < 1) return
+      claim(event)
+      setDropActive(false)
+      importFiles(files)
+      const images = Array.from(event.dataTransfer?.files ?? []).filter(file => file.type.startsWith('image/'))
+      if (images.length > 0) {
+        const transfer = new DataTransfer()
+        for (const image of images) transfer.items.add(image)
+        document.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }))
+      }
+    }
+    window.addEventListener('dragenter', onDragEnter, true)
+    window.addEventListener('dragover', onDragOver, true)
+    window.addEventListener('dragleave', onDragLeave, true)
+    window.addEventListener('drop', onDrop, true)
+    return () => {
+      window.removeEventListener('dragenter', onDragEnter, true)
+      window.removeEventListener('dragover', onDragOver, true)
+      window.removeEventListener('dragleave', onDragLeave, true)
+      window.removeEventListener('drop', onDrop, true)
+    }
+  }, [importFiles])
+
+  useEffect(() => {
+    const copying = (): boolean => (sessionResourceEntries.get(session.sessionId) ?? [])
+      .some(entry => entry.status === 'copying')
+    const blockClick = (event: MouseEvent): void => {
+      if (!copying()) return
+      const target = event.target instanceof Element ? event.target.closest('button') : null
+      const card = target?.closest('[data-composer-card]')
+      const buttons = card?.querySelectorAll('button')
+      if (!target || !card || target !== buttons?.item((buttons?.length ?? 0) - 1) || !target.querySelector('svg path')) return
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation()
+    }
+    const blockKey = (event: globalThis.KeyboardEvent): void => {
+      if (!copying() || event.key !== 'Enter' || event.isComposing) return
+      const target = event.target instanceof Element ? event.target.closest('[data-composer-input]') : null
+      if (!target) return
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation()
+    }
+    const blockSubmit = (event: SubmitEvent): void => {
+      if (!copying()) return
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation()
+    }
+    window.addEventListener('click', blockClick, true)
+    window.addEventListener('keydown', blockKey, true)
+    window.addEventListener('submit', blockSubmit, true)
+    return () => {
+      window.removeEventListener('click', blockClick, true)
+      window.removeEventListener('keydown', blockKey, true)
+      window.removeEventListener('submit', blockSubmit, true)
+    }
+  }, [session.sessionId])
+
+  const remove = (entry: SessionResourceEntryState): void => {
+    updateEntries(session.sessionId, current => current.filter(candidate => candidate.id !== entry.id))
+    entry.abort.abort()
+    if (entry.mention) {
+      const next = (sessionResourceDrafts.get(session.sessionId) ?? input.draft)
+        .replace(entry.mention, '').replace(/ {2,}/gu, ' ').trimStart()
+      sessionResourceDrafts.set(session.sessionId, next)
+      inputActions.setDraft(next)
+    }
+  }
+
+  return h('div', {
+    className: `dsh-work-session-resource${dropActive ? ' is-drop-active' : ''}`,
+    'data-work-session-resource': session.sessionId,
+  },
+  h('input', {
+    ref: picker,
+    className: 'dsh-work-file-input',
+    type: 'file',
+    multiple: true,
+    accept: '.md,.txt,.csv,.json,text/markdown,text/plain,text/csv,application/json',
+    onChange: (event: { currentTarget: HTMLInputElement }) => {
+      const files = Array.from(event.currentTarget.files ?? [])
+      event.currentTarget.value = ''
+      importFiles(files)
+    },
+  }),
+  h('button', {
+    className: 'dsh-work-session-resource-trigger',
+    type: 'button',
+    title: '添加资料（Markdown、TXT、CSV、JSON）',
+    'aria-label': '添加资料',
+    disabled: input.phase !== 'plain',
+    onClick: () => picker.current?.click(),
+  }, h('span', { 'aria-hidden': true }, '+'), '资料'),
+  entries.length > 0 ? h('div', {
+    className: 'dsh-work-session-resource-popover',
+    role: 'status',
+    'aria-label': '待发送资料',
+  }, ...entries.map(entry => h('div', {
+    className: `dsh-work-session-resource-row is-${entry.status}`,
+    key: entry.id,
+    'data-work-session-resource-name': entry.file.name,
+  },
+  h('span', { className: 'dsh-work-session-resource-icon', 'aria-hidden': true }, '文'),
+  h('span', { className: 'dsh-work-session-resource-copy' },
+    h('strong', { title: entry.path ?? entry.file.name }, entry.file.name),
+    h('small', null, entry.status === 'copying'
+      ? '正在复制到当前工作区…'
+      : entry.status === 'ready'
+        ? '已复制，发送后读取'
+        : entry.error)),
+  entry.status === 'failed' ? h('button', {
+    type: 'button',
+    onClick: () => { void importFile(entry.file, entry.id) },
+  }, '重试') : null,
+  h('button', {
+    type: 'button',
+    'aria-label': `移除 ${entry.file.name}`,
+    onClick: () => remove(entry),
+  }, '×')))) : null)
 }
 
 function WorkRow({ work }: { readonly work: WorkView }): ReactNode {
@@ -676,6 +964,22 @@ body[data-ds-dark-theme] {
 .dsh-work-legacy-deliverable-frame pre { min-height: 160px; margin: 0; overflow: auto; padding: 20px; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 13px/21px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 .dsh-work-legacy-deliverable-loading { min-height: 160px; display: grid; place-items: center; margin: 0; color: var(--work-muted); font-size: 13px; }
 .dsh-work-legacy-deliverable-frame footer { display: flex; justify-content: flex-end; padding: 12px 18px; border-top: 1px solid var(--work-border); }
+.dsh-work-session-resource { position: relative; display: inline-flex; align-items: center; font-family: var(--work-font); }
+.dsh-work-session-resource-trigger { height: 30px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border: 0; border-radius: 7px; color: var(--work-muted); background: transparent; cursor: pointer; font: 500 12px/1 var(--work-font); }
+.dsh-work-session-resource-trigger span { font-size: 17px; line-height: 1; }
+.dsh-work-session-resource-trigger:hover:not(:disabled), .dsh-work-session-resource.is-drop-active .dsh-work-session-resource-trigger { color: var(--work-accent); background: var(--work-accent-subtle); }
+.dsh-work-session-resource-trigger:disabled { opacity: .45; cursor: default; }
+.dsh-work-session-resource-popover { position: absolute; left: 0; bottom: 38px; z-index: 20; width: min(360px, calc(100vw - 40px)); display: grid; gap: 5px; padding: 8px; border: 1px solid var(--work-border); border-radius: 10px; color: var(--work-text); background: var(--work-surface); box-shadow: var(--work-shadow); }
+.dsh-work-session-resource-row { min-width: 0; display: flex; align-items: center; gap: 8px; padding: 7px; border-radius: 7px; background: var(--work-surface-subtle); }
+.dsh-work-session-resource-row.is-failed { color: var(--work-danger); }
+.dsh-work-session-resource-icon { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; flex: none; border-radius: 6px; color: var(--work-accent); background: var(--work-accent-subtle); font-size: 10px; font-weight: 700; }
+.dsh-work-session-resource-copy { min-width: 0; flex: 1; }
+.dsh-work-session-resource-copy strong, .dsh-work-session-resource-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-work-session-resource-copy strong { font-size: 12px; line-height: 17px; }
+.dsh-work-session-resource-copy small { color: var(--work-faint); font-size: 10px; line-height: 15px; }
+.dsh-work-session-resource-row.is-failed small { color: var(--work-danger); }
+.dsh-work-session-resource-row > button { flex: none; padding: 3px 6px; border: 0; border-radius: 5px; color: var(--work-muted); background: transparent; cursor: pointer; font: 500 11px/1 var(--work-font); }
+.dsh-work-session-resource-row > button:hover { color: var(--work-text); background: var(--work-border); }
 .dsh-work-sidebar { height: 100%; min-width: 0; display: flex; flex-direction: column; padding: 16px 20px; background: var(--work-sidebar); }
 .dsh-work-sidebar.is-collapsed { align-items: center; padding: 18px 10px; gap: 18px; }
 .dsh-work-sidebar-brand { height: 36px; display: flex; align-items: center; gap: 10px; font-size: 19px; letter-spacing: -.02em; }
@@ -861,6 +1165,13 @@ export function registerWorkSurface(ctx: Context, works: IWorks): () => void {
     name: 'sidebar.brand.name',
     priority: -100,
   }, () => h('span', { 'data-dsh-work-brand': 'name' }, 'DSH Work')))
+  ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
+    name: 'conversation.input.left',
+    id: 'dsh-work-session-resource',
+    order: -100,
+    label: '添加资料',
+    inject: () => ({ works }),
+  }, NativeSessionResourceEntry))
   ctx.slots.inject('sidebar.brand.mark', () => ctx.slots.register({
     name: 'sidebar.brand.mark',
     priority: -100,

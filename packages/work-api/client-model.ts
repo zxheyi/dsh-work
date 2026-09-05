@@ -12,9 +12,11 @@ import type {
   WorkDeliverableContent,
   WorkListValue,
   WorkImportConversationSpec,
+  WorkImportSessionResourceSpec,
   WorkRemoteFollowFrame,
   WorkView,
   WorkShowDeliveryValue,
+  WorkSessionFileResource,
 } from './index.ts'
 
 export interface WorkClientRemote {
@@ -26,6 +28,10 @@ export interface WorkClientRemote {
   dispatch(request: WorkDispatchRequest, signal?: AbortSignal): Promise<RemoteResult<WorkView>>
   readDeliverable(request: { readonly workId: string }): Promise<RemoteResult<WorkDeliverableContent>>
   showDelivery(request: { readonly workId: string }, signal?: AbortSignal): Promise<RemoteResult<WorkShowDeliveryValue>>
+  importSessionResource(
+    spec: WorkImportSessionResourceSpec,
+    signal?: AbortSignal,
+  ): Promise<RemoteResult<WorkSessionFileResource>>
   list(): Promise<RemoteResult<WorkListValue>>
   follow(signal?: AbortSignal): AsyncIterable<WorkRemoteFollowFrame>
 }
@@ -49,6 +55,10 @@ export interface IWorks {
   dispatch(request: WorkClientDispatchRequest, signal?: AbortSignal): Promise<WorkView>
   readDeliverable(workId: string): Promise<WorkDeliverableContent>
   showDelivery(workId: string, signal?: AbortSignal): Promise<void>
+  importSessionResource(
+    spec: WorkImportSessionResourceSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkSessionFileResource>
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -100,6 +110,13 @@ export class ClientWorkModel implements WorkSource {
 
   showDelivery(workId: string, signal?: AbortSignal): Promise<RemoteResult<WorkShowDeliveryValue>> {
     return this.remote.showDelivery({ workId }, signal)
+  }
+
+  importSessionResource(
+    spec: WorkImportSessionResourceSpec,
+    signal?: AbortSignal,
+  ): Promise<RemoteResult<WorkSessionFileResource>> {
+    return this.remote.importSessionResource(spec, signal)
   }
 
   replaceBaseline(value: WorkListValue): void {
@@ -213,5 +230,14 @@ export class WorksController extends Service implements IWorks {
   async showDelivery(workId: string, signal?: AbortSignal): Promise<void> {
     const result = await this.model.showDelivery(workId, signal)
     if (!result.ok) throw result.error
+  }
+
+  async importSessionResource(
+    spec: WorkImportSessionResourceSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkSessionFileResource> {
+    const result = await this.model.importSessionResource(spec, signal)
+    if (!result.ok) throw result.error
+    return result.value
   }
 }

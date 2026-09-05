@@ -7,6 +7,7 @@ import test from 'node:test'
 
 import {
   WorkError,
+  MAX_WORK_FILE_RESOURCE_BYTES,
   createHarnessWorkPort,
   createMemoryWorkStore,
   createWorkController,
@@ -1034,4 +1035,142 @@ test('serializes concurrent remote mutations and rejects the stale revision', as
   await assert.rejects(second, (error: unknown) =>
     error instanceof WorkError && error.code === 'work/mutation-conflict')
   assert.deepEqual(turns, ['First client.'])
+})
+
+test('copies supported text resources into the addressed Session Workspace without changing the source', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-resource-'))
+  const workspace = path.join(root, 'workspace')
+  const source = path.join(root, 'source notes.md')
+  await fs.mkdir(workspace)
+  await fs.writeFile(source, '# Source stays unchanged\n')
+  const before = createHash('sha256').update(await fs.readFile(source)).digest('hex')
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    harness: {
+      ...testHarness(),
+      async inspectSessionWorkspace() { return workspace },
+    },
+  })
+
+  const imported = await controller.importSessionResource({
+    sessionId: 'session-a',
+    name: 'source notes.md',
+    mediaType: 'text/markdown',
+    dataBase64: (await fs.readFile(source)).toString('base64'),
+  })
+
+  assert.equal(imported.sessionId, 'session-a')
+  assert.match(imported.path, /^attachment-[a-f0-9]{12}-[a-f0-9]{12}-source notes\.md$/u)
+  assert.equal((await fs.readFile(path.join(workspace, imported.path), 'utf8')), '# Source stays unchanged\n')
+  assert.equal(createHash('sha256').update(await fs.readFile(source)).digest('hex'), before)
+
+  const second = await controller.importSessionResource({
+    sessionId: 'session-b',
+    name: 'source notes.md',
+    dataBase64: (await fs.readFile(source)).toString('base64'),
+  })
+  assert.notEqual(second.path, imported.path)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('rejects unsupported, invalid, and unsafe Session resources before treating them as readable', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-resource-invalid-'))
+  const workspace = path.join(root, 'workspace')
+  await fs.mkdir(workspace)
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    harness: {
+      ...testHarness(),
+      async inspectSessionWorkspace() { return workspace },
+    },
+  })
+  const importResource = (name: string, content: Buffer) => controller.importSessionResource({
+    sessionId: 'session-invalid',
+    name,
+    dataBase64: content.toString('base64'),
+  })
+
+  await assert.rejects(importResource('report.pdf', Buffer.from('not a pdf')), (error: unknown) =>
+    error instanceof WorkError && error.code === 'work/session-resource-invalid')
+  await assert.rejects(importResource('broken.json', Buffer.from('{')), (error: unknown) =>
+    error instanceof WorkError && error.code === 'work/session-resource-invalid')
+  await assert.rejects(importResource('../escape.md', Buffer.from('escape')), (error: unknown) =>
+    error instanceof WorkError && error.code === 'work/session-resource-invalid')
+  await assert.rejects(importResource('binary.txt', Buffer.from([0xff, 0xfe])), (error: unknown) =>
+    error instanceof WorkError && error.code === 'work/session-resource-invalid')
+  await assert.rejects(importResource('quoted"name.md', Buffer.from('quoted')), (error: unknown) =>
+    error instanceof WorkError && error.code === 'work/session-resource-invalid')
+
+  const linkedBytes = Buffer.from('linked')
+  const linkedName = 'linked.md'
+  const linkedDigest = createHash('sha256').update(linkedBytes).digest('hex')
+  const linkedTarget = path.join(root, 'outside.md')
+  await fs.writeFile(linkedTarget, 'outside unchanged')
+  const linkedPath = path.join(
+    workspace,
+    `attachment-${createHash('sha256').update('session-invalid').digest('hex').slice(0, 12)}-${linkedDigest.slice(0, 12)}-${linkedName}`,
+  )
+  await fs.symlink(linkedTarget, linkedPath)
+  await assert.rejects(importResource(linkedName, linkedBytes), (error: unknown) =>
+    error instanceof WorkError && error.code === 'work/session-resource-invalid')
+  assert.equal(await fs.readFile(linkedTarget, 'utf8'), 'outside unchanged')
+
+  const targetPath = (name: string, content: Buffer): string => path.join(
+    workspace,
+    `attachment-${createHash('sha256').update('session-invalid').digest('hex').slice(0, 12)}-${createHash('sha256').update(content).digest('hex').slice(0, 12)}-${name}`,
+  )
+  const directoryBytes = Buffer.from('directory collision')
+  await fs.mkdir(targetPath('directory.md', directoryBytes))
+  await assert.rejects(importResource('directory.md', directoryBytes), (error: unknown) =>
+    error instanceof WorkError && error.code === 'work/session-resource-invalid')
+
+  const oversizedBytes = Buffer.from('bounded existing target')
+  const oversizedPath = targetPath('oversized.md', oversizedBytes)
+  await fs.writeFile(oversizedPath, 'x')
+  await fs.truncate(oversizedPath, MAX_WORK_FILE_RESOURCE_BYTES + 1)
+  await assert.rejects(importResource('oversized.md', oversizedBytes), (error: unknown) =>
+    error instanceof WorkError && error.code === 'work/session-resource-invalid')
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('does not delete a same-name file from a replaced Workspace root during failed cleanup', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-resource-swap-'))
+  const workspace = path.join(root, 'workspace')
+  const movedWorkspace = path.join(root, 'workspace-original')
+  await fs.mkdir(workspace)
+  const bytes = Buffer.from('must remain in the original workspace')
+  const sessionId = 'session-root-swap'
+  const name = 'swap.md'
+  let targetName = ''
+  let pendingName = ''
+  let swapped = false
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    harness: {
+      ...testHarness(),
+      async inspectSessionWorkspace() { return workspace },
+    },
+    sessionResourceInternals: {
+      async afterTargetOpen(paths) {
+        if (swapped) return
+        swapped = true
+        targetName = path.basename(paths.targetPath)
+        pendingName = path.basename(paths.pendingPath)
+        await fs.rename(workspace, movedWorkspace)
+        await fs.mkdir(workspace)
+        await fs.writeFile(path.join(workspace, targetName), 'replacement sentinel')
+      },
+    },
+  })
+
+  await assert.rejects(controller.importSessionResource({
+    sessionId,
+    name,
+    dataBase64: bytes.toString('base64'),
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-resource-invalid')
+
+  assert.equal(await fs.readFile(path.join(workspace, targetName), 'utf8'), 'replacement sentinel')
+  assert.equal((await fs.stat(path.join(movedWorkspace, pendingName))).size, 0)
+  await assert.rejects(fs.stat(path.join(movedWorkspace, targetName)), { code: 'ENOENT' })
+  await fs.rm(root, { recursive: true, force: true })
 })

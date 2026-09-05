@@ -5,11 +5,13 @@ import type {
   WorkCreateSpec,
   WorkDispatchRequest,
   WorkImportConversationSpec,
+  WorkImportSessionResourceSpec,
   WorkListValue,
   WorkDeliverableContent,
   WorkReadDeliverableRequest,
   WorkShowDeliveryRequest,
   WorkShowDeliveryValue,
+  WorkSessionFileResource,
   WorkRemoteFollowFrame,
   WorkView,
 } from './index.ts'
@@ -90,6 +92,20 @@ const deliverableContentSchema: z.ZodType<WorkDeliverableContent> = z.object({
 }).strict()
 const showDeliveryValueSchema: z.ZodType<WorkShowDeliveryValue> = z.object({
   shown: z.literal(true),
+}).strict()
+const importSessionResourceSchema: z.ZodType<WorkImportSessionResourceSpec> = z.object({
+  sessionId: z.string().min(1).max(256),
+  name: z.string().min(1).max(200),
+  mediaType: z.string().min(1).max(128).optional(),
+  dataBase64: z.string().min(1).max(Math.ceil((25 * 1024 * 1024) / 3) * 4),
+}).strict()
+const sessionFileResourceSchema: z.ZodType<WorkSessionFileResource> = z.object({
+  sessionId: z.string().min(1).max(256),
+  name: z.string().min(1).max(200),
+  path: z.string().min(1),
+  bytes: z.number().int().positive().max(25 * 1024 * 1024),
+  mediaType: z.string().min(1).max(128).nullable(),
+  contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
 }).strict()
 const listSchema: z.ZodType<WorkListValue> = z.object({
   items: z.array(workViewSchema).max(1),
@@ -185,6 +201,21 @@ export const TYPERT_REMOTE: TypertRemoteContribution = Object.freeze({
       result: strict('@dsh-work/work-api#WorkShowDeliveryValue', showDeliveryValueSchema),
     }),
     Object.freeze({
+      id: '@dsh-work/work-api#work/importSessionResource',
+      service: 'workApi',
+      namespace: 'work',
+      method: 'importSessionResource',
+      invocation: Object.freeze({ kind: 'direct' as const }),
+      parameters: Object.freeze([Object.freeze({
+        name: 'spec',
+        wire: 'spec',
+        source: 'json' as const,
+        codec: strict('@dsh-work/work-api#WorkImportSessionResourceSpec', importSessionResourceSchema),
+      })]),
+      cancellation: Object.freeze({ parameter: 'signal' as const }),
+      result: strict('@dsh-work/work-api#WorkSessionFileResource', sessionFileResourceSchema),
+    }),
+    Object.freeze({
       id: '@dsh-work/work-api#work/list',
       service: 'workApi',
       namespace: 'work',
@@ -225,6 +256,10 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       request: WorkShowDeliveryRequest,
       signal?: AbortSignal,
     ) => Promise<RemoteResult<WorkShowDeliveryValue>>
+    'work/importSessionResource': (
+      spec: WorkImportSessionResourceSpec,
+      signal?: AbortSignal,
+    ) => Promise<RemoteResult<WorkSessionFileResource>>
     'work/list': () => Promise<RemoteResult<WorkListValue>>
     'work/follow': (signal?: AbortSignal) => AsyncIterable<WorkRemoteFollowFrame>
   }
@@ -236,6 +271,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       dispatch: TypertRemoteMap['work/dispatch']
       readDeliverable: TypertRemoteMap['work/readDeliverable']
       showDelivery: TypertRemoteMap['work/showDelivery']
+      importSessionResource: TypertRemoteMap['work/importSessionResource']
       list: TypertRemoteMap['work/list']
       follow: TypertRemoteMap['work/follow']
     }

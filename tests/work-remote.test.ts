@@ -53,6 +53,7 @@ test('exports the narrow Work surface through public Typert markers', () => {
     { method: 'dispatch', mode: 'unary' },
     { method: 'readDeliverable', mode: 'unary' },
     { method: 'showDelivery', mode: 'unary' },
+    { method: 'importSessionResource', mode: 'unary' },
     { method: 'list', mode: 'unary' },
     { method: 'follow', mode: 'stream' },
   ])
@@ -66,6 +67,7 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
     'work/dispatch',
     'work/readDeliverable',
     'work/showDelivery',
+    'work/importSessionResource',
     'work/list',
     'work/follow',
   ])

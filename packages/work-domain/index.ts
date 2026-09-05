@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { constants as fsConstants } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -14,6 +15,7 @@ export type WorkErrorCode =
   | 'work/recovery-conflict'
   | 'work/resource-invalid'
   | 'work/resource-limit'
+  | 'work/session-resource-invalid'
   | 'work/turn-failed'
 
 export class WorkError extends Error {
@@ -97,6 +99,22 @@ export interface WorkFileResource {
   readonly contentDigest: string
 }
 
+export interface ImportSessionResourceSpec {
+  readonly sessionId: string
+  readonly name: string
+  readonly mediaType?: string | undefined
+  readonly dataBase64: string
+}
+
+export interface SessionFileResource {
+  readonly sessionId: string
+  readonly name: string
+  readonly path: string
+  readonly bytes: number
+  readonly mediaType: string | null
+  readonly contentDigest: string
+}
+
 export interface WorkFileDeliverable {
   readonly kind: 'file'
   readonly path: string
@@ -116,6 +134,7 @@ export interface WorkController {
   list(): Promise<readonly WorkSnapshot[]>
   readDeliverable(workId: string): Promise<WorkDeliverableContent>
   showDelivery(workId: string, signal?: AbortSignal): Promise<void>
+  importSessionResource(spec: ImportSessionResourceSpec, signal?: AbortSignal): Promise<SessionFileResource>
   follow(signal?: AbortSignal): AsyncIterable<WorkFollowFrame>
   dispatch(request: DispatchWorkRequest, signal?: AbortSignal): Promise<WorkSnapshot>
 }
@@ -188,6 +207,12 @@ export interface WorkControllerOptions {
   readonly deliveryRoot?: string
   readonly harness: HarnessWorkPort
   readonly store?: WorkStore
+  readonly sessionResourceInternals?: {
+    readonly afterTargetOpen?: (paths: {
+      readonly pendingPath: string
+      readonly targetPath: string
+    }) => void | Promise<void>
+  }
 }
 
 export interface WorkStore {
@@ -237,6 +262,7 @@ export interface HarnessWorkPort {
   ensurePrimarySession(request: EnsurePrimarySessionRequest): Promise<{ readonly sessionId: string }>
   submitTurn(request: SubmitTurnRequest, signal?: AbortSignal): Promise<void>
   openPath?(path: string, signal?: AbortSignal): Promise<void>
+  inspectSessionWorkspace?(sessionId: string, signal?: AbortSignal): Promise<string>
 }
 
 export interface EnsurePrimarySessionRequest {
@@ -362,11 +388,189 @@ async function persistResource(
   })
 }
 
+const SUPPORTED_SESSION_RESOURCE_EXTENSIONS = new Set(['.csv', '.json', '.md', '.txt'])
+
+async function persistSessionResource(
+  workspacePathInput: string,
+  spec: ImportSessionResourceSpec,
+  signal?: AbortSignal,
+  internals?: WorkControllerOptions['sessionResourceInternals'],
+): Promise<SessionFileResource> {
+  let decoded: ReturnType<typeof decodeResource>
+  try {
+    decoded = decodeResource({ type: 'add-file-resource', ...spec })
+  } catch (cause) {
+    if (cause instanceof WorkError) {
+      throw new WorkError('work/session-resource-invalid', cause.message, { cause })
+    }
+    throw cause
+  }
+  const extension = path.extname(decoded.name).toLowerCase()
+  if (decoded.name.includes('"')) {
+    throw new WorkError(
+      'work/session-resource-invalid',
+      'File names containing quotes cannot be represented by the native reference grammar.',
+    )
+  }
+  if (!SUPPORTED_SESSION_RESOURCE_EXTENSIONS.has(extension)) {
+    throw new WorkError(
+      'work/session-resource-invalid',
+      'Only Markdown, plain-text, CSV, and JSON files are supported in this version.',
+    )
+  }
+  let text: string
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(decoded.bytes)
+  } catch (cause) {
+    throw new WorkError(
+      'work/session-resource-invalid',
+      'The selected resource must contain valid UTF-8 text.',
+      { cause },
+    )
+  }
+  if (extension === '.json') {
+    try {
+      JSON.parse(text)
+    } catch (cause) {
+      throw new WorkError(
+        'work/session-resource-invalid',
+        'The selected JSON resource is not valid JSON.',
+        { cause },
+      )
+    }
+  }
+
+  let workspacePath: string
+  try {
+    workspacePath = await fs.realpath(workspacePathInput)
+  } catch (cause) {
+    throw new WorkError(
+      'work/session-resource-invalid',
+      'The current Session has no readable Workspace directory.',
+      { cause },
+    )
+  }
+  const workspaceStat = await fs.stat(workspacePath, { bigint: true })
+  if (!workspaceStat.isDirectory()) {
+    throw new WorkError('work/session-resource-invalid', 'The current Session Workspace is not a directory.')
+  }
+  const sessionKey = createHash('sha256').update(spec.sessionId).digest('hex').slice(0, 12)
+  const fileName = `attachment-${sessionKey}-${decoded.contentDigest.slice(0, 12)}-${decoded.name}`
+  const target = path.join(workspacePath, fileName)
+  const pending = path.join(workspacePath, `.dsh-work-pending-${randomUUID()}`)
+  const assertWorkspaceIdentity = async (): Promise<void> => {
+    const current = await fs.stat(workspacePathInput, { bigint: true })
+    if (
+      !current.isDirectory()
+      || current.dev !== workspaceStat.dev
+      || current.ino !== workspaceStat.ino
+    ) {
+      throw new WorkError(
+        'work/session-resource-invalid',
+        'The current Session Workspace changed during the copy.',
+      )
+    }
+  }
+  if (signal?.aborted) {
+    throw new WorkError('work/session-resource-invalid', 'The resource copy was cancelled.')
+  }
+  try {
+    const handle = await fs.open(
+      pending,
+      fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY | fsConstants.O_NOFOLLOW,
+      0o600,
+    )
+    try {
+      await internals?.afterTargetOpen?.({ pendingPath: pending, targetPath: target })
+      await assertWorkspaceIdentity()
+      await handle.writeFile(decoded.bytes, signal ? { signal } : undefined)
+      await handle.sync()
+    } catch (cause) {
+      await handle.close().catch(() => {})
+      throw cause
+    }
+    await handle.close()
+    await assertWorkspaceIdentity()
+    await fs.link(pending, target)
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) {
+      throw new WorkError(
+        'work/session-resource-invalid',
+        'The selected resource could not be copied into the Workspace.',
+        { cause: error },
+      )
+    }
+    let existing: Buffer
+    try {
+      const handle = await fs.open(
+        target,
+        fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK,
+      )
+      try {
+        await assertWorkspaceIdentity()
+        const stat = await handle.stat()
+        if (!stat.isFile()) {
+          throw new Error('The existing attachment is not a regular file.')
+        }
+        if (stat.size < 1 || stat.size > MAX_WORK_FILE_RESOURCE_BYTES) {
+          throw new Error('The existing attachment is outside the supported size limit.')
+        }
+        const bounded = Buffer.allocUnsafe(MAX_WORK_FILE_RESOURCE_BYTES + 1)
+        let offset = 0
+        while (offset < bounded.length) {
+          const read = await handle.read(bounded, offset, bounded.length - offset, null)
+          if (read.bytesRead === 0) break
+          offset += read.bytesRead
+        }
+        if (offset > MAX_WORK_FILE_RESOURCE_BYTES) {
+          throw new Error('The existing attachment grew beyond the supported size limit.')
+        }
+        existing = bounded.subarray(0, offset)
+      } finally {
+        await handle.close()
+      }
+    } catch (cause) {
+      throw new WorkError(
+        'work/session-resource-invalid',
+        'The managed attachment path is not a plain file.',
+        { cause },
+      )
+    }
+    if (createHash('sha256').update(existing).digest('hex') !== decoded.contentDigest) {
+      throw new WorkError(
+        'work/session-resource-invalid',
+        'The managed attachment path already contains different bytes.',
+      )
+    }
+  }
+  await assertWorkspaceIdentity()
+  const resolved = await fs.realpath(target)
+  const relative = path.relative(workspacePath, resolved)
+  if (relative.startsWith(`..${path.sep}`) || relative === '..' || path.isAbsolute(relative)) {
+    throw new WorkError(
+      'work/session-resource-invalid',
+      'The selected resource resolved outside the current Session Workspace.',
+    )
+  }
+  return Object.freeze({
+    sessionId: spec.sessionId,
+    name: decoded.name,
+    path: relative.split(path.sep).join(path.posix.sep),
+    bytes: decoded.bytes.length,
+    mediaType: decoded.mediaType,
+    contentDigest: decoded.contentDigest,
+  })
+}
+
 export interface HarnessWorkContext {
   readonly workspaceRegistry: {
     create(path: string, title?: string): Promise<{ readonly id: string; readonly path: string }>
   }
   readonly sessionController: {
+    inspect?(sessionId: string, signal?: AbortSignal): Promise<{
+      readonly meta: { readonly cwd?: string }
+      readonly events: readonly unknown[]
+    }>
     create(request: {
       readonly sessionId: string
       readonly workspaceId: string
@@ -488,6 +692,14 @@ export function createHarnessWorkPort(context: HarnessWorkContext): HarnessWorkP
         throw new Error('Native path opening is unavailable.')
       }
       await context.sessionController.openWorkspacePath({ path: target }, signal)
+    },
+    async inspectSessionWorkspace(sessionId, signal = new AbortController().signal) {
+      if (!context.sessionController.inspect) {
+        throw new Error('Native Session inspection is unavailable.')
+      }
+      const inspected = await context.sessionController.inspect(sessionId, signal)
+      if (!inspected.meta.cwd) throw new Error('The current Session has no Workspace directory.')
+      return inspected.meta.cwd
     },
   }
 }
@@ -912,6 +1124,26 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         if (cause instanceof WorkError) throw cause
         throw deliveryError('The delivery location could not be shown.', { cause })
       }
+    },
+
+    async importSessionResource(spec, signal) {
+      if (!options.harness.inspectSessionWorkspace) {
+        throw new WorkError(
+          'work/session-resource-invalid',
+          'This Host cannot resolve the current Session Workspace.',
+        )
+      }
+      let workspacePath: string
+      try {
+        workspacePath = await options.harness.inspectSessionWorkspace(spec.sessionId, signal)
+      } catch (cause) {
+        throw new WorkError(
+          'work/session-resource-invalid',
+          'The current Session has no readable Workspace directory.',
+          { cause },
+        )
+      }
+      return persistSessionResource(workspacePath, spec, signal, options.sessionResourceInternals)
     },
 
     async *follow(signal = new AbortController().signal) {

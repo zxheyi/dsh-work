@@ -119,7 +119,7 @@
       "files": "packages/work-domain/index.ts；packages/work-api/index.ts；packages/work-api/remote.ts；packages/work-api/surface.ts",
       "verification": "文件字节/路径负向集成、导入发送 E2E、生成中截图",
       "limits": "首批明确支持的可解析格式，不把可上传等同可理解。",
-      "status": "pending"
+      "status": "verified"
     },
     {
       "id": "T07",

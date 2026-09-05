@@ -5,7 +5,9 @@ import {
   WorkError,
   type CreateWorkSpec,
   type DispatchWorkRequest,
+  type ImportSessionResourceSpec,
   type ImportConversationSpec,
+  type SessionFileResource,
   type WorkController,
   type WorkDeliverableContent as DomainWorkDeliverableContent,
   type WorkFollowFrame,
@@ -20,6 +22,8 @@ export type WorkDispatchRequest = DispatchWorkRequest & Required<Pick<
 >>
 export type WorkClientDispatchRequest = Omit<WorkDispatchRequest, 'mutationId' | 'expectedRevision'>
 export type WorkDeliverableContent = DomainWorkDeliverableContent
+export type WorkImportSessionResourceSpec = ImportSessionResourceSpec
+export type WorkSessionFileResource = SessionFileResource
 
 export interface WorkReadDeliverableRequest {
   readonly workId: string
@@ -71,6 +75,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'work/recovery-conflict': Record<string, never>
     'work/resource-invalid': Record<string, never>
     'work/resource-limit': Record<string, never>
+    'work/session-resource-invalid': Record<string, never>
     'work/turn-failed': Record<string, never>
   }
 }
@@ -150,6 +155,13 @@ export class WorkRemoteController extends TypertRemoteService {
     })
   }
 
+  importSessionResource(
+    spec: WorkImportSessionResourceSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkSessionFileResource> {
+    return workResult(() => this.controller.importSessionResource(spec, signal))
+  }
+
   async list(): Promise<WorkListValue> {
     return Object.freeze({
       items: Object.freeze((await this.controller.list()).map(projectWork)),
@@ -161,7 +173,7 @@ export class WorkRemoteController extends TypertRemoteService {
   }
 }
 
-type RemoteMethodName = 'create' | 'importConversation' | 'dispatch' | 'readDeliverable' | 'showDelivery' | 'list' | 'follow'
+type RemoteMethodName = 'create' | 'importConversation' | 'dispatch' | 'readDeliverable' | 'showDelivery' | 'importSessionResource' | 'list' | 'follow'
 type RemoteMethod = (this: WorkRemoteController, ...args: unknown[]) => unknown
 type RemoteDecorator = (
   method: RemoteMethod,
@@ -191,6 +203,7 @@ installRemoteMarker('importConversation', Remote as RemoteDecorator)
 installRemoteMarker('dispatch', Remote as RemoteDecorator)
 installRemoteMarker('readDeliverable', Remote as RemoteDecorator)
 installRemoteMarker('showDelivery', Remote as RemoteDecorator)
+installRemoteMarker('importSessionResource', Remote as RemoteDecorator)
 installRemoteMarker('list', Remote as RemoteDecorator)
 installRemoteMarker('follow', Remote({ mode: 'stream' }) as RemoteDecorator)
 

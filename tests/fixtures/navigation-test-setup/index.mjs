@@ -18,10 +18,16 @@ const digest = value => createHash('sha256').update(value).digest('hex')
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
 
 class NavigationAdapter extends LlmAdapter {
+  constructor(capturePath) {
+    super()
+    this.capturePath = capturePath
+  }
   providerInfo() { return { id: PROVIDER, name: 'DSH Work 导航验收' } }
   listModels() { return Promise.resolve([MODEL]) }
   resolveModel() { return Promise.resolve(MODEL) }
   async * stream(options) {
+    const received = JSON.stringify(options)
+    if (received.includes('source notes.md')) await fs.writeFile(this.capturePath, received)
     const text = options.purpose === 'session-title'
       ? options.sessionId === SESSION_A ? '会话甲' : '会话乙'
       : options.sessionId === SESSION_A ? '甲会话回复。' : '乙会话回复。'
@@ -46,7 +52,10 @@ export const name = 'dsh-work-navigation-test-setup'
 export const inject = ['dshHomePath', 'llm', 'workspaceRegistry', 'sessionController']
 
 export async function apply(context) {
-  const registration = context.llm.registerAdapter([PROVIDER], new NavigationAdapter())
+  const registration = context.llm.registerAdapter(
+    [PROVIDER],
+    new NavigationAdapter(context.dshHomePath('t06-session-resource-received.json')),
+  )
   context.effect(() => registration)
   const workspacePath = context.dshHomePath('t05-navigation-workspace')
   await fs.mkdir(workspacePath, { recursive: true })
