@@ -55,6 +55,7 @@ test('exports the narrow Work surface through public Typert markers', () => {
     { method: 'showDelivery', mode: 'unary' },
     { method: 'importSessionResource', mode: 'unary' },
     { method: 'inspectSessionOutputs', mode: 'unary' },
+    { method: 'inspectSessionOutputSources', mode: 'unary' },
     { method: 'readSessionOutput', mode: 'unary' },
     { method: 'list', mode: 'unary' },
     { method: 'follow', mode: 'stream' },
@@ -72,6 +73,7 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
     'work/importSessionResource',
     'work/list',
     'work/inspectSessionOutputs',
+    'work/inspectSessionOutputSources',
     'work/readSessionOutput',
     'work/follow',
   ])
@@ -177,6 +179,45 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
   }), { sessionId: 'session-remote', turn: 2, throughSeq: 12 })
   assert.throws(() => outputCodec.schema.parse({
     sessionId: 'session-remote', turn: 2, throughSeq: 12, staleTurn: 1,
+  }))
+
+  const inspectSources = TYPERT_REMOTE.descriptors.find(
+    descriptor => descriptor.method === 'inspectSessionOutputSources',
+  )
+  assert.ok(inspectSources)
+  const sourceResultCodec = inspectSources.result
+  assert.equal(sourceResultCodec.mode, 'strict')
+  assert.deepEqual(sourceResultCodec.schema.parse({
+    items: [{
+      sessionId: 'session-remote',
+      turn: 2,
+      name: 'brief.md',
+      path: 'attachment-source-brief.md',
+      reference: '@attachment-source-brief.md',
+      bytes: 12,
+      mediaType: 'text/markdown',
+      contentDigest: 'a'.repeat(64),
+      status: 'verified',
+    }],
+  }), {
+    items: [{
+      sessionId: 'session-remote',
+      turn: 2,
+      name: 'brief.md',
+      path: 'attachment-source-brief.md',
+      reference: '@attachment-source-brief.md',
+      bytes: 12,
+      mediaType: 'text/markdown',
+      contentDigest: 'a'.repeat(64),
+      status: 'verified',
+    }],
+  })
+  assert.throws(() => sourceResultCodec.schema.parse({
+    items: [{
+      sessionId: 'session-remote', turn: 2, name: 'brief.md', path: 'brief.md',
+      reference: '@brief.md', bytes: null, mediaType: null, contentDigest: null,
+      status: 'invented',
+    }],
   }))
 
   const readOutput = TYPERT_REMOTE.descriptors.find(

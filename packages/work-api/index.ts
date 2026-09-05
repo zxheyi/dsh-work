@@ -6,12 +6,14 @@ import {
   type CreateWorkSpec,
   type DispatchWorkRequest,
   type InspectSessionOutputsSpec,
+  type InspectSessionOutputSourcesSpec,
   type ReadSessionOutputSpec,
   type ImportSessionResourceSpec,
   type ImportConversationSpec,
   type SessionFileResource,
   type SessionOutputFile,
   type SessionOutputContent,
+  type SessionOutputSource,
   type WorkController,
   type WorkDeliverableContent as DomainWorkDeliverableContent,
   type WorkFollowFrame,
@@ -29,7 +31,9 @@ export type WorkDeliverableContent = DomainWorkDeliverableContent
 export type WorkImportSessionResourceSpec = ImportSessionResourceSpec
 export type WorkSessionFileResource = SessionFileResource
 export type WorkInspectSessionOutputsSpec = InspectSessionOutputsSpec
+export type WorkInspectSessionOutputSourcesSpec = InspectSessionOutputSourcesSpec
 export type WorkSessionOutputFile = SessionOutputFile
+export type WorkSessionOutputSource = SessionOutputSource
 export type WorkReadSessionOutputSpec = ReadSessionOutputSpec
 export type WorkSessionOutputContent = SessionOutputContent
 
@@ -40,6 +44,7 @@ export interface WorkReadDeliverableRequest {
 export type WorkShowDeliveryRequest = WorkReadDeliverableRequest
 export interface WorkShowDeliveryValue { readonly shown: true }
 export interface WorkSessionOutputsValue { readonly items: readonly WorkSessionOutputFile[] }
+export interface WorkSessionOutputSourcesValue { readonly items: readonly WorkSessionOutputSource[] }
 
 export interface WorkView {
   readonly workId: string
@@ -181,6 +186,15 @@ export class WorkRemoteController extends TypertRemoteService {
     }))
   }
 
+  inspectSessionOutputSources(
+    spec: WorkInspectSessionOutputSourcesSpec,
+    signal?: AbortSignal,
+  ): Promise<WorkSessionOutputSourcesValue> {
+    return workResult(async () => Object.freeze({
+      items: await this.controller.inspectSessionOutputSources(spec, signal),
+    }))
+  }
+
   readSessionOutput(
     spec: WorkReadSessionOutputSpec,
     signal?: AbortSignal,
@@ -199,7 +213,7 @@ export class WorkRemoteController extends TypertRemoteService {
   }
 }
 
-type RemoteMethodName = 'create' | 'importConversation' | 'dispatch' | 'readDeliverable' | 'showDelivery' | 'importSessionResource' | 'inspectSessionOutputs' | 'readSessionOutput' | 'list' | 'follow'
+type RemoteMethodName = 'create' | 'importConversation' | 'dispatch' | 'readDeliverable' | 'showDelivery' | 'importSessionResource' | 'inspectSessionOutputs' | 'inspectSessionOutputSources' | 'readSessionOutput' | 'list' | 'follow'
 type RemoteMethod = (this: WorkRemoteController, ...args: unknown[]) => unknown
 type RemoteDecorator = (
   method: RemoteMethod,
@@ -231,6 +245,7 @@ installRemoteMarker('readDeliverable', Remote as RemoteDecorator)
 installRemoteMarker('showDelivery', Remote as RemoteDecorator)
 installRemoteMarker('importSessionResource', Remote as RemoteDecorator)
 installRemoteMarker('inspectSessionOutputs', Remote as RemoteDecorator)
+installRemoteMarker('inspectSessionOutputSources', Remote as RemoteDecorator)
 installRemoteMarker('readSessionOutput', Remote as RemoteDecorator)
 installRemoteMarker('list', Remote as RemoteDecorator)
 installRemoteMarker('follow', Remote({ mode: 'stream' }) as RemoteDecorator)

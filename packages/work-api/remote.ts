@@ -6,6 +6,7 @@ import type {
   WorkDispatchRequest,
   WorkImportConversationSpec,
   WorkImportSessionResourceSpec,
+  WorkInspectSessionOutputSourcesSpec,
   WorkInspectSessionOutputsSpec,
   WorkReadSessionOutputSpec,
   WorkListValue,
@@ -16,6 +17,8 @@ import type {
   WorkSessionFileResource,
   WorkSessionOutputFile,
   WorkSessionOutputContent,
+  WorkSessionOutputSource,
+  WorkSessionOutputSourcesValue,
   WorkSessionOutputsValue,
   WorkRemoteFollowFrame,
   WorkView,
@@ -128,6 +131,20 @@ const sessionOutputFileSchema: z.ZodType<WorkSessionOutputFile> = z.object({
 const sessionOutputsValueSchema: z.ZodType<WorkSessionOutputsValue> = z.object({
   items: z.array(sessionOutputFileSchema).max(64),
 }).strict()
+const sessionOutputSourceSchema: z.ZodType<WorkSessionOutputSource> = z.object({
+  sessionId: z.string().min(1).max(256),
+  turn: z.number().int().nonnegative(),
+  name: z.string().min(1).max(200),
+  path: z.string().min(1).max(4096),
+  reference: z.string().min(2).max(4099),
+  bytes: z.number().int().positive().max(25 * 1024 * 1024).nullable(),
+  mediaType: z.string().min(1).max(128).nullable(),
+  contentDigest: z.string().regex(/^[a-f0-9]{64}$/u).nullable(),
+  status: z.enum(['verified', 'unverified', 'missing', 'changed', 'inaccessible']),
+}).strict()
+const sessionOutputSourcesValueSchema: z.ZodType<WorkSessionOutputSourcesValue> = z.object({
+  items: z.array(sessionOutputSourceSchema).max(20),
+}).strict()
 const readSessionOutputSchema: z.ZodType<WorkReadSessionOutputSpec> = z.object({
   sessionId: z.string().min(1).max(256),
   turn: z.number().int().nonnegative(),
@@ -143,6 +160,7 @@ const sessionOutputContentSchema: z.ZodType<WorkSessionOutputContent> = z.object
   mediaType: z.string().min(1).max(128).nullable(),
   content: z.string().min(1).max(5 * 1024 * 1024),
   contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+  sources: z.array(sessionOutputSourceSchema).max(20),
 }).strict()
 const listSchema: z.ZodType<WorkListValue> = z.object({
   items: z.array(workViewSchema).max(1),
@@ -277,6 +295,21 @@ export const TYPERT_REMOTE: TypertRemoteContribution = Object.freeze({
       result: strict('@dsh-work/work-api#WorkSessionOutputsValue', sessionOutputsValueSchema),
     }),
     Object.freeze({
+      id: '@dsh-work/work-api#work/inspectSessionOutputSources',
+      service: 'workApi',
+      namespace: 'work',
+      method: 'inspectSessionOutputSources',
+      invocation: Object.freeze({ kind: 'direct' as const }),
+      parameters: Object.freeze([Object.freeze({
+        name: 'spec',
+        wire: 'spec',
+        source: 'json' as const,
+        codec: strict('@dsh-work/work-api#WorkInspectSessionOutputSourcesSpec', inspectSessionOutputsSchema),
+      })]),
+      cancellation: Object.freeze({ parameter: 'signal' as const }),
+      result: strict('@dsh-work/work-api#WorkSessionOutputSourcesValue', sessionOutputSourcesValueSchema),
+    }),
+    Object.freeze({
       id: '@dsh-work/work-api#work/readSessionOutput',
       service: 'workApi',
       namespace: 'work',
@@ -331,6 +364,10 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       spec: WorkInspectSessionOutputsSpec,
       signal?: AbortSignal,
     ) => Promise<RemoteResult<WorkSessionOutputsValue>>
+    'work/inspectSessionOutputSources': (
+      spec: WorkInspectSessionOutputSourcesSpec,
+      signal?: AbortSignal,
+    ) => Promise<RemoteResult<WorkSessionOutputSourcesValue>>
     'work/readSessionOutput': (
       spec: WorkReadSessionOutputSpec,
       signal?: AbortSignal,
@@ -348,6 +385,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       showDelivery: TypertRemoteMap['work/showDelivery']
       importSessionResource: TypertRemoteMap['work/importSessionResource']
       inspectSessionOutputs: TypertRemoteMap['work/inspectSessionOutputs']
+      inspectSessionOutputSources: TypertRemoteMap['work/inspectSessionOutputSources']
       readSessionOutput: TypertRemoteMap['work/readSessionOutput']
       list: TypertRemoteMap['work/list']
       follow: TypertRemoteMap['work/follow']

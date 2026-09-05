@@ -46,13 +46,17 @@ function emitText(text) {
   ]
 }
 
-function toolCall(index, id, filePath, content) {
-  const args = JSON.stringify({ file_path: filePath, content })
+function toolCall(index, id, name, argsValue) {
+  const args = JSON.stringify(argsValue)
   return [
     { type: 'block-start', index, blockType: 'tool-call' },
-    { type: 'tool-call-delta', index, id, name: 'write', argumentsDelta: args },
-    { type: 'block-end', index, block: { type: 'tool-call', id, name: 'write', arguments: args } },
+    { type: 'tool-call-delta', index, id, name, argumentsDelta: args },
+    { type: 'block-end', index, block: { type: 'tool-call', id, name, arguments: args } },
   ]
+}
+
+function referencedPath(text) {
+  return /@(?:"([^"\r\n]+)"|([^\s"'<>]+))/u.exec(text)?.slice(1).find(Boolean) ?? null
 }
 
 class OutputAdapter extends LlmAdapter {
@@ -66,20 +70,32 @@ class OutputAdapter extends LlmAdapter {
     }
     const latest = [...options.messages].reverse().find(message =>
       message?.source?.kind === 'user' || message?.source?.kind === 'tool')
+    const latestUser = [...options.messages].reverse().find(message => message?.source?.kind === 'user')
+    const userPrompt = textOf(latestUser)
     if (latest?.source?.kind === 'tool') {
+      if (userPrompt.includes(GENERATE_A_PROMPT) && latest.source.callId === 'output-a-read') {
+        for (const event of toolCall(0, 'output-a-markdown', 'write', { file_path: 'report-a.md', content: REPORT_A })) yield event
+        for (const event of toolCall(1, 'output-a-csv', 'write', { file_path: 'report-b.csv', content: 'name,value\nalpha,1\n' })) yield event
+        for (const event of toolCall(2, 'output-a-empty', 'write', { file_path: 'empty.md', content: '' })) yield event
+        yield { type: 'finish', reason: { kind: 'tool-calls' } }
+        return
+      }
       yield * emitText('真实文件已经生成。')
       return
     }
     const prompt = textOf(latest)
     if (prompt.includes(GENERATE_A_PROMPT)) {
-      for (const event of toolCall(0, 'output-a-markdown', 'report-a.md', REPORT_A)) yield event
-      for (const event of toolCall(1, 'output-a-csv', 'report-b.csv', 'name,value\nalpha,1\n')) yield event
-      for (const event of toolCall(2, 'output-a-empty', 'empty.md', '')) yield event
+      const sourcePath = referencedPath(prompt)
+      if (!sourcePath) {
+        yield * emitText('没有收到可读取的资料。')
+        return
+      }
+      for (const event of toolCall(0, 'output-a-read', 'read', { file_path: sourcePath })) yield event
       yield { type: 'finish', reason: { kind: 'tool-calls' } }
       return
     }
     if (prompt.includes(GENERATE_B_PROMPT)) {
-      for (const event of toolCall(0, 'output-b-markdown', 'other-session.md', '# 乙报告\n')) yield event
+      for (const event of toolCall(0, 'output-b-markdown', 'write', { file_path: 'other-session.md', content: '# 乙报告\n' })) yield event
       yield { type: 'finish', reason: { kind: 'tool-calls' } }
       return
     }

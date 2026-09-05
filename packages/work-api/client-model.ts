@@ -13,6 +13,7 @@ import type {
   WorkListValue,
   WorkImportConversationSpec,
   WorkImportSessionResourceSpec,
+  WorkInspectSessionOutputSourcesSpec,
   WorkInspectSessionOutputsSpec,
   WorkReadSessionOutputSpec,
   WorkRemoteFollowFrame,
@@ -21,6 +22,8 @@ import type {
   WorkSessionFileResource,
   WorkSessionOutputFile,
   WorkSessionOutputContent,
+  WorkSessionOutputSource,
+  WorkSessionOutputSourcesValue,
   WorkSessionOutputsValue,
 } from './index.ts'
 
@@ -41,6 +44,10 @@ export interface WorkClientRemote {
     spec: WorkInspectSessionOutputsSpec,
     signal?: AbortSignal,
   ): Promise<RemoteResult<WorkSessionOutputsValue>>
+  inspectSessionOutputSources(
+    spec: WorkInspectSessionOutputSourcesSpec,
+    signal?: AbortSignal,
+  ): Promise<RemoteResult<WorkSessionOutputSourcesValue>>
   readSessionOutput(
     spec: WorkReadSessionOutputSpec,
     signal?: AbortSignal,
@@ -76,6 +83,10 @@ export interface IWorks {
     spec: WorkInspectSessionOutputsSpec,
     signal?: AbortSignal,
   ): Promise<readonly WorkSessionOutputFile[]>
+  inspectSessionOutputSources(
+    spec: WorkInspectSessionOutputSourcesSpec,
+    signal?: AbortSignal,
+  ): Promise<readonly WorkSessionOutputSource[]>
   readSessionOutput(
     spec: WorkReadSessionOutputSpec,
     signal?: AbortSignal,
@@ -145,6 +156,13 @@ export class ClientWorkModel implements WorkSource {
     signal?: AbortSignal,
   ): Promise<RemoteResult<WorkSessionOutputsValue>> {
     return this.remote.inspectSessionOutputs(spec, signal)
+  }
+
+  inspectSessionOutputSources(
+    spec: WorkInspectSessionOutputSourcesSpec,
+    signal?: AbortSignal,
+  ): Promise<RemoteResult<WorkSessionOutputSourcesValue>> {
+    return this.remote.inspectSessionOutputSources(spec, signal)
   }
 
   readSessionOutput(
@@ -281,6 +299,15 @@ export class WorksController extends Service implements IWorks {
     signal?: AbortSignal,
   ): Promise<readonly WorkSessionOutputFile[]> {
     const result = await this.model.inspectSessionOutputs(spec, signal)
+    if (!result.ok) throw result.error
+    return result.value.items
+  }
+
+  async inspectSessionOutputSources(
+    spec: WorkInspectSessionOutputSourcesSpec,
+    signal?: AbortSignal,
+  ): Promise<readonly WorkSessionOutputSource[]> {
+    const result = await this.model.inspectSessionOutputSources(spec, signal)
     if (!result.ok) throw result.error
     return result.value.items
   }

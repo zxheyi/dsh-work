@@ -78,6 +78,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
       async dispatch() { throw new Error('not called') },
       async importSessionResource() { throw new Error('not called') },
       async inspectSessionOutputs() { throw new Error('not called') },
+      async inspectSessionOutputSources() { throw new Error('not called') },
       async readSessionOutput() { throw new Error('not called') },
       async list() { return { ok: true, value: { items: [] } } },
       async *follow() {},
@@ -132,6 +133,8 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   assert.match(source, /data-work-legacy-deliverable-preview/)
   assert.match(source, /data-work-session-resource/)
   assert.match(source, /data-work-session-outputs/)
+  assert.match(source, /data-work-session-sources/)
+  assert.match(source, /data-work-output-preview-source/)
   assert.equal(source.includes('data-work-legacy-open'), false)
   assert.equal(source.includes('data-work-legacy-surface'), false)
   assert.equal(source.includes('你想完成什么？'), false)

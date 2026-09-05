@@ -142,9 +142,15 @@ async function run(): Promise<void> {
     }
     const send = async (text: string): Promise<void> => {
       assert.equal(await setDraft(text), text)
+      await clickSend()
+    }
+    const clickSend = async (): Promise<void> => {
       const clicked = await js<boolean>("(() => { const input = document.querySelector('[data-composer-input]'); const card = input?.closest('[data-composer-card]'); const buttons = card?.querySelectorAll('button'); const button = buttons?.item((buttons?.length ?? 0) - 1); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()")
       assert.equal(clicked, true)
     }
+    const selectFile = (name: string, type: string, content: string): Promise<boolean> => js<boolean>(
+      "(() => { const input = document.querySelector('[data-work-session-resource] input[type=file]'); if (!(input instanceof HTMLInputElement)) return false; const transfer = new DataTransfer(); transfer.items.add(new File([" + JSON.stringify(content) + "], " + JSON.stringify(name) + ", { type: " + JSON.stringify(type) + " })); Object.defineProperty(input, 'files', { configurable: true, value: transfer.files }); input.dispatchEvent(new Event('change', { bubbles: true })); return true })()",
+    )
 
     step = 'ordinary-reply'; report('fail')
     await clickSession('成果会话甲')
@@ -175,7 +181,19 @@ async function run(): Promise<void> {
       'Session B output leaked into Session A',
     )
     await js("window.__dshWorkOutputSelections = []; window.addEventListener('dsh-work:select-session-output', event => { event.preventDefault(); window.__dshWorkOutputSelections.push(event.detail) })")
-    await send(baseline.generateAPrompt)
+    const sourceName = 'source-brief.md'
+    const sourceContent = '# Source brief\n\nOnly verified facts.\n'
+    assert.equal(await setDraft(baseline.generateAPrompt), baseline.generateAPrompt)
+    assert.equal(await selectFile(sourceName, 'text/markdown', sourceContent), true)
+    const sourceDraft = await waitFor(
+      () => js<{ body: string; draft: string }>("({ body: document.body.innerText, draft: document.querySelector('[data-composer-input]')?.textContent ?? '' })"),
+      value => value.body.includes(sourceName) && value.body.includes('已复制，发送后读取')
+        && value.draft.includes(sourceName) && value.draft.includes(baseline.generateAPrompt),
+      'Session A source did not become ready',
+    )
+    const sourcePath = /@(?:"([^"\r\n]+)"|([^\s"'<>]+))/u.exec(sourceDraft.draft)?.slice(1).find(Boolean)
+    assert.ok(sourcePath)
+    await clickSend()
     const names = await waitFor(
       () => js<string[]>("Array.from(document.querySelectorAll('[data-work-session-output] strong')).map(item => item.textContent ?? '')"),
       values => values.length === 2,
@@ -184,7 +202,19 @@ async function run(): Promise<void> {
     assert.deepEqual(names, ['report-a.md', 'report-b.csv'])
     assert.equal(await js<boolean>("document.body.innerText.includes('empty.md')"), false)
     assert.equal(await js<number>("document.querySelectorAll('[data-work-session-outputs]').length"), 1)
+    const sourcePhase = await waitFor(
+      () => js<string>("document.querySelector('[data-work-session-outputs]')?.getAttribute('data-work-session-sources-phase') ?? ''"),
+      value => value === 'ready' || value === 'error',
+      'Source inspection did not settle',
+    )
+    assert.equal(sourcePhase, 'ready')
+    await waitFor(
+      () => js<string>("document.querySelector('[data-work-session-sources]')?.textContent ?? ''"),
+      text => text === `已读取 1 份资料${sourceName}已读取`,
+      'Verified source grouping did not appear beside generated results',
+    )
     assert.equal(await js<number>("document.querySelectorAll('[data-produced-files-row]').length"), 0)
+    assert.equal(fs.readFileSync(path.join(baseline.workspacePath, sourcePath), 'utf8'), sourceContent)
     const reportA = fs.readFileSync(path.join(baseline.workspacePath, 'report-a.md'), 'utf8')
     assert.match(reportA, /^# 甲报告/u)
     assert.equal(fs.readFileSync(path.join(baseline.workspacePath, 'report-b.csv'), 'utf8'), 'name,value\nalpha,1\n')
@@ -230,6 +260,30 @@ async function run(): Promise<void> {
     assert.equal(await js<boolean>('globalThis.__dshWorkPreviewExecuted === true'), false)
     fs.writeFileSync(path.join(output, 'preview.png'), (await window.webContents.capturePage()).toPNG())
 
+    step = 'source-review-and-reference'; report('fail')
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] [role=tab]')).find(item => item.textContent?.trim().startsWith('来源')); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
+    const sourcePanel = await waitFor(
+      () => js<string>("document.querySelector('[data-work-output-preview-source]')?.textContent ?? ''"),
+      text => text.includes(sourceName) && text.includes('工作区副本') && text.includes('已读取') && text.includes('在输入框引用'),
+      'Preview source tab did not show the verified Workspace snapshot',
+    )
+    assert.match(sourcePanel, /已读取/u)
+    assert.equal(await js<string>("document.querySelector('[data-work-output-preview-source]')?.getAttribute('data-work-output-preview-source') ?? ''"), sourcePath)
+    await js("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+    fs.writeFileSync(path.join(output, 'sources.png'), (await window.webContents.capturePage()).toPNG())
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview-source] button')).find(item => item.textContent?.trim() === '在输入框引用'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
+    await waitFor(
+      () => js<string>("document.querySelector('[data-composer-input]')?.textContent ?? ''"),
+      text => text.includes(sourcePath),
+      'Verified source reference was not restored to the native composer',
+    )
+    await clickSend()
+    await waitFor(
+      () => js<string>("document.querySelector('[data-composer-input]')?.textContent ?? ''"),
+      text => text === '',
+      'Referenced source draft was not consumed by native Send',
+    )
+
     step = 'native-tool-surface-handoff'; report('fail')
     await js("(() => { const process = document.querySelector('[data-turn-process]'); if (process instanceof HTMLButtonElement && process.getAttribute('aria-expanded') !== 'true') process.click() })()")
     await waitFor(
@@ -273,6 +327,18 @@ async function run(): Promise<void> {
       () => js<string>("document.querySelector('[data-work-output-preview]')?.textContent ?? ''"),
       text => text.includes('此格式暂不支持应用内预览') && text.includes('使用系统应用打开'),
       'Unsupported output did not expose a real system-open action',
+    )
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] [role=tab]')).find(item => item.textContent?.trim().startsWith('来源')); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
+    await waitFor(
+      () => js<string>("document.querySelector('[data-work-output-preview-source]')?.textContent ?? ''"),
+      text => text.includes(sourceName) && text.includes('已读取'),
+      'Non-Markdown output did not expose its verified source',
+    )
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] [role=tab]')).find(item => item.textContent?.trim() === '内容'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
+    await waitFor(
+      () => js<string>("document.querySelector('[data-work-output-preview]')?.textContent ?? ''"),
+      text => text.includes('此格式暂不支持应用内预览'),
+      'Non-Markdown output did not return to its content fallback',
     )
     const selected = await js<Array<{ path: string }>>("window.__dshWorkOutputSelections")
     assert.deepEqual(selected.map(item => item.path), ['report-a.md', 'report-a.md', 'report-b.csv'])

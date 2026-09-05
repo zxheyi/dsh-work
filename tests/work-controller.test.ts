@@ -1175,6 +1175,269 @@ test('does not delete a same-name file from a replaced Workspace root during fai
   await fs.rm(root, { recursive: true, force: true })
 })
 
+test('reports only imported Session resources that the completed Turn actually references or reads', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-sources-'))
+  const workspace = path.join(root, 'workspace')
+  await fs.mkdir(workspace)
+  const sessionId = 'session-sources'
+  const events: unknown[] = []
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    harness: {
+      ...testHarness(),
+      async inspectSessionWorkspace() { return workspace },
+      async inspectSession() { return { cwd: workspace, events } },
+    },
+  })
+  const imported = async (name: string, content: string) => controller.importSessionResource({
+    sessionId,
+    name,
+    dataBase64: Buffer.from(content).toString('base64'),
+  })
+  const verified = await imported('verified.md', '# Verified\n')
+  const unverified = await imported('unverified.md', '# Unverified\n')
+  const changed = await imported('changed.md', '# Original\n')
+  const produced = await imported('also-produced.md', '# Produced\n')
+  await fs.writeFile(path.join(workspace, 'report.md'), '# Report\n')
+  await fs.writeFile(path.join(workspace, changed.path), '# Changed after import\n')
+  const missingBytes = Buffer.from('# Missing\n')
+  const missing = `attachment-${createHash('sha256').update(sessionId).digest('hex').slice(0, 12)}-${createHash('sha256').update(missingBytes).digest('hex').slice(0, 12)}-missing.md`
+  const references = [verified.path, unverified.path, changed.path, missing, produced.path]
+    .map(value => `@${value}`).join(' ')
+  const call = (seq: number, callId: string, name: string, args: object) => ({
+    seq,
+    type: 'tool/call',
+    data: { turn: 2, callId, name, arguments: JSON.stringify(args) },
+  })
+  const result = (seq: number, callId: string) => ({
+    seq,
+    type: 'tool/result',
+    surfaceOp: 'append',
+    data: {
+      turn: 2,
+      message: {
+        source: { callId },
+        content: [{ type: 'tool-result', isError: false }],
+      },
+    },
+  })
+  events.push(
+    { seq: 1, type: 'turn/start', data: { turn: 2 } },
+    {
+      seq: 2,
+      type: 'user/message',
+      data: { source: { kind: 'user' }, content: [{ type: 'text', text: `${references} prose @random.md` }] },
+    },
+    call(3, 'read-verified', 'read', { file_path: path.join(workspace, verified.path) }),
+    result(4, 'read-verified'),
+    call(5, 'produce-imported-path', 'write', {
+      file_path: `./${produced.path}`, content: '# Produced\n',
+    }),
+    result(6, 'produce-imported-path'),
+    call(7, 'produce-report', 'write', { file_path: 'report.md', content: '# Report\n' }),
+    result(8, 'produce-report'),
+    { seq: 9, type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } },
+  )
+
+  const sources = await controller.inspectSessionOutputSources({
+    sessionId,
+    turn: 2,
+    throughSeq: 8,
+  })
+
+  assert.deepEqual(sources.map(source => ({ path: source.path, status: source.status })), [
+    { path: verified.path, status: 'verified' },
+    { path: unverified.path, status: 'unverified' },
+    { path: changed.path, status: 'changed' },
+    { path: missing, status: 'missing' },
+  ])
+  assert.equal(sources[0]?.contentDigest, verified.contentDigest)
+  assert.equal(sources.some(source => source.path === produced.path), false)
+  assert.equal(sources.some(source => source.path === 'random.md'), false)
+
+  const content = await controller.readSessionOutput({
+    sessionId,
+    turn: 2,
+    throughSeq: 8,
+    path: 'report.md',
+  })
+  assert.deepEqual(content.sources, sources)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('does not carry a prior source into a text-free Turn or admit forged oversized attachment names', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-source-reset-'))
+  const sessionId = 'session-source-reset'
+  const key = createHash('sha256').update(sessionId).digest('hex').slice(0, 12)
+  const oldPath = `attachment-${key}-${'a'.repeat(12)}-old.md`
+  const oversized = `attachment-${key}-${'b'.repeat(12)}-${'x'.repeat(201)}.md`
+  await fs.writeFile(path.join(root, 'report.md'), '# Valid report\n')
+  const events = [
+    { seq: 1, type: 'turn/start', data: { turn: 1 } },
+    {
+      seq: 2,
+      type: 'user/message',
+      data: { source: { kind: 'user' }, content: [{ type: 'text', text: `@${oldPath}` }] },
+    },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+    { seq: 4, type: 'turn/start', data: { turn: 2 } },
+    {
+      seq: 5,
+      type: 'user/message',
+      data: { source: { kind: 'user' }, content: [{ type: 'image', data: 'ignored' }] },
+    },
+    { seq: 6, type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } },
+    { seq: 7, type: 'turn/start', data: { turn: 3 } },
+    {
+      seq: 8,
+      type: 'user/message',
+      data: { source: { kind: 'user' }, content: [{ type: 'text', text: `@${oversized}` }] },
+    },
+    {
+      seq: 9,
+      type: 'tool/call',
+      data: {
+        turn: 3, callId: 'report', name: 'write',
+        arguments: JSON.stringify({ file_path: 'report.md', content: '# Valid report\n' }),
+      },
+    },
+    {
+      seq: 10,
+      type: 'tool/result',
+      surfaceOp: 'append',
+      data: {
+        turn: 3,
+        message: {
+          source: { callId: 'report' },
+          content: [{ type: 'tool-result', isError: false }],
+        },
+      },
+    },
+    { seq: 11, type: 'turn/end', data: { turn: 3, reason: { kind: 'completed' } } },
+  ]
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    harness: {
+      ...testHarness(),
+      async inspectSession() { return { cwd: root, events } },
+    },
+  })
+
+  assert.deepEqual(await controller.inspectSessionOutputSources({
+    sessionId, turn: 2, throughSeq: 5,
+  }), [])
+  assert.deepEqual(await controller.inspectSessionOutputSources({
+    sessionId, turn: 3, throughSeq: 10,
+  }), [])
+  assert.deepEqual((await controller.readSessionOutput({
+    sessionId, turn: 3, throughSeq: 10, path: 'report.md',
+  })).sources, [])
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('marks a source inaccessible when the Session Workspace root changes during inspection', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-source-root-swap-'))
+  const workspace = path.join(root, 'workspace')
+  const movedWorkspace = path.join(root, 'workspace-original')
+  const replacement = path.join(root, 'replacement')
+  await fs.mkdir(workspace)
+  await fs.mkdir(replacement)
+  const sessionId = 'session-source-root-swap'
+  const events: unknown[] = []
+  let swapped = false
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    harness: {
+      ...testHarness(),
+      async inspectSessionWorkspace() { return workspace },
+      async inspectSession() { return { cwd: workspace, events } },
+    },
+    sessionOutputInternals: {
+      async afterSourceFirstStat(candidatePath) {
+        if (swapped) return
+        swapped = true
+        await fs.copyFile(candidatePath, path.join(replacement, path.basename(candidatePath)))
+        await fs.rename(workspace, movedWorkspace)
+        await fs.symlink(replacement, workspace)
+      },
+    },
+  })
+  const source = await controller.importSessionResource({
+    sessionId,
+    name: 'source.md',
+    dataBase64: Buffer.from('# Source\n').toString('base64'),
+  })
+  events.push(
+    { seq: 1, type: 'turn/start', data: { turn: 1 } },
+    {
+      seq: 2,
+      type: 'user/message',
+      data: { source: { kind: 'user' }, content: [{ type: 'text', text: `@${source.path}` }] },
+    },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  )
+
+  const sources = await controller.inspectSessionOutputSources({
+    sessionId, turn: 1, throughSeq: 2,
+  })
+
+  assert.equal(swapped, true)
+  assert.deepEqual(sources.map(value => ({ status: value.status, bytes: value.bytes, digest: value.contentDigest })), [
+    { status: 'inaccessible', bytes: null, digest: null },
+  ])
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('rejects a Session Workspace root replaced while establishing the source boundary', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-source-baseline-swap-'))
+  const workspace = path.join(root, 'workspace')
+  const movedWorkspace = path.join(root, 'workspace-original')
+  const replacement = path.join(root, 'replacement')
+  await fs.mkdir(workspace)
+  await fs.mkdir(replacement)
+  const sessionId = 'session-source-baseline-swap'
+  const events: unknown[] = []
+  let sourcePath = ''
+  let swapped = false
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    harness: {
+      ...testHarness(),
+      async inspectSessionWorkspace() { return workspace },
+      async inspectSession() { return { cwd: workspace, events } },
+    },
+    sessionOutputInternals: {
+      async afterSourceWorkspaceRealpath() {
+        swapped = true
+        await fs.copyFile(path.join(workspace, sourcePath), path.join(replacement, sourcePath))
+        await fs.rename(workspace, movedWorkspace)
+        await fs.symlink(replacement, workspace)
+      },
+    },
+  })
+  const source = await controller.importSessionResource({
+    sessionId,
+    name: 'source.md',
+    dataBase64: Buffer.from('# Source\n').toString('base64'),
+  })
+  sourcePath = source.path
+  events.push(
+    { seq: 1, type: 'turn/start', data: { turn: 1 } },
+    {
+      seq: 2,
+      type: 'user/message',
+      data: { source: { kind: 'user' }, content: [{ type: 'text', text: `@${source.path}` }] },
+    },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  )
+
+  await assert.rejects(controller.inspectSessionOutputSources({
+    sessionId, turn: 1, throughSeq: 2,
+  }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-output-invalid')
+  assert.equal(swapped, true)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
 test('reports only real nonempty files produced by the addressed completed Session Turn', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-session-outputs-'))
   const workspaceA = path.join(root, 'session-a')
@@ -1414,6 +1677,7 @@ test('reads only the addressed validated Markdown output on demand', async () =>
     mediaType: 'text/markdown',
     content: markdown,
     contentDigest: createHash('sha256').update(markdown).digest('hex'),
+    sources: [],
   })
   for (const selectedPath of ['unregistered.md', 'page.html']) {
     await assert.rejects(controller.readSessionOutput({

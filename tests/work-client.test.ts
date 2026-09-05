@@ -74,6 +74,9 @@ function successfulRemote(overrides: Partial<WorkClientRemote> = {}): WorkClient
     async inspectSessionOutputs() {
       return { ok: true as const, value: { items: [] } }
     },
+    async inspectSessionOutputSources() {
+      return { ok: true as const, value: { items: [] } }
+    },
     async readSessionOutput() {
       return {
         ok: true as const,
@@ -86,6 +89,7 @@ function successfulRemote(overrides: Partial<WorkClientRemote> = {}): WorkClient
           mediaType: 'text/markdown',
           content: '# Report\n',
           contentDigest: 'd'.repeat(64),
+          sources: [],
         },
       }
     },
@@ -338,6 +342,7 @@ test('reads the exact Session output without mutating Work state', async () => {
           mediaType: 'text/markdown',
           content: '# Report\n',
           contentDigest: 'e'.repeat(64),
+          sources: [],
         },
       }
     },
@@ -350,5 +355,39 @@ test('reads the exact Session output without mutating Work state', async () => {
 
   assert.deepEqual(received, [spec])
   assert.equal(content.content, '# Report\n')
+  assert.deepEqual(model.getSnapshot().items, [view(1)])
+})
+
+test('loads auditable sources for the exact Session Turn without mutating Work state', async () => {
+  const received: unknown[] = []
+  const model = new ClientWorkModel(successfulRemote({
+    async inspectSessionOutputSources(spec) {
+      received.push(spec)
+      return {
+        ok: true,
+        value: {
+          items: [{
+            sessionId: spec.sessionId,
+            turn: spec.turn,
+            name: 'brief.md',
+            path: 'attachment-source-brief.md',
+            reference: '@attachment-source-brief.md',
+            bytes: 12,
+            mediaType: 'text/markdown',
+            contentDigest: 'f'.repeat(64),
+            status: 'verified',
+          }],
+        },
+      }
+    },
+  }))
+  model.replaceBaseline({ items: [view(1)] })
+  const works = new WorksController(new Context(), model)
+  const spec = { sessionId: 'session-exact', turn: 3, throughSeq: 18 }
+
+  const sources = await works.inspectSessionOutputSources(spec)
+
+  assert.deepEqual(received, [spec])
+  assert.equal(sources[0]?.status, 'verified')
   assert.deepEqual(model.getSnapshot().items, [view(1)])
 })

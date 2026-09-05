@@ -195,7 +195,7 @@
       "files": "packages/work-domain/index.ts；packages/work-api/index.ts；packages/work-api/surface.ts",
       "verification": "来源关联集成、缺失来源负向、来源页 E2E/截图",
       "limits": "来源不是可信度评分，不从聊天措辞臆造来源。",
-      "status": "pending"
+      "status": "verified"
     },
     {
       "id": "T11",

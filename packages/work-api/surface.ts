@@ -16,7 +16,12 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 
 import type { IWorks, WorkClientSnapshot } from './client-model.ts'
-import type { WorkSessionOutputContent, WorkSessionOutputFile, WorkView } from './index.ts'
+import type {
+  WorkSessionOutputContent,
+  WorkSessionOutputFile,
+  WorkSessionOutputSource,
+  WorkView,
+} from './index.ts'
 import type { WorkDeliverableContent } from './index.ts'
 
 interface WorkSurfaceInjected {
@@ -63,6 +68,11 @@ interface NativeSessionOutputsProps extends WorkSurfaceInjected {
   readonly matched: SessionOutputsMatch
   readonly sessionId: string
   readonly openFile: (path: string) => void
+}
+
+interface SessionResourceReferenceDetail {
+  readonly sessionId: string
+  readonly path: string
 }
 
 interface SessionOutputPreviewSelection extends WorkSessionOutputFile {
@@ -593,6 +603,24 @@ function NativeSessionResourceEntry({
     }
   }, [session.sessionId])
 
+  useEffect(() => {
+    const referenceSource = (event: Event): void => {
+      if (!(event instanceof CustomEvent) || typeof event.detail !== 'object' || !event.detail) return
+      const detail = event.detail as Partial<SessionResourceReferenceDetail>
+      if (detail.sessionId !== session.sessionId || typeof detail.path !== 'string') return
+      const mention = resourceMention(detail.path)
+      const current = sessionResourceDrafts.get(session.sessionId) ?? input.draft
+      if (current.includes(mention)) return
+      const separator = current.trim().length > 0 ? ' ' : ''
+      const next = `${current}${separator}${mention} `
+      sessionResourceDrafts.set(session.sessionId, next)
+      inputActions.setDraft(next)
+      requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-composer-input]')?.focus())
+    }
+    window.addEventListener('dsh-work:reference-session-resource', referenceSource)
+    return () => window.removeEventListener('dsh-work:reference-session-resource', referenceSource)
+  }, [input.draft, inputActions, session.sessionId])
+
   const remove = (entry: SessionResourceEntryState): void => {
     updateEntries(session.sessionId, current => current.filter(candidate => candidate.id !== entry.id))
     entry.abort.abort()
@@ -1084,35 +1112,79 @@ function outputSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function sourceStatusLabel(status: WorkSessionOutputSource['status']): string {
+  switch (status) {
+    case 'verified': return '已读取'
+    case 'unverified': return '已关联，未读取'
+    case 'missing': return '文件不存在'
+    case 'changed': return '文件已变更'
+    case 'inaccessible': return '无法访问'
+  }
+}
+
 function NativeSessionOutputs({ matched, openFile, sessionId, works }: NativeSessionOutputsProps): ReactNode {
   const [files, setFiles] = useState<readonly WorkSessionOutputFile[]>(Object.freeze([]))
+  const [sources, setSources] = useState<readonly WorkSessionOutputSource[]>(Object.freeze([]))
+  const [sourcePhase, setSourcePhase] = useState<'loading' | 'ready' | 'error'>('loading')
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
 
   useEffect(() => {
     const abort = new AbortController()
     setFiles(Object.freeze([]))
+    setSources(Object.freeze([]))
+    setSourcePhase('loading')
     setSelectedPath(null)
-    void works.inspectSessionOutputs({
+    const spec = {
       sessionId,
       turn: matched.turn,
       throughSeq: matched.throughSeq,
-    }, abort.signal).then(value => {
-      setFiles(value)
+    }
+    void works.inspectSessionOutputs(spec, abort.signal).then(nextFiles => {
+      if (abort.signal.aborted) return
+      setFiles(nextFiles)
+    }).catch(() => {
+      if (!abort.signal.aborted) setFiles(Object.freeze([]))
+    })
+    void works.inspectSessionOutputSources(spec, abort.signal).then(nextSources => {
+      if (abort.signal.aborted) return
+      setSources(nextSources)
+      setSourcePhase('ready')
     }).catch(() => {
       if (!abort.signal.aborted) {
-        setFiles(Object.freeze([]))
+        setSources(Object.freeze([]))
+        setSourcePhase('error')
       }
     })
     return () => abort.abort()
   }, [matched.throughSeq, matched.turn, sessionId, works])
 
   if (files.length < 1) return null
+  const verifiedCount = sources.filter(source => source.status === 'verified').length
+  const sourceSummary = verifiedCount > 0
+    ? `已读取 ${String(verifiedCount)} 份资料`
+    : `已关联 ${String(sources.length)} 份资料`
   return h('div', {
     className: 'dsh-work-session-outputs',
     'data-work-session-outputs': true,
     'data-work-session-output-turn': String(matched.turn),
+    'data-work-session-sources-phase': sourcePhase,
   },
-  h('span', { className: 'dsh-work-session-outputs-label' }, '成果'),
+  sources.length > 0 ? h('div', {
+    className: 'dsh-work-session-sources',
+    'data-work-session-sources': true,
+  },
+  h('span', { className: 'dsh-work-session-sources-summary' }, sourceSummary),
+  h('div', { className: 'dsh-work-session-sources-list' }, ...sources.map(source => h('span', {
+    className: `dsh-work-session-source is-${source.status}`,
+    key: source.path,
+    title: source.path,
+    'data-work-session-source': source.path,
+  },
+  h('strong', null, source.name),
+  h('small', null, sourceStatusLabel(source.status)))))) : null,
+  sourcePhase === 'error' ? h('span', { className: 'dsh-work-session-sources-error' }, '资料来源暂不可用') : null,
+  files.length > 0 ? h('div', { className: 'dsh-work-session-output-group' },
+  h('span', { className: 'dsh-work-session-outputs-label' }, '生成结果'),
   h('div', { className: 'dsh-work-session-outputs-row' }, ...files.map(file => h('button', {
     type: 'button',
     key: file.path,
@@ -1143,7 +1215,7 @@ function NativeSessionOutputs({ matched, openFile, sessionId, works }: NativeSes
   h('span', { className: 'dsh-work-session-output-icon', 'aria-hidden': 'true' }, '文'),
   h('span', { className: 'dsh-work-session-output-copy' },
     h('strong', null, file.name),
-    h('small', null, outputSize(file.bytes)))))))
+    h('small', null, outputSize(file.bytes))))))) : null)
 }
 
 function safeMarkdownContent(content: WorkSessionOutputContent): ReactNode {
@@ -1185,6 +1257,7 @@ function NativeSessionOutputPreview({
   works,
 }: NativeSessionOutputPreviewProps): ReactNode {
   const selection = useSyncExternalStore(preview.subscribe, preview.getSnapshot, preview.getSnapshot)
+  const [tab, setTab] = useState<'content' | 'sources'>('content')
   const [retry, setRetry] = useState(0)
   const request = useMemo(() => new LatestPreviewRequest(), [])
   const [state, setState] = useState<
@@ -1193,6 +1266,14 @@ function NativeSessionOutputPreview({
     | { readonly phase: 'ready'; readonly content: WorkSessionOutputContent }
     | { readonly phase: 'error' }
   >({ phase: 'idle' })
+  const [sourceState, setSourceState] = useState<
+    | { readonly phase: 'idle' | 'loading' | 'error' }
+    | { readonly phase: 'ready'; readonly sources: readonly WorkSessionOutputSource[] }
+  >({ phase: 'idle' })
+
+  useEffect(() => {
+    setTab('content')
+  }, [selection?.path, selection?.sessionId])
 
   useEffect(() => {
     if (!selection || selection.sessionId !== sessionId || selection.mediaType !== 'text/markdown') {
@@ -1218,11 +1299,32 @@ function NativeSessionOutputPreview({
   }, [request, retry, selection, sessionId, works])
 
   useEffect(() => {
+    if (!selection || selection.sessionId !== sessionId) {
+      setSourceState({ phase: 'idle' })
+      return
+    }
+    const abort = new AbortController()
+    setSourceState({ phase: 'loading' })
+    void works.inspectSessionOutputSources({
+      sessionId: selection.sessionId,
+      turn: selection.turn,
+      throughSeq: selection.throughSeq,
+    }, abort.signal).then(sources => {
+      if (abort.signal.aborted) return
+      setSourceState({ phase: 'ready', sources })
+    }).catch(() => {
+      if (!abort.signal.aborted) setSourceState({ phase: 'error' })
+    })
+    return () => abort.abort()
+  }, [selection, sessionId, works])
+
+  useEffect(() => {
     if (selection && selection.sessionId !== sessionId) closePreview()
   }, [closePreview, selection, sessionId])
 
   if (!selection) return null
   const unsupported = selection.mediaType !== 'text/markdown'
+  const previewSources = sourceState.phase === 'ready' ? sourceState.sources : Object.freeze([])
   return h('section', {
     className: 'dsh-work-output-preview',
     'data-work-output-preview': selection.path,
@@ -1238,12 +1340,56 @@ function NativeSessionOutputPreview({
       onClick: closePreview,
     }, '×')),
   h('div', { className: 'dsh-work-output-preview-tabs', role: 'tablist', 'aria-label': '文件详情' },
-    h('button', { type: 'button', role: 'tab', 'aria-selected': true }, '内容')),
+    h('button', {
+      type: 'button',
+      role: 'tab',
+      'aria-selected': tab === 'content',
+      onClick: () => setTab('content'),
+    }, '内容'),
+    h('button', {
+      type: 'button',
+      role: 'tab',
+      'aria-selected': tab === 'sources',
+      onClick: () => setTab('sources'),
+    }, `来源${previewSources.length > 0 ? ` ${String(previewSources.length)}` : ''}`)),
   h('div', { className: 'dsh-work-output-preview-meta' },
     h('span', null, `第 ${String(selection.turn)} 回合生成`),
     h('span', null, outputSize(selection.bytes))),
   h('div', { className: 'dsh-work-output-preview-body' },
-    unsupported
+    tab === 'sources'
+      ? sourceState.phase === 'loading' || sourceState.phase === 'idle'
+        ? h('div', { className: 'dsh-work-output-preview-status', role: 'status', 'aria-live': 'polite' }, '正在核对资料来源…')
+        : sourceState.phase === 'error'
+          ? h('div', { className: 'dsh-work-output-preview-empty' },
+            h('strong', null, '暂时无法核对资料来源'),
+            h('p', null, '重新打开文件后可以再次核对。'))
+          : previewSources.length < 1
+            ? h('div', { className: 'dsh-work-output-preview-empty' },
+              h('strong', null, '没有可核对的资料来源'),
+              h('p', null, '这里只显示本回合明确引用或实际读取的工作区资料。'))
+            : h('div', { className: 'dsh-work-output-preview-sources' }, ...previewSources.map(source => h('article', {
+              className: `dsh-work-output-preview-source is-${source.status}`,
+              key: source.path,
+              'data-work-output-preview-source': source.path,
+            },
+            h('div', { className: 'dsh-work-output-preview-source-main' },
+              h('span', { className: 'dsh-work-output-preview-source-icon', 'aria-hidden': true }, '文'),
+              h('span', { className: 'dsh-work-output-preview-source-copy' },
+                h('strong', null, source.name),
+                h('small', { title: source.path }, source.path))),
+            h('div', { className: 'dsh-work-output-preview-source-meta' },
+              h('span', null, '工作区副本'),
+              h('span', { className: `is-${source.status}` }, sourceStatusLabel(source.status)),
+              source.bytes === null ? null : h('span', null, outputSize(source.bytes))),
+            h('button', {
+              type: 'button',
+              disabled: source.status !== 'verified' && source.status !== 'unverified',
+              onClick: () => window.dispatchEvent(new CustomEvent<SessionResourceReferenceDetail>(
+                'dsh-work:reference-session-resource',
+                { detail: Object.freeze({ sessionId: source.sessionId, path: source.path }) },
+              )),
+            }, '在输入框引用'))))
+      : unsupported
       ? h('div', { className: 'dsh-work-output-preview-empty' },
         h('strong', null, '此格式暂不支持应用内预览'),
         h('p', null, '可以使用系统应用打开这个文件。'),
@@ -1300,9 +1446,18 @@ body[data-ds-dark-theme] {
 .dsh-work-native-brand-mark { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: white; background: #365eca; font: 700 13px/1 var(--work-font); }
 [data-approval-key] { font-family: var(--work-font); }
 [data-approval-key] > div { border-color: color-mix(in srgb, var(--work-warning) 46%, var(--work-border)) !important; border-radius: 14px !important; box-shadow: var(--work-shadow) !important; }
-.dsh-work-session-outputs { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 8px; margin-top: 16px; color: var(--work-text); font-family: var(--work-font); }
+.dsh-work-session-outputs { display: grid; gap: 10px; margin-top: 16px; color: var(--work-text); font-family: var(--work-font); }
+.dsh-work-session-output-group { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 8px; }
 .dsh-work-session-outputs-label { color: var(--work-faint); font-size: 13px; line-height: 22px; }
 .dsh-work-session-outputs-row { min-width: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.dsh-work-session-sources { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 7px; }
+.dsh-work-session-sources-summary { color: var(--work-muted); font-size: 12px; font-weight: 600; }
+.dsh-work-session-sources-error { color: var(--work-warning); font-size: 11px; }
+.dsh-work-session-sources-list { display: flex; min-width: 0; flex-wrap: wrap; gap: 6px; }
+.dsh-work-session-source { display: inline-flex; min-width: 0; max-width: 220px; align-items: baseline; gap: 5px; padding: 3px 7px; border: 1px solid var(--work-border); border-radius: 7px; background: var(--work-surface-subtle); }
+.dsh-work-session-source strong { overflow: hidden; color: var(--work-text); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-work-session-source small { flex: 0 0 auto; color: var(--work-faint); font-size: 10px; }
+.dsh-work-session-source.is-missing small, .dsh-work-session-source.is-changed small, .dsh-work-session-source.is-inaccessible small { color: var(--work-warning); }
 .dsh-work-session-output { min-width: 0; max-width: 260px; display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 8px; padding: 7px 10px 7px 8px; border: 1px solid var(--work-border); border-radius: 9px; color: var(--work-text); background: var(--work-surface); text-align: left; cursor: pointer; font-family: var(--work-font); }
 .dsh-work-session-output:hover { border-color: var(--work-border-strong); background: var(--work-surface-subtle); }
 .dsh-work-session-output.is-selected { border-color: var(--work-accent); box-shadow: inset 0 0 0 1px var(--work-accent); }
@@ -1319,10 +1474,25 @@ body[data-ds-dark-theme] {
 .dsh-work-output-preview-close { width: 32px; height: 32px; border: 0; border-radius: 50%; color: var(--work-muted); background: transparent; cursor: pointer; font: 400 26px/30px var(--work-font); }
 .dsh-work-output-preview-close:hover { color: var(--work-text); background: var(--work-surface-subtle); }
 .dsh-work-output-preview-tabs { height: 50px; display: flex; align-items: stretch; padding: 0 18px; border-bottom: 1px solid var(--work-border); }
-.dsh-work-output-preview-tabs button { position: relative; min-width: 54px; border: 0; color: var(--work-accent); background: transparent; cursor: default; font: 600 14px/50px var(--work-font); }
-.dsh-work-output-preview-tabs button::after { content: ''; position: absolute; height: 2px; left: 10px; right: 10px; bottom: 0; background: var(--work-accent); }
+.dsh-work-output-preview-tabs button { position: relative; min-width: 54px; border: 0; color: var(--work-muted); background: transparent; cursor: pointer; font: 600 14px/50px var(--work-font); }
+.dsh-work-output-preview-tabs button[aria-selected="true"] { color: var(--work-accent); }
+.dsh-work-output-preview-tabs button[aria-selected="true"]::after { content: ''; position: absolute; height: 2px; left: 10px; right: 10px; bottom: 0; background: var(--work-accent); }
 .dsh-work-output-preview-meta { display: flex; justify-content: space-between; gap: 12px; padding: 14px 24px 0; color: var(--work-faint); font-size: 11px; }
 .dsh-work-output-preview-body { flex: 1; min-height: 0; padding: 18px 24px 96px; overflow-y: auto; }
+.dsh-work-output-preview-sources { display: grid; gap: 12px; }
+.dsh-work-output-preview-source { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: 10px 12px; padding: 14px; border: 1px solid var(--work-border); border-radius: 10px; background: var(--work-surface-subtle); }
+.dsh-work-output-preview-source-main { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.dsh-work-output-preview-source-icon { display: grid; width: 28px; height: 32px; flex: 0 0 auto; place-items: center; border: 1px solid var(--work-border-strong); border-radius: 5px; background: var(--work-surface); color: var(--work-muted); font-size: 11px; font-weight: 700; }
+.dsh-work-output-preview-source-copy { display: grid; min-width: 0; gap: 3px; }
+.dsh-work-output-preview-source-copy strong, .dsh-work-output-preview-source-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-work-output-preview-source-copy strong { color: var(--work-text); font-size: 13px; }
+.dsh-work-output-preview-source-copy small { color: var(--work-faint); font-size: 10px; }
+.dsh-work-output-preview-source-meta { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--work-faint); font-size: 10px; }
+.dsh-work-output-preview-source-meta span { padding: 2px 6px; border-radius: 999px; background: var(--work-surface); }
+.dsh-work-output-preview-source-meta .is-verified { color: var(--work-success); }
+.dsh-work-output-preview-source-meta .is-missing, .dsh-work-output-preview-source-meta .is-changed, .dsh-work-output-preview-source-meta .is-inaccessible { color: var(--work-warning); }
+.dsh-work-output-preview-source > button { align-self: center; padding: 6px 9px; border: 1px solid var(--work-border-strong); border-radius: 7px; background: var(--work-surface); color: var(--work-text); cursor: pointer; font: 600 11px/1.2 var(--work-font); }
+.dsh-work-output-preview-source > button:disabled { color: var(--work-faint); cursor: default; opacity: .65; }
 .dsh-work-output-preview-status { color: var(--work-muted); padding: 16px 0; font-size: 13px; }
 .dsh-work-output-preview-empty { display: grid; gap: 8px; align-content: start; padding: 28px 0; }
 .dsh-work-output-preview-empty strong { font-size: 15px; }

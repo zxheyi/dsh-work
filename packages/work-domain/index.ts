@@ -122,6 +122,20 @@ export interface InspectSessionOutputsSpec {
   readonly throughSeq: number
 }
 
+export type InspectSessionOutputSourcesSpec = InspectSessionOutputsSpec
+
+export interface SessionOutputSource {
+  readonly sessionId: string
+  readonly turn: number
+  readonly name: string
+  readonly path: string
+  readonly reference: string
+  readonly bytes: number | null
+  readonly mediaType: string | null
+  readonly contentDigest: string | null
+  readonly status: 'verified' | 'unverified' | 'missing' | 'changed' | 'inaccessible'
+}
+
 export interface ReadSessionOutputSpec extends InspectSessionOutputsSpec {
   readonly path: string
 }
@@ -138,6 +152,7 @@ export interface SessionOutputFile {
 export interface SessionOutputContent extends SessionOutputFile {
   readonly content: string
   readonly contentDigest: string
+  readonly sources: readonly SessionOutputSource[]
 }
 
 export interface WorkFileDeliverable {
@@ -161,6 +176,10 @@ export interface WorkController {
   showDelivery(workId: string, signal?: AbortSignal): Promise<void>
   importSessionResource(spec: ImportSessionResourceSpec, signal?: AbortSignal): Promise<SessionFileResource>
   inspectSessionOutputs(spec: InspectSessionOutputsSpec, signal?: AbortSignal): Promise<readonly SessionOutputFile[]>
+  inspectSessionOutputSources(
+    spec: InspectSessionOutputSourcesSpec,
+    signal?: AbortSignal,
+  ): Promise<readonly SessionOutputSource[]>
   readSessionOutput(spec: ReadSessionOutputSpec, signal?: AbortSignal): Promise<SessionOutputContent>
   follow(signal?: AbortSignal): AsyncIterable<WorkFollowFrame>
   dispatch(request: DispatchWorkRequest, signal?: AbortSignal): Promise<WorkSnapshot>
@@ -246,6 +265,8 @@ export interface WorkControllerOptions {
       readonly producedPath: string
     }) => void | Promise<void>
     readonly afterPreviewFirstStat?: (path: string) => void | Promise<void>
+    readonly afterSourceFirstStat?: (path: string) => void | Promise<void>
+    readonly afterSourceWorkspaceRealpath?: () => void | Promise<void>
   }
 }
 
@@ -322,8 +343,21 @@ export const MAX_WORK_MARKDOWN_DELIVERABLE_BYTES = 5 * 1024 * 1024
 
 const MAX_WORK_FILE_RESOURCE_BASE64_CHARS = Math.ceil(MAX_WORK_FILE_RESOURCE_BYTES / 3) * 4
 const MAX_SESSION_OUTPUT_FILES = 64
+const MAX_SESSION_OUTPUT_SOURCES = 20
 const MAX_SESSION_OUTPUT_PREVIEW_BYTES = 5 * 1024 * 1024
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u
+
+function isSafeResourceName(name: string): boolean {
+  return name.length >= 1
+    && name.length <= 200
+    && name.trim() === name
+    && name !== '.'
+    && name !== '..'
+    && path.basename(name) === name
+    && !name.includes('/')
+    && !name.includes('\\')
+    && !CONTROL_CHARACTER_PATTERN.test(name)
+}
 
 function resourceError(message: string, options?: ErrorOptions): WorkError {
   return new WorkError('work/resource-invalid', message, options)
@@ -337,17 +371,7 @@ function decodeResource(command: AddFileResourceCommand): {
   readonly resourceId: string
 } {
   const name = command.name
-  if (
-    name.length < 1
-    || name.length > 200
-    || name.trim() !== name
-    || name === '.'
-    || name === '..'
-    || path.basename(name) !== name
-    || name.includes('/')
-    || name.includes('\\')
-    || CONTROL_CHARACTER_PATTERN.test(name)
-  ) {
+  if (!isSafeResourceName(name)) {
     throw resourceError('The selected resource must have one safe file name.')
   }
   const mediaType = command.mediaType?.trim() || null
@@ -699,6 +723,286 @@ function sessionOutputMediaType(filePath: string): string | null {
   return null
 }
 
+function sessionReadPath(name: unknown, argumentsRaw: unknown): string | null {
+  if (name !== 'read' || typeof argumentsRaw !== 'string') return null
+  try {
+    const args = recordData(JSON.parse(argumentsRaw) as unknown)
+    return typeof args?.file_path === 'string' && args.file_path.trim().length > 0
+      ? args.file_path
+      : null
+  } catch {
+    return null
+  }
+}
+
+function resourceReferences(text: string): readonly string[] {
+  const paths: string[] = []
+  const seen = new Set<string>()
+  const pattern = /@(?:"([^"\r\n]+)"|([^\s"'<>]+))/gu
+  for (const match of text.matchAll(pattern)) {
+    const candidate = match[1] ?? match[2]
+    if (!candidate || seen.has(candidate)) continue
+    seen.add(candidate)
+    paths.push(candidate)
+  }
+  return paths
+}
+
+function userMessageText(data: Record<string, unknown>): string | null {
+  const source = recordData(data.source)
+  if (source?.kind !== 'user' || !Array.isArray(data.content)) return null
+  const texts = data.content.flatMap(value => {
+    const block = recordData(value)
+    return block?.type === 'text' && typeof block.text === 'string' ? [block.text] : []
+  })
+  return texts.length > 0 ? texts.join('\n') : null
+}
+
+function importedSourceIdentity(sessionId: string, candidate: string): {
+  readonly digestPrefix: string
+  readonly name: string
+  readonly path: string
+} | null {
+  if (path.isAbsolute(candidate) || candidate.includes('/') || candidate.includes('\\')) return null
+  const sessionKey = createHash('sha256').update(sessionId).digest('hex').slice(0, 12)
+  const matched = /^attachment-([a-f0-9]{12})-([a-f0-9]{12})-(.+)$/u.exec(candidate)
+  if (!matched || matched[1] !== sessionKey || !matched[2] || !matched[3]
+    || !isSafeResourceName(matched[3])
+    || !SUPPORTED_SESSION_RESOURCE_EXTENSIONS.has(path.extname(matched[3]).toLowerCase())) return null
+  return Object.freeze({ digestPrefix: matched[2], name: matched[3], path: candidate })
+}
+
+function normalizedWorkspacePath(
+  workspacePath: string,
+  workspacePathInput: string,
+  candidate: string,
+): string | null {
+  const relativeWithin = (root: string, absolute: string): string | null => {
+    const relative = path.relative(path.resolve(root), absolute)
+    if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null
+    return relative.split(path.sep).join(path.posix.sep)
+  }
+  if (!path.isAbsolute(candidate)) return relativeWithin(workspacePath, path.resolve(workspacePath, candidate))
+  const absolute = path.normalize(candidate)
+  return relativeWithin(workspacePath, absolute) ?? relativeWithin(workspacePathInput, absolute)
+}
+
+async function inspectImportedSource(
+  workspacePath: string,
+  spec: InspectSessionOutputSourcesSpec,
+  identity: NonNullable<ReturnType<typeof importedSourceIdentity>>,
+  read: boolean,
+  assertWorkspaceIdentity: () => Promise<void>,
+  signal?: AbortSignal,
+  internals?: WorkControllerOptions['sessionOutputInternals'],
+): Promise<SessionOutputSource> {
+  const reference = /\s/u.test(identity.path) ? `@"${identity.path}"` : `@${identity.path}`
+  const base = {
+    sessionId: spec.sessionId,
+    turn: spec.turn,
+    name: identity.name,
+    path: identity.path,
+    reference,
+    mediaType: sessionOutputMediaType(identity.name),
+  } as const
+  const candidate = path.resolve(workspacePath, identity.path)
+  signal?.throwIfAborted()
+  try {
+    const handle = await fs.open(
+      candidate,
+      fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK,
+    )
+    try {
+      const first = await handle.stat({ bigint: true })
+      await internals?.afterSourceFirstStat?.(candidate)
+      await assertWorkspaceIdentity()
+      signal?.throwIfAborted()
+      if (!first.isFile() || first.size < 1n || first.size > BigInt(MAX_WORK_FILE_RESOURCE_BYTES)) {
+        return Object.freeze({ ...base, bytes: null, contentDigest: null, status: 'changed' })
+      }
+      const buffer = Buffer.allocUnsafe(64 * 1024)
+      const digest = createHash('sha256')
+      let byteLength = 0
+      while (byteLength <= MAX_WORK_FILE_RESOURCE_BYTES) {
+        signal?.throwIfAborted()
+        const { bytesRead } = await handle.read(
+          buffer,
+          0,
+          Math.min(buffer.length, MAX_WORK_FILE_RESOURCE_BYTES + 1 - byteLength),
+          byteLength,
+        )
+        if (bytesRead === 0) break
+        digest.update(buffer.subarray(0, bytesRead))
+        byteLength += bytesRead
+      }
+      const second = await handle.stat({ bigint: true })
+      const current = await fs.lstat(candidate, { bigint: true })
+      await assertWorkspaceIdentity()
+      signal?.throwIfAborted()
+      if (byteLength > MAX_WORK_FILE_RESOURCE_BYTES
+        || second.dev !== first.dev
+        || second.ino !== first.ino
+        || second.size !== first.size
+        || second.mtimeNs !== first.mtimeNs
+        || second.ctimeNs !== first.ctimeNs
+        || current.dev !== second.dev
+        || current.ino !== second.ino
+        || current.size !== second.size
+        || byteLength !== Number(second.size)) {
+        return Object.freeze({ ...base, bytes: null, contentDigest: null, status: 'changed' })
+      }
+      const contentDigest = digest.digest('hex')
+      if (!contentDigest.startsWith(identity.digestPrefix)) {
+        return Object.freeze({ ...base, bytes: byteLength, contentDigest, status: 'changed' })
+      }
+      return Object.freeze({
+        ...base,
+        bytes: byteLength,
+        contentDigest,
+        status: read ? 'verified' : 'unverified',
+      })
+    } finally {
+      await handle.close()
+    }
+  } catch (cause) {
+    if (signal?.aborted) throw cause
+    const code = cause instanceof Error && 'code' in cause ? cause.code : null
+    return Object.freeze({
+      ...base,
+      bytes: null,
+      contentDigest: null,
+      status: code === 'ENOENT' ? 'missing' : 'inaccessible',
+    })
+  }
+}
+
+async function validatedSessionOutputSources(
+  inspected: { readonly cwd: string; readonly events: readonly unknown[] },
+  spec: InspectSessionOutputSourcesSpec,
+  signal?: AbortSignal,
+  internals?: WorkControllerOptions['sessionOutputInternals'],
+): Promise<readonly SessionOutputSource[]> {
+  if (!Number.isSafeInteger(spec.turn) || spec.turn < 0
+    || !Number.isSafeInteger(spec.throughSeq) || spec.throughSeq < 0) {
+    throw new WorkError('work/session-output-invalid', 'Session output coordinates are invalid.')
+  }
+  let selectedReferences: readonly string[] = Object.freeze([])
+  const mutationCalls = new Map<string, string | null>()
+  const readCalls = new Map<string, string | null>()
+  const produced = new Set<string>()
+  const read = new Set<string>()
+  let activeTurn: number | null = null
+  const ended = inspected.events.some(value => {
+    const event = recordData(value)
+    const data = recordData(event?.data)
+    const reason = recordData(data?.reason)
+    return event?.type === 'turn/end' && data?.turn === spec.turn && reason?.kind === 'completed'
+  })
+  for (const value of inspected.events) {
+    const event = recordData(value)
+    const data = recordData(event?.data)
+    if (!event || !data) continue
+    const seq = typeof event.seq === 'number' ? event.seq : Number.POSITIVE_INFINITY
+    if (seq > spec.throughSeq) continue
+    if (event.type === 'user/message') {
+      const text = userMessageText(data)
+      if (data.turn === spec.turn || activeTurn === spec.turn) {
+        selectedReferences = text === null ? Object.freeze([]) : resourceReferences(text)
+      }
+      continue
+    }
+    if (event.type === 'turn/start') {
+      activeTurn = typeof data.turn === 'number' ? data.turn : null
+      if (activeTurn === spec.turn) selectedReferences = Object.freeze([])
+      continue
+    }
+    if (data.turn !== spec.turn) continue
+    if (event.type === 'turn/end') continue
+    if (event.type === 'tool/call' && typeof data.callId === 'string') {
+      mutationCalls.set(data.callId, sessionMutationPath(data.name, data.arguments))
+      readCalls.set(data.callId, sessionReadPath(data.name, data.arguments))
+      continue
+    }
+    if (event.type !== 'tool/result' || event.surfaceOp !== 'append') continue
+    const message = recordData(data.message)
+    const source = recordData(message?.source)
+    const content = Array.isArray(message?.content) ? message.content : []
+    const result = recordData(content[0])
+    if (typeof source?.callId !== 'string' || result?.type !== 'tool-result' || result.isError === true) continue
+    const producedPath = mutationCalls.get(source.callId)
+    const readPath = readCalls.get(source.callId)
+    if (producedPath) produced.add(producedPath)
+    if (readPath) read.add(readPath)
+  }
+  if (!ended) return Object.freeze([])
+  let workspacePath: string
+  let workspaceStat: Awaited<ReturnType<typeof fs.stat>>
+  try {
+    const before = await fs.stat(inspected.cwd, { bigint: true })
+    workspacePath = await fs.realpath(inspected.cwd)
+    await internals?.afterSourceWorkspaceRealpath?.()
+    workspaceStat = await fs.stat(inspected.cwd, { bigint: true })
+    const resolvedStat = await fs.stat(workspacePath, { bigint: true })
+    if (!before.isDirectory()
+      || !workspaceStat.isDirectory()
+      || !resolvedStat.isDirectory()
+      || workspaceStat.dev !== before.dev
+      || workspaceStat.ino !== before.ino
+      || resolvedStat.dev !== before.dev
+      || resolvedStat.ino !== before.ino) {
+      throw new Error('Session Workspace identity changed while establishing the source boundary')
+    }
+  } catch (cause) {
+    throw new WorkError('work/session-output-invalid', 'The Session Workspace is not readable.', { cause })
+  }
+  const assertWorkspaceIdentity = async (): Promise<void> => {
+    try {
+      const current = await fs.stat(inspected.cwd, { bigint: true })
+      const resolved = await fs.realpath(inspected.cwd)
+      if (current.isDirectory()
+        && current.dev === workspaceStat.dev
+        && current.ino === workspaceStat.ino
+        && resolved === workspacePath) return
+    } catch {
+      // The Workspace root is unavailable and must not be confused with a missing source file.
+    }
+    throw new Error('Session Workspace identity changed during source inspection')
+  }
+  const normalizedRead = new Set([...read].flatMap(candidate => {
+    const normalized = normalizedWorkspacePath(workspacePath, inspected.cwd, candidate)
+    return normalized ? [normalized] : []
+  }))
+  const normalizedProduced = new Set([...produced].flatMap(candidate => {
+    const normalized = normalizedWorkspacePath(workspacePath, inspected.cwd, candidate)
+    return normalized ? [normalized] : []
+  }))
+  const candidates = [...selectedReferences, ...normalizedRead]
+  const identities: Array<NonNullable<ReturnType<typeof importedSourceIdentity>>> = []
+  const seen = new Set<string>()
+  for (const candidate of candidates) {
+    const normalized = normalizedWorkspacePath(workspacePath, inspected.cwd, candidate)
+    if (!normalized || seen.has(normalized) || normalizedProduced.has(normalized)) continue
+    const identity = importedSourceIdentity(spec.sessionId, normalized)
+    if (!identity) continue
+    seen.add(normalized)
+    identities.push(identity)
+    if (identities.length >= MAX_SESSION_OUTPUT_SOURCES) break
+  }
+  const sources: SessionOutputSource[] = []
+  for (const identity of identities) {
+    sources.push(await inspectImportedSource(
+      workspacePath,
+      spec,
+      identity,
+      normalizedRead.has(identity.path),
+      assertWorkspaceIdentity,
+      signal,
+      internals,
+    ))
+  }
+  return Object.freeze(sources)
+}
+
 async function validatedSessionOutputs(
   inspected: { readonly cwd: string; readonly events: readonly unknown[] },
   spec: InspectSessionOutputsSpec,
@@ -888,10 +1192,12 @@ async function readValidatedSessionOutput(
         throw new Error('output changed during preview')
       }
       const content = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+      const sources = await validatedSessionOutputSources(inspected, spec, signal, internals)
       return Object.freeze({
         ...output,
         content,
         contentDigest: createHash('sha256').update(bytes).digest('hex'),
+        sources,
       })
     } finally {
       await handle.close()
@@ -1474,6 +1780,26 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         )
       }
       return validatedSessionOutputs(inspected, spec, options.sessionOutputInternals)
+    },
+
+    async inspectSessionOutputSources(spec, signal) {
+      if (!options.harness.inspectSession) {
+        throw new WorkError(
+          'work/session-output-invalid',
+          'This Host cannot inspect Session source events.',
+        )
+      }
+      let inspected: Awaited<ReturnType<NonNullable<HarnessWorkPort['inspectSession']>>>
+      try {
+        inspected = await options.harness.inspectSession(spec.sessionId, signal)
+      } catch (cause) {
+        throw new WorkError(
+          'work/session-output-invalid',
+          'The current Session source events are not readable.',
+          { cause },
+        )
+      }
+      return validatedSessionOutputSources(inspected, spec, signal, options.sessionOutputInternals)
     },
 
     async readSessionOutput(spec, signal) {
