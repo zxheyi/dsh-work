@@ -221,12 +221,18 @@ async function run(): Promise<void> {
         'Missing model route did not lock the native composer with guidance',
       )
       assert.ok(blocked.text.includes('dsh-work-missing/unavailable'))
-      const before = blocked.text
+      const before = await js<{ readonly turns: number; readonly draft: string }>(`({
+        turns: document.querySelectorAll('[data-chat-turn]').length,
+        draft: document.querySelector('[data-composer-input]')?.textContent ?? '',
+      })`)
       await js(`document.querySelector('[data-composer-input]')?.dispatchEvent(new KeyboardEvent('keydown', {
         key: 'Enter', bubbles: true, cancelable: true,
       }))`)
       await new Promise(resolve => setTimeout(resolve, 200))
-      assert.equal(await js<string>('document.body.innerText'), before)
+      assert.deepEqual(await js<{ readonly turns: number; readonly draft: string }>(`({
+        turns: document.querySelectorAll('[data-chat-turn]').length,
+        draft: document.querySelector('[data-composer-input]')?.textContent ?? '',
+      })`), before)
     } else {
       step = 'draft-survives-model-selection'; writeReport('fail')
       await waitFor(
@@ -378,6 +384,8 @@ async function run(): Promise<void> {
         value => value,
         'Running ordinary reply did not expose the native Stop action',
       )
+      fs.writeFileSync(path.join(output, 'generation.png'),
+        (await window.webContents.capturePage()).toPNG())
       await js(`document.querySelector('button[aria-label="停止生成"]')?.click()`)
       await waitFor(
         async () => fs.existsSync(path.join(home, CHAT_TEST_ABORT_FILE))

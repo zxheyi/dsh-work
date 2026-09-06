@@ -207,6 +207,8 @@ async function run(): Promise<void> {
       text => text.includes('已拒绝，本次受限操作没有执行。') && !text.includes('等待审批'),
       'Composer did not recover after rejection',
     )
+    fs.writeFileSync(path.join(output, 'denied.png'),
+      (await window.webContents.capturePage()).toPNG())
     assert.equal(fs.readFileSync(baseline.actionPath, 'utf8'), 'allow\n')
 
     step = 'continue-after-reject'; report('fail')

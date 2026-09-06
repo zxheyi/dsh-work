@@ -2186,7 +2186,9 @@ function NativeSessionOutputPreview({
             h('p', null, '文件可能已移动、仍在写入或内容过大。'),
             h('button', { type: 'button', onClick: () => setRetry(value => value + 1) }, '重试'))
           : safeMarkdownContent(state.content)),
-  h('footer', { className: 'dsh-work-output-preview-actions' },
+  h('footer', {
+    className: `dsh-work-output-preview-actions${tab === 'versions' ? ' is-versions' : ''}`,
+  },
     h('span', {
       role: saveState.phase === 'error' || saveOpenError || revisionPhase === 'error'
         || adoptionPhase === 'error' ? 'alert' : 'status',
@@ -2388,6 +2390,10 @@ body[data-ds-dark-theme] {
 .dsh-work-output-preview-actions > span { min-width: 0; overflow: hidden; color: var(--work-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .dsh-work-output-preview-actions span[role="alert"] { color: var(--work-danger); }
 .dsh-work-output-preview-action-buttons { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.dsh-work-output-preview-actions.is-versions { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+.dsh-work-output-preview-actions.is-versions > span { width: 100%; white-space: normal; }
+.dsh-work-output-preview-actions.is-versions .dsh-work-output-preview-action-buttons { width: 100%; min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dsh-work-output-preview-actions.is-versions button { width: 100%; min-width: 0; padding-inline: 8px; }
 .dsh-work-output-preview-actions button { flex: 0 0 auto; padding: 8px 14px; border: 1px solid var(--work-accent); border-radius: 8px; color: white; background: var(--work-accent); cursor: pointer; font: 600 13px/18px var(--work-font); }
 .dsh-work-output-preview-actions button.is-secondary { border-color: var(--work-border-strong); color: var(--work-text); background: var(--work-surface); }
 .dsh-work-output-preview-actions button:disabled { cursor: default; opacity: .55; }

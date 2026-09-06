@@ -1,8 +1,8 @@
 # Familiar Work v5 acceptance
 
-Status: accepted target; implementation pending
+Status: automated macOS acceptance passed; F13 human observation pending
 
-Fact source: [R01-R18 and scenarios](../design/familiar-v5/requirements.json). Decision: [ADR 0014](../decisions/0014-familiar-conversations-and-versioned-files.md). Evidence and task ownership: [implementation issue](../implementation/familiar-v5.md).
+Fact source: [R01-R18 and scenarios](../design/familiar-v5/requirements.json). Decision: [ADR 0014](../decisions/0014-familiar-conversations-and-versioned-files.md). Evidence and task ownership: [implementation issue](../implementation/familiar-v5.md). Frozen automated evidence: [Familiar Work v5 evidence](familiar-work-v5-evidence.md).
 
 | ID | Observable result | Verification |
 | --- | --- | --- |
@@ -16,7 +16,7 @@ Fact source: [R01-R18 and scenarios](../design/familiar-v5/requirements.json). D
 | F8 | Immutable versions survive restart; compare reads real bytes; restore creates a new version | Snapshot/interruption/conflict integration, comparison screenshot |
 | F9 | Adoption refers to a specific file/version and never closes the conversation | State-domain tests, adopt-then-revise E2E |
 | F10 | Runtime failure returns to original context without blindly replaying external actions | Guardian/process E2E and lifecycle regression |
-| F11 | 390px/736px layouts and keyboard can return to conversation and complete main actions | Responsive screenshots, keyboard/focus/accessible-name checks |
+| F11 | 390px/736px content and version layouts can return to conversation and complete main actions | Responsive screenshots, overflow geometry, keyboard/focus/accessible-name checks |
 | F12 | Legacy Work data retains IDs/files; absent history remains explicitly absent | Compatibility fixture, later full migration interruption/rollback suite |
 | F13 | At least four of five existing DSH users complete the core flow without learning new product terms | [Real human observation](familiar-work-v5-usability-observation.md); automated checks are not a substitute |
 

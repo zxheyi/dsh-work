@@ -802,6 +802,17 @@ async function run(): Promise<void> {
     )
     assert.equal(readOutputVersionRecords().filter(record =>
       record.sessionId === baseline.sessionA && record.path === 'report-a.md').length, 3)
+    assert.equal(await js<boolean>(`(() => {
+      const preview = document.querySelector('[data-work-output-preview]')
+      const rect = preview?.getBoundingClientRect()
+      const buttons = Array.from(preview?.querySelectorAll('.dsh-work-output-preview-actions button') ?? [])
+      return Boolean(rect) && document.documentElement.scrollWidth <= innerWidth
+        && buttons.length === 4
+        && buttons.every(button => {
+          const buttonRect = button.getBoundingClientRect()
+          return buttonRect.left >= rect.left && buttonRect.right <= rect.right
+        })
+    })()`), true)
     fs.writeFileSync(path.join(output, 'versions.png'), (await window.webContents.capturePage()).toPNG())
 
     step = 'responsive-keyboard-file-review'; report('fail')
@@ -883,6 +894,16 @@ async function run(): Promise<void> {
     }
 
     await openByKeyboardAt(736)
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[role=tab]')).find(item => item.textContent?.startsWith('版本')); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
+    await waitFor(
+      () => js<boolean>("Boolean(document.querySelector('[data-work-output-version-detail]'))"),
+      value => value,
+      'Version panel did not open at 736px',
+    )
+    assert.equal((await previewSnapshot()).overflow, false)
+    fs.writeFileSync(path.join(output, 'responsive-versions-736.png'),
+      (await window.webContents.capturePage()).toPNG())
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[role=tab]')).find(item => item.textContent?.trim() === '内容'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
     const tabOrder: string[] = []
     for (let index = 0; index < 6; index++) {
       await pressKey('Tab')
@@ -912,6 +933,16 @@ async function run(): Promise<void> {
 
     await openByKeyboardAt(390)
     assert.equal(await js<string>("document.querySelector('.dsh-work-output-preview-close-label')?.textContent ?? ''"), '返回会话')
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[role=tab]')).find(item => item.textContent?.startsWith('版本')); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
+    await waitFor(
+      () => js<boolean>("Boolean(document.querySelector('[data-work-output-version-detail]'))"),
+      value => value,
+      'Version panel did not open at 390px',
+    )
+    assert.equal((await previewSnapshot()).overflow, false)
+    fs.writeFileSync(path.join(output, 'responsive-versions-390.png'),
+      (await window.webContents.capturePage()).toPNG())
+    assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[role=tab]')).find(item => item.textContent?.trim() === '内容'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
     fs.writeFileSync(path.join(output, 'responsive-390.png'), (await window.webContents.capturePage()).toPNG())
     for (let index = 0; index < 5; index++) await pressKey('Tab')
     assert.equal(await js<string>("document.activeElement?.textContent?.trim() ?? ''"), '要求修改')

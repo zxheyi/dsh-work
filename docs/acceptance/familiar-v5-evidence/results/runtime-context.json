@@ -1,0 +1,22 @@
+{
+  "status": "pass",
+  "step": "complete",
+  "runId": "6187e762-e6cd-4d26-965c-2e0badcb9e15",
+  "screenshots": [
+    "unavailable.png",
+    "restored.png"
+  ],
+  "terminal": {
+    "state": "stopped",
+    "code": null,
+    "canStart": true,
+    "canStop": false,
+    "canRecover": false
+  },
+  "sameSession": true,
+  "draftRestored": true,
+  "noTurnReplay": true,
+  "noConversationCreated": true,
+  "outputSelectionRestored": true,
+  "injectedLaunchFailure": true
+}
