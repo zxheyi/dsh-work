@@ -1201,7 +1201,7 @@ test('publishes immutable Session output versions and reads historical bytes aft
     sessionId: 'session-versioned', turn: 3, throughSeq: failedThroughSeq,
   }), {
     sessionId: 'session-versioned', turn: 3, name: 'report.md', path: 'report.md',
-    reference: '@report.md', status: 'failed',
+    reference: '@report.md', status: 'failed', reason: 'invalid-output',
     message: '恢复未生成选定版本的完整内容，已保留上一结果。',
   })
   assert.deepEqual(await restoreController.inspectSessionOutputs({
@@ -1266,6 +1266,278 @@ test('publishes immutable Session output versions and reads historical bytes aft
   }), (error: unknown) => error instanceof WorkError
     && error.code === 'work/session-output-conflict'
     && /external changes/u.test(error.message))
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('rejects external changes before reusing a pending revision lease', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-external-revision-'))
+  const original = '# Original baseline\n'
+  const events: unknown[] = [
+    { seq: 1, type: 'tool/call', data: {
+      turn: 1, callId: 'initial', name: 'write',
+      arguments: JSON.stringify({ file_path: 'report.md', content: original }),
+    } },
+    { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1,
+      message: { source: { callId: 'initial' }, content: [{ type: 'tool-result', isError: false }] },
+    } },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ]
+  await fs.writeFile(path.join(root, 'report.md'), original)
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    harness: {
+      ...testHarness(),
+      async inspectSession() { return { cwd: root, events } },
+    },
+  })
+  const spec = { sessionId: 'session-external', turn: 1, throughSeq: 3, path: 'report.md' }
+  const prepared = await controller.prepareSessionOutputRevision(spec)
+  events.push(
+    { seq: 4, type: 'user/message', data: {
+      source: { kind: 'user' }, content: [{ type: 'text', text: 'Explain the result' }],
+    } },
+    { seq: 5, type: 'turn/start', data: { turn: 2 } },
+    { seq: 6, type: 'assistant/message', data: { turn: 2, step: 1 } },
+    { seq: 7, type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } },
+  )
+  const unrelated = {
+    sessionId: 'session-external', turn: 2, throughSeq: 7, revisionLease: prepared.revisionLease,
+  }
+  assert.equal(await controller.inspectSessionRevision(unrelated), null)
+  assert.deepEqual(await controller.inspectSessionOutputs(unrelated), [])
+  await fs.writeFile(path.join(root, 'report.md'), '# External edit\n')
+  await assert.rejects(controller.prepareSessionOutputRevision(spec), (error: unknown) =>
+    error instanceof WorkError && error.code === 'work/session-output-conflict')
+  assert.equal((await controller.readSessionOutput(spec)).contentDigest, prepared.contentDigest)
+  assert.equal(await fs.readFile(path.join(root, 'report.md'), 'utf8'), '# External edit\n')
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('does not publish another Session bytes after a revision was accepted', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-accepted-revision-race-'))
+  const workspace = path.join(root, 'workspace')
+  const versionRoot = path.join(root, 'versions')
+  await fs.mkdir(workspace)
+  const original = '# Original\n'
+  const eventsA: unknown[] = [
+    { seq: 1, type: 'tool/call', data: {
+      turn: 1, callId: 'a-initial', name: 'write',
+      arguments: JSON.stringify({ file_path: 'report.md', content: original }),
+    } },
+    { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1, message: { source: { callId: 'a-initial' }, content: [{ type: 'tool-result' }] },
+    } },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ]
+  const eventsB: unknown[] = []
+  await fs.writeFile(path.join(workspace, 'report.md'), original)
+  const harness: HarnessWorkPort = {
+    ...testHarness(),
+    async inspectSession(sessionId) {
+      return { cwd: workspace, events: sessionId === 'session-a' ? eventsA : eventsB }
+    },
+    async inspectSessionWorkspace() { return workspace },
+  }
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot, harness,
+  })
+  await controller.inspectSessionOutputs({ sessionId: 'session-a', turn: 1, throughSeq: 3 })
+  const prepared = await controller.prepareSessionOutputRevision({
+    sessionId: 'session-a', turn: 1, throughSeq: 3, path: 'report.md',
+  })
+  const accepted = '# Accepted A\n'
+  await fs.writeFile(path.join(workspace, 'report.md'), accepted)
+  eventsA.push(
+    { seq: 4, type: 'user/message', data: {
+      source: { kind: 'user' }, content: [{ type: 'text', text: '@report.md revise' }],
+    } },
+    { seq: 5, type: 'turn/start', data: { turn: 2 } },
+    { seq: 6, type: 'tool/call', data: {
+      turn: 2, callId: 'a-edit', name: 'edit',
+      arguments: JSON.stringify({ file_path: 'report.md', old_string: 'Original', new_string: 'Accepted A' }),
+    } },
+    { seq: 7, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 2, message: { source: { callId: 'a-edit' }, content: [{ type: 'tool-result' }] },
+    } },
+    { seq: 8, type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } },
+  )
+  const inspectA = {
+    sessionId: 'session-a', turn: 2, throughSeq: 8, revisionLease: prepared.revisionLease,
+  }
+  assert.equal(await controller.inspectSessionRevision(inspectA), null)
+
+  const other = '# Other Session\n'
+  await fs.writeFile(path.join(workspace, 'report.md'), other)
+  eventsB.push(
+    { seq: 1, type: 'tool/call', data: {
+      turn: 1, callId: 'b-write', name: 'write',
+      arguments: JSON.stringify({ file_path: 'report.md', content: other }),
+    } },
+    { seq: 2, type: 'tool/result', surfaceOp: 'append', data: {
+      turn: 1, message: { source: { callId: 'b-write' }, content: [{ type: 'tool-result' }] },
+    } },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  )
+  await controller.inspectSessionOutputs({ sessionId: 'session-b', turn: 1, throughSeq: 3 })
+  await assert.rejects(controller.inspectSessionOutputs(inspectA), (error: unknown) =>
+    error instanceof WorkError && error.code === 'work/session-output-conflict')
+  const aVersions = await controller.listSessionOutputVersions({
+    sessionId: 'session-a', path: 'report.md',
+  })
+  assert.equal(aVersions.length, 1)
+  assert.equal((await controller.readSessionOutputVersion({
+    fileId: aVersions[0]!.fileId, versionId: aVersions[0]!.versionId,
+  })).content, original)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('rejects a stale cross-Session revision lease and allows an explicit refreshed retry', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-cross-session-revision-'))
+  const workspace = path.join(root, 'workspace')
+  const versionRoot = path.join(root, 'versions')
+  const deliveryRoot = path.join(root, 'saved')
+  await fs.mkdir(workspace)
+  const base = '# Shared baseline\n'
+  const eventsBySession = new Map<string, unknown[]>([
+    ['session-a', []],
+    ['session-b', []],
+  ])
+  const appendWrite = (
+    sessionId: string,
+    turn: number,
+    firstSeq: number,
+    content: string,
+    revision = false,
+  ): number => {
+    const events = eventsBySession.get(sessionId)!
+    const callSeq = revision ? firstSeq + 2 : firstSeq
+    if (revision) events.push(
+      {
+        seq: firstSeq,
+        type: 'user/message',
+        data: { source: { kind: 'user' }, content: [{ type: 'text', text: '@report.md revise' }] },
+      },
+      { seq: firstSeq + 1, type: 'turn/start', data: { turn } },
+    )
+    const callId = `${sessionId}-${String(turn)}`
+    events.push(
+      { seq: callSeq, type: 'tool/call', data: {
+        turn, callId, name: 'write', arguments: JSON.stringify({ file_path: 'report.md', content }),
+      } },
+      { seq: callSeq + 1, type: 'tool/result', surfaceOp: 'append', data: {
+        turn, message: { source: { callId }, content: [{ type: 'tool-result', isError: false }] },
+      } },
+      { seq: callSeq + 2, type: 'turn/end', data: { turn, reason: { kind: 'completed' } } },
+    )
+    return callSeq + 2
+  }
+  appendWrite('session-a', 1, 1, base)
+  appendWrite('session-b', 1, 1, base)
+  await fs.writeFile(path.join(workspace, 'report.md'), base)
+  const harness: HarnessWorkPort = {
+    ...testHarness(),
+    async inspectSession(sessionId) {
+      return { cwd: workspace, events: eventsBySession.get(sessionId) ?? [] }
+    },
+    async inspectSessionWorkspace() { return workspace },
+  }
+  const controller = createWorkController({
+    workspaceRoot: path.join(root, 'managed'),
+    sessionOutputVersionRoot: versionRoot, deliveryRoot, harness,
+  })
+  for (const sessionId of ['session-a', 'session-b']) {
+    await controller.inspectSessionOutputs({ sessionId, turn: 1, throughSeq: 3 })
+  }
+  const sourceA = { sessionId: 'session-a', turn: 1, throughSeq: 3, path: 'report.md' }
+  const sourceB = { sessionId: 'session-b', turn: 1, throughSeq: 3, path: 'report.md' }
+  const preparedA = await controller.prepareSessionOutputRevision(sourceA)
+  const preparedB = await controller.prepareSessionOutputRevision(sourceB)
+  assert.equal(preparedA.revisionLease.expectedContentDigest, preparedB.revisionLease.expectedContentDigest)
+
+  const firstRevision = '# Session A wins\n'
+  await fs.writeFile(path.join(workspace, 'report.md'), firstRevision)
+  const throughA = appendWrite('session-a', 2, 4, firstRevision, true)
+  const inspectA = {
+    sessionId: 'session-a', turn: 2, throughSeq: throughA,
+    revisionLease: preparedA.revisionLease,
+  }
+  assert.equal(await controller.inspectSessionRevision(inspectA), null)
+  await controller.inspectSessionOutputs(inspectA)
+  assert.equal((await controller.listSessionOutputVersions(sourceA)).length, 2)
+  eventsBySession.get('session-a')!.push(
+    { seq: throughA + 1, type: 'user/message', data: {
+      source: { kind: 'user' }, content: [{ type: 'text', text: 'Explain the change' }],
+    } },
+    { seq: throughA + 2, type: 'turn/start', data: { turn: 3 } },
+    { seq: throughA + 3, type: 'assistant/message', data: { turn: 3, step: 1 } },
+    { seq: throughA + 4, type: 'turn/end', data: { turn: 3, reason: { kind: 'completed' } } },
+  )
+  const publishedRetry = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot,
+    deliveryRoot, harness,
+  })
+  assert.deepEqual((await publishedRetry.inspectSessionOutputs(inspectA)).map(file => file.path), ['report.md'])
+  assert.equal((await publishedRetry.listSessionOutputVersions(sourceA)).length, 2)
+
+  const staleRevision = '# Session B stale write\n'
+  await fs.writeFile(path.join(workspace, 'report.md'), staleRevision)
+  const throughB = appendWrite('session-b', 2, 4, staleRevision, true)
+  const inspectB = {
+    sessionId: 'session-b', turn: 2, throughSeq: throughB,
+    revisionLease: preparedB.revisionLease,
+  }
+  const restartedWithUnknownLease = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot,
+    deliveryRoot, harness,
+  })
+  await assert.rejects(restartedWithUnknownLease.inspectSessionOutputs(inspectB), (error: unknown) =>
+    error instanceof WorkError && error.code === 'work/session-output-conflict')
+  assert.equal((await restartedWithUnknownLease.listSessionOutputVersions(sourceB)).length, 1)
+  const conflict = await controller.inspectSessionRevision(inspectB)
+  assert.equal(conflict?.status, 'failed')
+  assert.match(conflict?.message ?? '', /另一会话|外部修改/u)
+  assert.deepEqual(await controller.inspectSessionOutputs(inspectB), [])
+  assert.equal((await controller.listSessionOutputVersions(sourceB)).length, 1)
+  assert.equal((await controller.readSessionOutputVersion({
+    fileId: (await controller.listSessionOutputVersions(sourceA))[1]!.fileId,
+    versionId: (await controller.listSessionOutputVersions(sourceA))[1]!.versionId,
+  })).content, firstRevision)
+
+  const refreshed = await controller.prepareSessionOutputRevision({
+    sessionId: 'session-b', turn: 2, throughSeq: throughB, path: 'report.md',
+  })
+  assert.equal(refreshed.contentDigest, createHash('sha256').update(staleRevision).digest('hex'))
+  const retriedRevision = '# Session B explicit retry\n'
+  await fs.writeFile(path.join(workspace, 'report.md'), retriedRevision)
+  const retriedThrough = appendWrite('session-b', 3, throughB + 1, retriedRevision, true)
+  const retriedInspect = {
+    sessionId: 'session-b', turn: 3, throughSeq: retriedThrough,
+    revisionLease: refreshed.revisionLease,
+  }
+  assert.equal(await controller.inspectSessionRevision(retriedInspect), null)
+  await controller.inspectSessionOutputs(retriedInspect)
+  const bVersions = await controller.listSessionOutputVersions(sourceB)
+  assert.equal(bVersions.length, 2)
+  assert.equal((await controller.readSessionOutputVersion({
+    fileId: bVersions[1]!.fileId, versionId: bVersions[1]!.versionId,
+  })).content, retriedRevision)
+
+  const savedSpec = {
+    sessionId: 'session-a', turn: 2, throughSeq: throughA, path: 'report.md',
+    version: {
+      fileId: (await controller.listSessionOutputVersions(sourceA))[1]!.fileId,
+      versionId: (await controller.listSessionOutputVersions(sourceA))[1]!.versionId,
+    },
+  }
+  const saved = await controller.saveSessionOutput(savedSpec)
+  const reconnected = createWorkController({
+    workspaceRoot: path.join(root, 'managed'), sessionOutputVersionRoot: versionRoot,
+    deliveryRoot, harness,
+  })
+  assert.deepEqual(await reconnected.saveSessionOutput(savedSpec), saved)
+  await reconnected.inspectSessionOutputs({ sessionId: 'session-a', turn: 2, throughSeq: throughA })
+  assert.equal((await reconnected.listSessionOutputVersions(sourceA)).length, 2)
   await fs.rm(root, { recursive: true, force: true })
 })
 
@@ -3304,14 +3576,19 @@ test('protects the last valid Session output until a same-Session revision is va
   })
   const source = { sessionId: 'session-revision', turn: 1, throughSeq: 5, path: 'report.md' }
 
-  assert.deepEqual(await controller.prepareSessionOutputRevision(source), {
+  const prepared = await controller.prepareSessionOutputRevision(source)
+  assert.deepEqual({ ...prepared, revisionLease: undefined }, {
     sessionId: 'session-revision',
     sourceTurn: 1,
+    preparedAfterTurn: 1,
     name: 'report.md',
     path: 'report.md',
     reference: '@report.md',
     contentDigest: createHash('sha256').update('# Original\n').digest('hex'),
+    revisionLease: undefined,
   })
+  assert.match(prepared.revisionLease.leaseId, /^[a-f0-9]{32}$/u)
+  assert.equal(prepared.revisionLease.expectedContentDigest, prepared.contentDigest)
 
   await fs.writeFile(path.join(root, 'report.md'), '')
   assert.equal((await controller.readSessionOutput(source)).content, '# Original\n')
@@ -3366,6 +3643,7 @@ test('protects the last valid Session output until a same-Session revision is va
     path: 'report.md',
     reference: '@report.md',
     status: 'failed',
+    reason: 'invalid-output',
     message: '修改未生成有效文件，已保留上一结果。',
   })
   assert.equal((await fs.stat(path.join(root, 'report.md'))).size, 0)
@@ -3376,6 +3654,10 @@ test('protects the last valid Session output until a same-Session revision is va
   assert.equal((await controller.readSessionOutput(source)).content, '# Original\n')
   assert.deepEqual(await controller.inspectSessionOutputs(failedSpec), [])
   assert.deepEqual(await controller.inspectSessionRevision(failedSpec), await controller.inspectSessionRevision(failedSpec))
+  const firstRetry = await controller.prepareSessionOutputRevision({ ...failedSpec, path: 'report.md' })
+  const secondRetry = await controller.prepareSessionOutputRevision({ ...failedSpec, path: 'report.md' })
+  assert.equal(firstRetry.preparedAfterTurn, 2)
+  assert.deepEqual(secondRetry.revisionLease, firstRetry.revisionLease)
 
   await fs.writeFile(path.join(root, 'report.md'), '# Revised\n')
   events.push(

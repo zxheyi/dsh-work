@@ -191,6 +191,16 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
   assert.deepEqual(outputCodec.schema.parse({
     sessionId: 'session-remote', turn: 2, throughSeq: 12,
   }), { sessionId: 'session-remote', turn: 2, throughSeq: 12 })
+  const revisionLease = {
+    leaseId: 'e'.repeat(32), expectedContentDigest: 'f'.repeat(64), path: 'report.md',
+  }
+  assert.deepEqual(outputCodec.schema.parse({
+    sessionId: 'session-remote', turn: 3, throughSeq: 18, revisionLease,
+  }), { sessionId: 'session-remote', turn: 3, throughSeq: 18, revisionLease })
+  assert.throws(() => outputCodec.schema.parse({
+    sessionId: 'session-remote', turn: 3, throughSeq: 18,
+    revisionLease: { ...revisionLease, inventedRevision: 2 },
+  }))
   assert.throws(() => outputCodec.schema.parse({
     sessionId: 'session-remote', turn: 2, throughSeq: 12, staleTurn: 1,
   }))
@@ -272,8 +282,11 @@ test('publishes strict Work descriptors for the Client Remote mount', () => {
     baseVersion: { ...versionSelection, ordinal: 1 },
   }))
   const revisionValue = {
-    sessionId: 'session-remote', sourceTurn: 2, name: 'report.md', path: 'report.md',
+    sessionId: 'session-remote', sourceTurn: 2, preparedAfterTurn: 2, name: 'report.md', path: 'report.md',
     reference: '@report.md', contentDigest: 'c'.repeat(64),
+    revisionLease: {
+      leaseId: 'e'.repeat(32), expectedContentDigest: 'c'.repeat(64), path: 'report.md',
+    },
     intent: 'restore' as const,
     baseVersion: {
       ...versionSelection, ordinal: 1, path: 'attachment-v1.md', reference: '@attachment-v1.md',

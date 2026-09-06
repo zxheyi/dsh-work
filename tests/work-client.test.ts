@@ -81,8 +81,12 @@ function successfulRemote(overrides: Partial<WorkClientRemote> = {}): WorkClient
       return {
         ok: true as const,
         value: {
-          sessionId: 'session-client', sourceTurn: 1, name: 'report.md', path: 'report.md',
+          sessionId: 'session-client', sourceTurn: 1, preparedAfterTurn: 1,
+          name: 'report.md', path: 'report.md',
           reference: '@report.md', contentDigest: 'd'.repeat(64),
+          revisionLease: {
+            leaseId: 'c'.repeat(32), expectedContentDigest: 'd'.repeat(64), path: 'report.md',
+          },
         },
       }
     },
@@ -484,11 +488,15 @@ test('prepares and inspects a Session revision without changing the Work project
         ok: true,
         value: {
           sessionId: spec.sessionId,
-          sourceTurn: spec.turn,
+          sourceTurn: 1,
+          preparedAfterTurn: spec.turn,
           name: 'report.md',
           path: spec.path,
           reference: '@report.md',
           contentDigest: 'f'.repeat(64),
+          revisionLease: {
+            leaseId: 'c'.repeat(32), expectedContentDigest: 'f'.repeat(64), path: 'report.md',
+          },
           intent: 'restore',
           baseVersion: {
             ...baseVersion,
@@ -504,6 +512,17 @@ test('prepares and inspects a Session revision without changing the Work project
       received.push(['inspect', spec])
       return { ok: true, value: null }
     },
+    async inspectSessionOutputs(spec) {
+      received.push(['outputs', spec])
+      return { ok: true, value: { items: [{
+        sessionId: spec.sessionId,
+        turn: spec.turn,
+        name: 'report.md',
+        path: 'report.md',
+        bytes: 12,
+        mediaType: 'text/markdown',
+      }] } }
+    },
   }))
   model.replaceBaseline({ items: [view(1)] })
   const works = new WorksController(new Context(), model)
@@ -516,12 +535,33 @@ test('prepares and inspects a Session revision without changing the Work project
   assert.equal(revision.reference, '@report.md')
   assert.equal(revision.baseVersion?.versionId, baseVersion.versionId)
   assert.equal(revision.intent, 'restore')
+  await works.inspectSessionOutputs({ sessionId: output.sessionId, turn: 4, throughSeq: 23 })
   assert.equal(await works.inspectSessionRevision({
     sessionId: output.sessionId, turn: 5, throughSeq: 31,
   }), null)
+  await works.inspectSessionOutputs({ sessionId: output.sessionId, turn: 5, throughSeq: 31 })
+  await works.inspectSessionOutputs({ sessionId: output.sessionId, turn: 6, throughSeq: 35 })
   assert.deepEqual(received, [
     ['prepare', output],
-    ['inspect', { sessionId: 'session-revision', turn: 5, throughSeq: 31 }],
+    ['outputs', {
+      sessionId: 'session-revision', turn: 4, throughSeq: 23,
+      revisionLease: {
+        leaseId: 'c'.repeat(32), expectedContentDigest: 'f'.repeat(64), path: 'report.md',
+      },
+    }],
+    ['inspect', {
+      sessionId: 'session-revision', turn: 5, throughSeq: 31,
+      revisionLease: {
+        leaseId: 'c'.repeat(32), expectedContentDigest: 'f'.repeat(64), path: 'report.md',
+      },
+    }],
+    ['outputs', {
+      sessionId: 'session-revision', turn: 5, throughSeq: 31,
+      revisionLease: {
+        leaseId: 'c'.repeat(32), expectedContentDigest: 'f'.repeat(64), path: 'report.md',
+      },
+    }],
+    ['outputs', { sessionId: 'session-revision', turn: 6, throughSeq: 35 }],
   ])
   assert.deepEqual(model.getSnapshot().items, [view(1)])
 })

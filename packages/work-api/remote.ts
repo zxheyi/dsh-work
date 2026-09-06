@@ -129,10 +129,16 @@ const sessionFileResourceSchema: z.ZodType<WorkSessionFileResource> = z.object({
   mediaType: z.string().min(1).max(128).nullable(),
   contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
 }).strict()
+const sessionOutputRevisionLeaseSchema = z.object({
+  leaseId: z.string().regex(/^[a-f0-9]{32}$/u),
+  expectedContentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+  path: z.string().min(1).max(4096),
+}).strict()
 const inspectSessionOutputsSchema: z.ZodType<WorkInspectSessionOutputsSpec> = z.object({
   sessionId: z.string().min(1).max(256),
   turn: z.number().int().nonnegative(),
   throughSeq: z.number().int().nonnegative(),
+  revisionLease: sessionOutputRevisionLeaseSchema.optional(),
 }).strict()
 const sessionOutputFileSchema: z.ZodType<WorkSessionOutputFile> = z.object({
   sessionId: z.string().min(1).max(256),
@@ -195,10 +201,12 @@ const sessionOutputRevisionBaseVersionSchema = z.object({
 const sessionOutputRevisionSchema: z.ZodType<WorkSessionOutputRevision> = z.object({
   sessionId: z.string().min(1).max(256),
   sourceTurn: z.number().int().nonnegative(),
+  preparedAfterTurn: z.number().int().nonnegative(),
   name: z.string().min(1).max(512),
   path: z.string().min(1).max(4096),
   reference: z.string().min(2).max(4099),
   contentDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+  revisionLease: sessionOutputRevisionLeaseSchema,
   baseVersion: sessionOutputRevisionBaseVersionSchema.optional(),
   intent: z.literal('restore').optional(),
 }).strict()
@@ -209,6 +217,7 @@ const sessionOutputRevisionFailureSchema: z.ZodType<WorkSessionOutputRevisionFai
   path: z.string().min(1).max(4096),
   reference: z.string().min(2).max(4099),
   status: z.literal('failed'),
+  reason: z.enum(['invalid-output', 'conflict']),
   message: z.string().min(1).max(512),
 }).strict()
 const sessionOutputSaveSchema: z.ZodType<WorkSessionOutputSave> = z.object({

@@ -360,6 +360,10 @@ export class WorksController extends Service implements IWorks {
   readonly list: WorkSource
   private readonly model: ClientWorkModel
   private readonly createMutationId: () => string
+  private readonly revisionLeases = new Map<string, {
+    readonly lease: WorkSessionOutputRevision['revisionLease']
+    readonly preparedAfterTurn: number
+  }>()
 
   constructor(
     ctx: Context,
@@ -428,8 +432,18 @@ export class WorksController extends Service implements IWorks {
     spec: WorkInspectSessionOutputsSpec,
     signal?: AbortSignal,
   ): Promise<readonly WorkSessionOutputFile[]> {
-    const result = await this.model.inspectSessionOutputs(spec, signal)
+    const retained = this.revisionLeases.get(spec.sessionId)
+    const lease = spec.revisionLease ?? retained?.lease
+    const result = await this.model.inspectSessionOutputs({
+      ...spec,
+      ...(lease ? { revisionLease: lease } : {}),
+    }, signal)
     if (!result.ok) throw result.error
+    if (lease && retained && spec.turn > retained.preparedAfterTurn
+      && result.value.items.some(item => item.path === lease.path)
+      && this.revisionLeases.get(spec.sessionId)?.lease.leaseId === lease.leaseId) {
+      this.revisionLeases.delete(spec.sessionId)
+    }
     return result.value.items
   }
 
@@ -449,6 +463,10 @@ export class WorksController extends Service implements IWorks {
     this.model.assertRuntimeWritable()
     const result = await this.model.prepareSessionOutputRevision(spec, signal)
     if (!result.ok) throw result.error
+    this.revisionLeases.set(result.value.sessionId, Object.freeze({
+      lease: result.value.revisionLease,
+      preparedAfterTurn: result.value.preparedAfterTurn,
+    }))
     return result.value
   }
 
@@ -456,8 +474,18 @@ export class WorksController extends Service implements IWorks {
     spec: WorkInspectSessionOutputsSpec,
     signal?: AbortSignal,
   ): Promise<WorkSessionOutputRevisionFailure | null> {
-    const result = await this.model.inspectSessionRevision(spec, signal)
+    const retained = this.revisionLeases.get(spec.sessionId)
+    const lease = spec.revisionLease ?? retained?.lease
+    const result = await this.model.inspectSessionRevision({
+      ...spec,
+      ...(lease ? { revisionLease: lease } : {}),
+    }, signal)
     if (!result.ok) throw result.error
+    if (result.value && lease && retained && spec.turn > retained.preparedAfterTurn
+      && result.value.path === lease.path
+      && this.revisionLeases.get(spec.sessionId)?.lease.leaseId === lease.leaseId) {
+      this.revisionLeases.delete(spec.sessionId)
+    }
     return result.value
   }
 

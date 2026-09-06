@@ -11,11 +11,14 @@ import {
   sessionOutputVersionSummary,
 } from '../packages/work-api/surface.ts'
 import {
+  WORK_RECOVERY_CONTEXT_PREFIX,
+  mergeWorkRecoveryRevisionLease,
   matchesWorkRecoveryOutput,
   parseWorkRecoveryContext,
   recoverySessionDisposition,
   recoveredDraftForSession,
   serializeWorkRecoveryContext,
+  workRecoveryRevisionLeaseForTurn,
   type WorkRecoveryContext,
 } from '../packages/work-api/recovery-context.ts'
 import { planTextDiff } from '../packages/work-api/text-diff.ts'
@@ -45,12 +48,59 @@ test('round trips only bounded exact recovery context without file content', () 
       sessionId: 'session-1', turn: 2, throughSeq: 9, name: 'report.md', path: 'report.md',
       bytes: 9, mediaType: 'text/markdown',
     },
+    revisionLeases: [{
+      sessionId: 'session-1', preparedAfterTurn: 2, leaseId: 'a'.repeat(32),
+      expectedContentDigest: 'b'.repeat(64), path: 'report.md', rejected: null,
+    }],
   }
   const encoded = serializeWorkRecoveryContext(context)
   assert.deepEqual(parseWorkRecoveryContext(encoded), context)
   assert.equal(encoded.includes('content'), false)
   assert.equal(parseWorkRecoveryContext(`${encoded.slice(0, -1)},"extra":true}`), null)
   assert.equal(serializeWorkRecoveryContext({ ...context, draft: 'x'.repeat(21 * 1024) }), '')
+  const legacy = `${WORK_RECOVERY_CONTEXT_PREFIX}${JSON.stringify({
+    schema: context.schema, sessionId: context.sessionId, draft: context.draft, selection: null,
+  })}`
+  assert.deepEqual(parseWorkRecoveryContext(legacy)?.revisionLeases, [])
+  const lease = context.revisionLeases[0]!
+  assert.equal(serializeWorkRecoveryContext({
+    ...context,
+    revisionLeases: Array.from({ length: 9 }, (_, index) => ({
+      ...lease, sessionId: `session-${String(index)}`,
+    })),
+  }), '')
+  assert.equal(serializeWorkRecoveryContext({ ...context, revisionLeases: [lease, lease] }), '')
+})
+
+test('retains rejected Turn evidence when a retry replaces the pending revision frontier', () => {
+  const rejected = {
+    turn: 2,
+    leaseId: 'c'.repeat(32),
+    expectedContentDigest: 'd'.repeat(64),
+  }
+  const first = {
+    sessionId: 'session-1', preparedAfterTurn: 1, leaseId: rejected.leaseId,
+    expectedContentDigest: rejected.expectedContentDigest, path: 'report.md', rejected,
+  }
+  const retry = mergeWorkRecoveryRevisionLease('session-1', first, {
+    preparedAfterTurn: 2,
+    leaseId: 'e'.repeat(32),
+    expectedContentDigest: 'f'.repeat(64),
+    path: 'report.md',
+    rejected: null,
+  })
+  assert.deepEqual(retry.rejected, rejected)
+  assert.deepEqual(workRecoveryRevisionLeaseForTurn(retry, 2), {
+    leaseId: rejected.leaseId,
+    expectedContentDigest: rejected.expectedContentDigest,
+    path: 'report.md',
+  })
+  assert.deepEqual(workRecoveryRevisionLeaseForTurn(retry, 3), {
+    leaseId: 'e'.repeat(32),
+    expectedContentDigest: 'f'.repeat(64),
+    path: 'report.md',
+  })
+  assert.equal(workRecoveryRevisionLeaseForTurn(retry, 1), null)
 })
 
 test('restores a selected output only when the original immutable coordinates still match', () => {

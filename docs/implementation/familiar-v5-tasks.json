@@ -414,7 +414,7 @@
       "files": "packages/work-domain/index.ts；packages/work-api/remote.ts；packages/work-api/client-model.ts",
       "verification": "双会话并发、外部改写、故障注入、Remote 租约回归",
       "limits": "基本保护必须随 T15/T18 引入，本任务补齐跨操作交错验证与用户恢复路径。",
-      "status": "pending"
+      "status": "verified"
     },
     {
       "id": "T22",

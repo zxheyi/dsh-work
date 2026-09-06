@@ -30,11 +30,14 @@ import type {
 } from './index.ts'
 import type { WorkDeliverableContent } from './index.ts'
 import {
+  MAX_RECOVERY_REVISION_LEASES,
+  mergeWorkRecoveryRevisionLease,
   matchesWorkRecoveryOutput,
   parseWorkRecoveryContext,
   recoverySessionDisposition,
   recoveredDraftForSession,
   serializeWorkRecoveryContext,
+  workRecoveryRevisionLeaseForTurn,
   type WorkRecoveryContext,
   type WorkRecoveryOutputSelection,
 } from './recovery-context.ts'
@@ -113,6 +116,8 @@ interface NativeSessionOutputsProps extends WorkSurfaceInjected {
 interface SessionResourceReferenceDetail {
   readonly sessionId: string
   readonly path: string
+  readonly revisionLease?: Omit<WorkRecoveryContext['revisionLeases'][number], 'sessionId'> | null
+  readonly reportRecoveryPersistence?: (persisted: boolean) => void
   readonly base?: {
     readonly path: string
     readonly ordinal: number
@@ -213,25 +218,88 @@ function publishRecoveryContext(
   selection: WorkRecoveryOutputSelection | null = activeRecoveryContext?.sessionId === sessionId
     ? activeRecoveryContext.selection
     : null,
-): void {
-  if (pendingRecoverySession && pendingRecoverySession !== sessionId) return
+  revisionLease: Omit<WorkRecoveryContext['revisionLeases'][number], 'sessionId'> | null | undefined = undefined,
+): boolean {
+  if (pendingRecoverySession && pendingRecoverySession !== sessionId) return false
   if (!pendingRecoverySession && pendingRecoverySelection?.sessionId !== sessionId) {
     pendingRecoverySelection = null
   }
+  const retainedLeases = activeRecoveryContext?.revisionLeases ?? Object.freeze([])
+  const retainedLease = retainedLeases.find(lease => lease.sessionId === sessionId)
+  const revisionLeases = revisionLease === undefined
+    ? retainedLeases
+    : revisionLease === null
+      ? Object.freeze(retainedLeases.filter(lease => lease.sessionId !== sessionId))
+      : Object.freeze([
+          ...retainedLeases.filter(lease => lease.sessionId !== sessionId),
+          mergeWorkRecoveryRevisionLease(sessionId, retainedLease, revisionLease),
+        ])
   const context: WorkRecoveryContext = Object.freeze({
     schema: 'dsh-work.recovery-context.v1',
     sessionId,
     draft,
     selection,
+    revisionLeases,
   })
+  const reservedContext: WorkRecoveryContext = Object.freeze({
+    ...context,
+    revisionLeases: Object.freeze(revisionLeases.map(lease => lease.rejected
+      ? lease
+      : Object.freeze({
+          ...lease,
+          rejected: Object.freeze({
+            turn: Number.MAX_SAFE_INTEGER,
+            leaseId: 'f'.repeat(32),
+            expectedContentDigest: 'f'.repeat(64),
+          }),
+        }))),
+  })
+  if (revisionLeases.length > 0 && !serializeWorkRecoveryContext(reservedContext)) return false
   const serialized = serializeWorkRecoveryContext(context)
   if (!serialized) {
+    if (revisionLeases.length > 0) return false
     clearRecoveryContext()
-    return
+    return false
   }
   activeRecoveryContext = context
   window.name = serialized
   window.dshWorkRecovery?.update(serialized)
+  return true
+}
+
+function markRecoveryRevisionConflict(
+  sessionId: string,
+  turn: number,
+  lease: Pick<WorkRecoveryContext['revisionLeases'][number], 'leaseId' | 'expectedContentDigest'>,
+): void {
+  const retained = activeRecoveryContext?.revisionLeases.find(candidate => candidate.sessionId === sessionId)
+  if (!retained) return
+  publishRecoveryContext(
+    sessionId,
+    activeRecoveryContext!.draft,
+    activeRecoveryContext!.selection,
+    Object.freeze({
+      preparedAfterTurn: retained.preparedAfterTurn,
+      leaseId: retained.leaseId,
+      expectedContentDigest: retained.expectedContentDigest,
+      path: retained.path,
+      rejected: Object.freeze({
+        turn,
+        leaseId: lease.leaseId,
+        expectedContentDigest: lease.expectedContentDigest,
+      }),
+    }),
+  )
+}
+
+function clearRecoveryRevisionLease(sessionId: string): void {
+  if (!activeRecoveryContext?.revisionLeases.some(lease => lease.sessionId === sessionId)) return
+  publishRecoveryContext(
+    sessionId,
+    activeRecoveryContext.draft,
+    activeRecoveryContext.selection,
+    null,
+  )
 }
 
 function createSessionOutputPreviewStore(): SessionOutputPreviewStore {
@@ -762,11 +830,18 @@ function NativeSessionResourceEntry({
           : `基于 ${resourceMention(base.path)}（v${String(base.ordinal)}）修改 ${mention}`
         : mention
       const current = sessionResourceDrafts.get(session.sessionId) ?? input.draft
-      if (current.includes(insertion)) return
       const separator = current.trim().length > 0 ? ' ' : ''
-      const next = `${current}${separator}${insertion} `
+      const next = current.includes(insertion) ? current : `${current}${separator}${insertion} `
+      const persisted = publishRecoveryContext(
+        session.sessionId,
+        next,
+        undefined,
+        detail.revisionLease,
+      )
+      detail.reportRecoveryPersistence?.(persisted)
+      if (!persisted) return
+      if (next === current) return
       sessionResourceDrafts.set(session.sessionId, next)
-      publishRecoveryContext(session.sessionId, next)
       inputActions.setDraft(next)
       requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-composer-input]')?.focus())
     }
@@ -1289,20 +1364,50 @@ function NativeSessionOutputs({ matched, openFile, sessionId, works }: NativeSes
     setSources(Object.freeze([]))
     setSourcePhase('loading')
     setSelectedPath(null)
+    const retainedRevisionLease = activeRecoveryContext?.revisionLeases.find(
+      lease => lease.sessionId === sessionId,
+    )
+    const revisionLease = workRecoveryRevisionLeaseForTurn(retainedRevisionLease, matched.turn)
     const spec = {
       sessionId,
       turn: matched.turn,
       throughSeq: matched.throughSeq,
+      ...(revisionLease ? { revisionLease } : {}),
     }
     setRevisionFailure(null)
     void works.inspectSessionRevision(spec, abort.signal).then(failure => {
       if (abort.signal.aborted) return
       setRevisionFailure(failure)
+      if (failure && revisionLease?.path === failure.path) {
+        if (failure.reason === 'conflict') {
+          markRecoveryRevisionConflict(sessionId, matched.turn, revisionLease)
+        } else clearRecoveryRevisionLease(sessionId)
+      }
       return works.inspectSessionOutputs(spec, abort.signal).then(nextFiles => {
-        if (!abort.signal.aborted) setFiles(nextFiles)
+        if (!abort.signal.aborted) {
+          setFiles(nextFiles)
+          if (revisionLease && nextFiles.some(file => file.path === revisionLease.path)) {
+            clearRecoveryRevisionLease(sessionId)
+          }
+        }
       })
-    }).catch(() => {
-      if (!abort.signal.aborted) setFiles(Object.freeze([]))
+    }).catch(cause => {
+      if (!abort.signal.aborted) {
+        setFiles(Object.freeze([]))
+        if (revisionLease && remoteErrorCode(cause) === 'work/session-output-conflict') {
+          setRevisionFailure(Object.freeze({
+            sessionId,
+            turn: matched.turn,
+            name: revisionLease.path.split('/').at(-1) ?? revisionLease.path,
+            path: revisionLease.path,
+            reference: resourceMention(revisionLease.path),
+            status: 'failed' as const,
+            reason: 'conflict' as const,
+            message: '当前文件已被另一会话或外部修改。请刷新内容后明确重试。',
+          }))
+          markRecoveryRevisionConflict(sessionId, matched.turn, revisionLease)
+        }
+      }
     })
     void works.inspectSessionOutputSources(spec, abort.signal).then(nextSources => {
       if (abort.signal.aborted) return
@@ -1820,6 +1925,13 @@ function NativeSessionOutputPreview({
     const target = selection
     const base = revisionBase
     if (intent === 'restore' && !base) return
+    const retainedLeases = activeRecoveryContext?.revisionLeases ?? Object.freeze([])
+    if (!retainedLeases.some(lease => lease.sessionId === target.sessionId)
+      && retainedLeases.length >= MAX_RECOVERY_REVISION_LEASES) {
+      setRevisionError('当前有过多未完成的文件修改。请先完成或重试已有修改。')
+      setRevisionPhase('error')
+      return
+    }
     revisionAbort.current?.abort()
     const abort = new AbortController()
     revisionAbort.current = abort
@@ -1838,13 +1950,18 @@ function NativeSessionOutputPreview({
         revisionAbort.current = null
         if (!matchesSessionOutputSelection(preview.getSnapshot(), target)
           || sessionId !== target.sessionId) return
-        setRevisionPhase('idle')
-        setRevisionError(null)
+        let recoveryPersisted = false
         window.dispatchEvent(new CustomEvent<SessionResourceReferenceDetail>(
           'dsh-work:reference-session-resource',
           { detail: Object.freeze({
             sessionId: revision.sessionId,
             path: revision.path,
+            reportRecoveryPersistence: (persisted: boolean) => { recoveryPersisted = persisted },
+            revisionLease: Object.freeze({
+              ...revision.revisionLease,
+              preparedAfterTurn: revision.preparedAfterTurn,
+              rejected: null,
+            }),
             ...(revision.baseVersion ? { base: Object.freeze({
               path: revision.baseVersion.path,
               ordinal: revision.baseVersion.ordinal,
@@ -1852,6 +1969,13 @@ function NativeSessionOutputPreview({
             }) } : {}),
           }) },
         ))
+        if (!recoveryPersisted) {
+          setRevisionPhase('error')
+          setRevisionError('当前草稿过长，无法安全保留文件修改状态。请缩短草稿后重试。')
+          return
+        }
+        setRevisionPhase('idle')
+        setRevisionError(null)
         if (narrow) closePreview()
       },
       cause => {

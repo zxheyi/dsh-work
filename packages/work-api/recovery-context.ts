@@ -1,6 +1,7 @@
 export const WORK_RECOVERY_CONTEXT_PREFIX = 'dsh-work-recovery:v1:'
 
-const MAX_CONTEXT_BYTES = 32 * 1024
+const MAX_CONTEXT_BYTES = 64 * 1024
+export const MAX_RECOVERY_REVISION_LEASES = 8
 const MAX_SESSION_ID = 256
 const MAX_DRAFT = 20 * 1024
 const MAX_NAME = 512
@@ -17,11 +18,25 @@ export interface WorkRecoveryOutputSelection {
   readonly mediaType: string | null
 }
 
+export interface WorkRecoveryRevisionLease {
+  readonly sessionId: string
+  readonly preparedAfterTurn: number
+  readonly leaseId: string
+  readonly expectedContentDigest: string
+  readonly path: string
+  readonly rejected: {
+    readonly turn: number
+    readonly leaseId: string
+    readonly expectedContentDigest: string
+  } | null
+}
+
 export interface WorkRecoveryContext {
   readonly schema: 'dsh-work.recovery-context.v1'
   readonly sessionId: string
   readonly draft: string
   readonly selection: WorkRecoveryOutputSelection | null
+  readonly revisionLeases: readonly WorkRecoveryRevisionLease[]
 }
 
 export type WorkRecoverySessionDisposition = 'wait' | 'open' | 'discard'
@@ -43,6 +58,24 @@ const validSelection = (value: unknown): value is WorkRecoveryOutputSelection =>
   && Number.isSafeInteger(value.bytes) && (value.bytes as number) > 0
   && (value.mediaType === null || boundedString(value.mediaType, MAX_MEDIA_TYPE))
 
+const validRevisionLease = (value: unknown): value is WorkRecoveryContext['revisionLeases'][number] =>
+  exactKeys(value, [
+    'sessionId', 'preparedAfterTurn', 'leaseId', 'expectedContentDigest', 'path', 'rejected',
+  ])
+  && boundedString(value.sessionId, MAX_SESSION_ID)
+  && Number.isSafeInteger(value.preparedAfterTurn) && (value.preparedAfterTurn as number) >= 0
+  && typeof value.leaseId === 'string' && /^[a-f0-9]{32}$/u.test(value.leaseId)
+  && typeof value.expectedContentDigest === 'string'
+  && /^[a-f0-9]{64}$/u.test(value.expectedContentDigest)
+  && boundedString(value.path, MAX_PATH)
+  && (value.rejected === null || (
+    exactKeys(value.rejected, ['turn', 'leaseId', 'expectedContentDigest'])
+    && Number.isSafeInteger(value.rejected.turn) && (value.rejected.turn as number) >= 0
+    && typeof value.rejected.leaseId === 'string' && /^[a-f0-9]{32}$/u.test(value.rejected.leaseId)
+    && typeof value.rejected.expectedContentDigest === 'string'
+    && /^[a-f0-9]{64}$/u.test(value.rejected.expectedContentDigest)
+  ))
+
 export function serializeWorkRecoveryContext(value: WorkRecoveryContext): string {
   const encoded = `${WORK_RECOVERY_CONTEXT_PREFIX}${JSON.stringify(value)}`
   if (encoded.length > MAX_CONTEXT_BYTES || !parseWorkRecoveryContext(encoded)) return ''
@@ -54,17 +87,26 @@ export function parseWorkRecoveryContext(value: unknown): WorkRecoveryContext | 
   let parsed: unknown
   try { parsed = JSON.parse(value.slice(WORK_RECOVERY_CONTEXT_PREFIX.length)) }
   catch { return null }
-  if (!exactKeys(parsed, ['schema', 'sessionId', 'draft', 'selection'])
+  if (!(exactKeys(parsed, ['schema', 'sessionId', 'draft', 'selection'])
+      || exactKeys(parsed, ['schema', 'sessionId', 'draft', 'selection', 'revisionLeases']))
     || parsed.schema !== 'dsh-work.recovery-context.v1'
     || !boundedString(parsed.sessionId, MAX_SESSION_ID)
     || !boundedString(parsed.draft, MAX_DRAFT, true)
-    || (parsed.selection !== null && !validSelection(parsed.selection))) return null
+    || (parsed.selection !== null && !validSelection(parsed.selection))
+    || ('revisionLeases' in parsed && (!Array.isArray(parsed.revisionLeases)
+      || parsed.revisionLeases.length > MAX_RECOVERY_REVISION_LEASES
+      || !parsed.revisionLeases.every(validRevisionLease)
+      || new Set(parsed.revisionLeases.map(lease => lease.sessionId)).size !== parsed.revisionLeases.length))) return null
   if (parsed.selection && parsed.selection.sessionId !== parsed.sessionId) return null
+  const revisionLeases = 'revisionLeases' in parsed && Array.isArray(parsed.revisionLeases)
+    ? Object.freeze(parsed.revisionLeases.map(lease => Object.freeze({ ...lease })))
+    : Object.freeze([])
   return Object.freeze({
     schema: parsed.schema,
     sessionId: parsed.sessionId,
     draft: parsed.draft,
     selection: parsed.selection ? Object.freeze({ ...parsed.selection }) : null,
+    revisionLeases,
   })
 }
 
@@ -79,6 +121,36 @@ export function matchesWorkRecoveryOutput(
     && retained.bytes === candidate.bytes
     && retained.name === candidate.name
     && retained.mediaType === candidate.mediaType
+}
+
+export function mergeWorkRecoveryRevisionLease(
+  sessionId: string,
+  retained: WorkRecoveryRevisionLease | undefined,
+  next: Omit<WorkRecoveryRevisionLease, 'sessionId'>,
+): WorkRecoveryRevisionLease {
+  return Object.freeze({
+    sessionId,
+    ...next,
+    rejected: next.rejected ?? retained?.rejected ?? null,
+  })
+}
+
+export function workRecoveryRevisionLeaseForTurn(
+  retained: WorkRecoveryRevisionLease | undefined,
+  turn: number,
+): Pick<WorkRecoveryRevisionLease, 'leaseId' | 'expectedContentDigest' | 'path'> | null {
+  if (!retained) return null
+  if (retained.rejected?.turn === turn) return Object.freeze({
+    leaseId: retained.rejected.leaseId,
+    expectedContentDigest: retained.rejected.expectedContentDigest,
+    path: retained.path,
+  })
+  if (turn <= retained.preparedAfterTurn) return null
+  return Object.freeze({
+    leaseId: retained.leaseId,
+    expectedContentDigest: retained.expectedContentDigest,
+    path: retained.path,
+  })
 }
 
 export function recoveredDraftForSession(

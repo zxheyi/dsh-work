@@ -3,11 +3,12 @@ import electron = require('electron')
 type RuntimeStatus = import('./contracts.ts').RuntimeStatus
 
 const { contextBridge, ipcRenderer } = electron
+const MAX_RECOVERY_CONTEXT_BYTES = 64 * 1024
 
 const retained = ipcRenderer.sendSync('dsh-work:recovery-context') as unknown
 const boundedRetained = typeof retained === 'string'
   && retained.startsWith('dsh-work-recovery:v1:')
-  && retained.length <= 32 * 1024 ? retained : ''
+  && retained.length <= MAX_RECOVERY_CONTEXT_BYTES ? retained : ''
 
 // Deliberately no invoke(channel), event object, path, URL, shell or file API.
 if (globalThis.location.href === 'dsh-work://status/index.html') contextBridge.exposeInMainWorld('dshWork', Object.freeze({
@@ -28,7 +29,7 @@ else if (globalThis.location.protocol === 'http:' && globalThis.location.hostnam
   read: (): string => boundedRetained,
   update: (value: unknown): void => {
     if (typeof value !== 'string' || (value !== ''
-      && (!value.startsWith('dsh-work-recovery:v1:') || value.length > 32 * 1024))) return
+      && (!value.startsWith('dsh-work-recovery:v1:') || value.length > MAX_RECOVERY_CONTEXT_BYTES))) return
     ipcRenderer.send('dsh-work:recovery-context-update', value)
   },
 }))

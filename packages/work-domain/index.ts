@@ -124,6 +124,7 @@ export interface InspectSessionOutputsSpec {
   readonly sessionId: string
   readonly turn: number
   readonly throughSeq: number
+  readonly revisionLease?: SessionOutputRevisionLease | undefined
 }
 
 export type InspectSessionOutputSourcesSpec = InspectSessionOutputsSpec
@@ -173,13 +174,21 @@ export interface SessionOutputRevisionBaseVersion {
   readonly contentDigest: string
 }
 
+export interface SessionOutputRevisionLease {
+  readonly leaseId: string
+  readonly expectedContentDigest: string
+  readonly path: string
+}
+
 export interface SessionOutputRevision {
   readonly sessionId: string
   readonly sourceTurn: number
+  readonly preparedAfterTurn: number
   readonly name: string
   readonly path: string
   readonly reference: string
   readonly contentDigest: string
+  readonly revisionLease: SessionOutputRevisionLease
   readonly baseVersion?: SessionOutputRevisionBaseVersion | undefined
   readonly intent?: 'restore' | undefined
 }
@@ -191,6 +200,7 @@ export interface SessionOutputRevisionFailure {
   readonly path: string
   readonly reference: string
   readonly status: 'failed'
+  readonly reason: 'invalid-output' | 'conflict'
   readonly message: string
 }
 
@@ -2904,24 +2914,36 @@ async function publishSessionOutputVersion(
   return commitVersionCapsule(journal, intentPath, capsule, signal, internals, assertDirectories)
 }
 
-function completedTurnFrontierSeq(
+function completedTurnSeq(
   events: readonly unknown[],
   turn: number,
 ): number | null {
-  let latestSeq = -1
   let completedSeq = -1
   for (const raw of events) {
     const event = recordData(raw)
     const data = recordData(event?.data)
     const seq = event?.seq
     if (typeof seq !== 'number' || !Number.isSafeInteger(seq) || seq < 0) continue
-    latestSeq = Math.max(latestSeq, seq)
     const reason = recordData(data?.reason)
     if (event?.type === 'turn/end' && data?.turn === turn && reason?.kind === 'completed') {
       completedSeq = Math.max(completedSeq, seq)
     }
   }
-  return completedSeq >= 0 && completedSeq === latestSeq ? completedSeq : null
+  return completedSeq >= 0 ? completedSeq : null
+}
+
+function completedTurnFrontierSeq(
+  events: readonly unknown[],
+  turn: number,
+): number | null {
+  const completedSeq = completedTurnSeq(events, turn)
+  const latestSeq = events.reduce<number>((latest, raw) => {
+    const seq = recordData(raw)?.seq
+    return typeof seq === 'number' && Number.isSafeInteger(seq) && seq >= 0
+      ? Math.max(latest, seq)
+      : latest
+  }, -1)
+  return completedSeq !== null && completedSeq === latestSeq ? completedSeq : null
 }
 
 function expectedSessionOutputDigest(
@@ -3003,13 +3025,20 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
     readonly bytes: Buffer
     readonly mediaType: string | null
     readonly contentDigest: string
+    readonly globalKey: string
+    readonly leaseId: string
     intent: 'modify' | 'restore'
     requiredContentDigest: string | null
     retryableContentDigest: string | null
     lastCheckedTurn: number
     lastFailureTurn: number | null
+    failureMessage: string | null
+    acceptedTurn: number | null
+    acceptedBytes: Buffer | null
+    acceptedContentDigest: string | null
   }
   const revisionProtections = new Map<string, RevisionProtection>()
+  const workspaceRevisionHeads = new Map<string, string>()
   const failedRevisionPaths = new Map<string, ReadonlySet<string>>()
   let revisionQueue: Promise<void> = Promise.resolve()
   const withRevisionLock = async <Value>(operation: () => Promise<Value>): Promise<Value> => {
@@ -3036,6 +3065,8 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
     }
   }
   const revisionKey = (sessionId: string, normalizedPath: string): string => `${sessionId}\0${normalizedPath}`
+  const globalRevisionKey = (workspacePath: string, normalizedPath: string): string =>
+    `${workspacePath}\0${normalizedPath}`
   const revisionTurnKey = (sessionId: string, turn: number): string => `${sessionId}\0${String(turn)}`
   const asRevision = (
     value: RevisionProtection,
@@ -3043,16 +3074,24 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
   ): SessionOutputRevision => Object.freeze({
     sessionId: value.sessionId,
     sourceTurn: value.sourceTurn,
+    preparedAfterTurn: value.preparedAfterTurn,
     name: value.name,
     path: value.path,
     reference: /\s/u.test(value.path) ? `@"${value.path}"` : `@${value.path}`,
     contentDigest: value.contentDigest,
+    revisionLease: Object.freeze({
+      leaseId: value.leaseId,
+      expectedContentDigest: value.contentDigest,
+      path: value.path,
+    }),
     ...(baseVersion ? { baseVersion } : {}),
     ...(value.intent === 'restore' ? { intent: 'restore' as const } : {}),
   })
   const revisionFailure = (
     value: RevisionProtection,
     turn: number,
+    message?: string,
+    reason: SessionOutputRevisionFailure['reason'] = 'invalid-output',
   ): SessionOutputRevisionFailure => Object.freeze({
     sessionId: value.sessionId,
     turn,
@@ -3060,9 +3099,10 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
     path: value.path,
     reference: /\s/u.test(value.path) ? `@"${value.path}"` : `@${value.path}`,
     status: 'failed',
-    message: value.intent === 'restore'
+    reason,
+    message: message ?? (value.intent === 'restore'
       ? '恢复未生成选定版本的完整内容，已保留上一结果。'
-      : '修改未生成有效文件，已保留上一结果。',
+      : '修改未生成有效文件，已保留上一结果。'),
   })
   const matchingProtection = (
     inspected: { readonly cwd: string },
@@ -3147,10 +3187,40 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
     }
     return Object.freeze({ recognized: true, contentDigest: null })
   }
+  const revisionLeaseAlreadyPublished = async (
+    inspected: { readonly cwd: string; readonly events: readonly unknown[] },
+    spec: InspectSessionOutputsSpec,
+    signal?: AbortSignal,
+  ): Promise<boolean> => {
+    if (!versionRoot || !spec.revisionLease) return false
+    const frontier = completedTurnSeq(inspected.events, spec.turn)
+    if (frontier === null) return false
+    let workspacePath: string
+    try {
+      workspacePath = await fs.realpath(inspected.cwd)
+    } catch {
+      return false
+    }
+    const normalizedPath = normalizedWorkspacePath(
+      workspacePath, inspected.cwd, spec.revisionLease.path,
+    )
+    if (!normalizedPath) return false
+    const fileId = sessionOutputFileId(spec.sessionId, normalizedPath)
+    const versionId = sessionOutputVersionId(fileId, 'generated', spec.turn, frontier)
+    return withVersionLock(async () => {
+      const journal = await openVersionJournal(versionRoot)
+      await recoverVersionIntentsForFile(
+        journal, fileId, signal, options.sessionOutputVersionInternals,
+      )
+      return (await listVersionRecordsByFileId(journal, fileId))
+        .some(version => version.versionId === versionId && version.path === spec.revisionLease!.path)
+    })
+  }
   const reconcileSessionRevision = async (
     inspected: { readonly cwd: string; readonly events: readonly unknown[] },
     spec: InspectSessionOutputsSpec,
     signal?: AbortSignal,
+    acceptForPublication = false,
   ): Promise<SessionOutputRevisionFailure | null> => {
     const turnKey = revisionTurnKey(spec.sessionId, spec.turn)
     const existingFailed = failedRevisionPaths.get(turnKey)
@@ -3186,7 +3256,19 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         if (reference.seq <= value.preparedAfterSeq) return false
         return normalizedWorkspacePath(workspacePath, inspected.cwd, reference.path) === value.normalizedPath
       }))
-    if (protections.length < 1) return null
+    if (protections.length < 1) {
+      const knownLease = spec.revisionLease && [...revisionProtections.values()].some(value =>
+        value.sessionId === spec.sessionId
+        && value.leaseId === spec.revisionLease!.leaseId
+        && value.contentDigest === spec.revisionLease!.expectedContentDigest
+        && value.path === spec.revisionLease!.path)
+      if (knownLease) return null
+      if (!spec.revisionLease || await revisionLeaseAlreadyPublished(inspected, spec, signal)) return null
+      throw new WorkError(
+        'work/session-output-conflict',
+        'The revision lease is no longer known. Refresh the current file before retrying.',
+      )
+    }
     const ended = inspected.events.some(raw => {
       const event = recordData(raw)
       const data = recordData(event?.data)
@@ -3207,19 +3289,51 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
     const validated = await validatedSessionOutputs(inspected, spec, options.sessionOutputInternals)
     for (const protection of protections) {
       if (protection.lastFailureTurn === spec.turn || existingFailed?.has(protection.normalizedPath)) {
-        return revisionFailure(protection, spec.turn)
+        return revisionFailure(protection, spec.turn, protection.failureMessage ?? undefined)
       }
+      if (spec.revisionLease
+        && (spec.revisionLease.leaseId !== protection.leaseId
+          || spec.revisionLease.expectedContentDigest !== protection.contentDigest)) {
+        const failed = new Set(failedRevisionPaths.get(turnKey) ?? [])
+        failed.add(protection.normalizedPath)
+        failedRevisionPaths.set(turnKey, failed)
+        protection.lastFailureTurn = spec.turn
+        protection.failureMessage = '修改基线已过期。请刷新当前文件后重新发起修改。'
+        return revisionFailure(
+          protection,
+          spec.turn,
+          protection.failureMessage,
+          'conflict',
+        )
+      }
+      if (protection.acceptedTurn === spec.turn) continue
       if (protection.lastCheckedTurn >= spec.turn) continue
+      const installedHead = workspaceRevisionHeads.get(protection.globalKey)
+      if (installedHead !== undefined && installedHead !== protection.contentDigest) {
+        const failed = new Set(failedRevisionPaths.get(turnKey) ?? [])
+        failed.add(protection.normalizedPath)
+        failedRevisionPaths.set(turnKey, failed)
+        protection.lastFailureTurn = spec.turn
+        protection.failureMessage = '当前文件已被另一会话或外部修改。请刷新内容后明确重试。'
+        return revisionFailure(
+          protection,
+          spec.turn,
+          protection.failureMessage,
+          'conflict',
+        )
+      }
       signal?.throwIfAborted()
       const produced = validated.find(output =>
         normalizedWorkspacePath(protection.workspacePath, inspected.cwd, output.path) === protection.normalizedPath)
       let valid = false
       let observedDigest: string | null = null
+      let acceptedContent: SessionOutputContent | null = null
       if (produced?.mediaType === 'text/markdown') {
         try {
           const content = await readValidatedSessionOutput(
             inspected, { ...spec, path: produced.path }, signal, options.sessionOutputInternals,
           )
+          acceptedContent = content
           observedDigest = content.contentDigest
           valid = protection.requiredContentDigest === null
             || content.contentDigest === protection.requiredContentDigest
@@ -3229,11 +3343,15 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         }
       }
       if (valid) {
+        if (!acceptForPublication) continue
         protection.lastCheckedTurn = spec.turn
-        revisionProtections.delete(revisionKey(protection.sessionId, protection.normalizedPath))
+        protection.acceptedTurn = spec.turn
+        protection.acceptedBytes = Buffer.from(acceptedContent!.content, 'utf8')
+        protection.acceptedContentDigest = observedDigest
         continue
       }
       protection.lastFailureTurn = spec.turn
+      protection.failureMessage = null
       protection.lastCheckedTurn = spec.turn
       if (observedDigest === null) {
         try {
@@ -3303,19 +3421,51 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         if (await hasPublishedVersion(output, initialFrontier)) continue
         await options.sessionOutputVersionInternals?.beforeOutputCapture?.(output.path)
         let captured: CapturedSessionOutput
+        const workspacePath = await fs.realpath(inspected.cwd)
+        const normalizedPath = normalizedWorkspacePath(workspacePath, inspected.cwd, output.path)
+        const acceptedProtection = normalizedPath === null ? undefined : revisionProtections.get(
+          revisionKey(spec.sessionId, normalizedPath),
+        )
         try {
-          captured = await captureValidatedSessionOutput(
-            inspected,
-            { ...spec, path: output.path },
-            signal,
-            options.sessionOutputInternals,
-          )
+          captured = acceptedProtection?.acceptedTurn === spec.turn
+            && acceptedProtection.acceptedBytes
+            && acceptedProtection.acceptedContentDigest
+            ? Object.freeze({
+                output: Object.freeze({
+                  sessionId: acceptedProtection.sessionId,
+                  turn: spec.turn,
+                  name: acceptedProtection.name,
+                  path: acceptedProtection.path,
+                  bytes: acceptedProtection.acceptedBytes.byteLength,
+                  mediaType: acceptedProtection.mediaType,
+                }),
+                workspacePath: acceptedProtection.workspacePath,
+                normalizedPath: acceptedProtection.normalizedPath,
+                data: Buffer.from(acceptedProtection.acceptedBytes),
+                contentDigest: acceptedProtection.acceptedContentDigest,
+              })
+            : await captureValidatedSessionOutput(
+                inspected,
+                { ...spec, path: output.path },
+                signal,
+                options.sessionOutputInternals,
+              )
         } catch (cause) {
           if (signal?.aborted) throw cause
           throw versionError('The completed Session output could not be frozen.', { cause })
         }
         const capturedFrontier = await inspectCurrentFrontier()
         if (capturedFrontier === null) return
+        if (acceptedProtection?.acceptedTurn === spec.turn
+          && workspaceRevisionHeads.get(acceptedProtection.globalKey) !== acceptedProtection.contentDigest) {
+          acceptedProtection.lastFailureTurn = spec.turn
+          acceptedProtection.failureMessage =
+            '当前文件已被另一会话或外部修改。请刷新内容后明确重试。'
+          const failed = new Set(failedRevisionPaths.get(revisionTurnKey(spec.sessionId, spec.turn)) ?? [])
+          failed.add(acceptedProtection.normalizedPath)
+          failedRevisionPaths.set(revisionTurnKey(spec.sessionId, spec.turn), failed)
+          throw new WorkError('work/session-output-conflict', acceptedProtection.failureMessage)
+        }
         const expectedDigest = expectedSessionOutputDigest(
           inspected,
           spec,
@@ -3354,6 +3504,10 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
             sources,
             data: captured.data,
           }, signal, options.sessionOutputVersionInternals)
+          workspaceRevisionHeads.set(
+            globalRevisionKey(captured.workspacePath, captured.normalizedPath),
+            captured.contentDigest,
+          )
         } catch (cause) {
           if (signal?.aborted || cause instanceof WorkError) throw cause
           throw versionError('The completed Session output version could not be published.', { cause })
@@ -3667,7 +3821,10 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         )
       }
       return withRevisionLock(async () => {
-        await reconcileSessionRevision(inspected, spec, signal)
+        const revisionResult = await reconcileSessionRevision(inspected, spec, signal, true)
+        if (revisionResult?.reason === 'conflict') {
+          throw new WorkError('work/session-output-conflict', revisionResult.message)
+        }
         const outputs = await validatedSessionOutputs(inspected, spec, options.sessionOutputInternals)
         const failed = failedRevisionPaths.get(revisionTurnKey(spec.sessionId, spec.turn))
         let visible = failed
@@ -3707,6 +3864,11 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
           }))
         }
         await publishGeneratedVersions(inspected, spec, visible, signal)
+        for (const [key, protection] of revisionProtections) {
+          if (protection.sessionId === spec.sessionId && protection.acceptedTurn === spec.turn) {
+            revisionProtections.delete(key)
+          }
+        }
         return Object.freeze(visible)
       })
     },
@@ -3769,6 +3931,7 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         if (!normalizedPath) {
           throw new WorkError('work/session-output-invalid', 'The selected output is outside its Session Workspace.')
         }
+        const globalKey = globalRevisionKey(workspacePath, normalizedPath)
         const key = revisionKey(spec.sessionId, normalizedPath)
         let existing = revisionProtections.get(key)
         const latestEndedTurn = inspected.events.reduce<number>((latest, raw) => {
@@ -3929,6 +4092,44 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
           })
         }
         if (existing) {
+          const installedHead = workspaceRevisionHeads.get(existing.globalKey)
+          if (installedHead !== undefined && installedHead !== existing.contentDigest) {
+            if (!existingRequestSettled()) {
+              throw new WorkError(
+                'work/session-output-conflict',
+                'Another Session changed this file after the revision was prepared. Refresh before retrying.',
+              )
+            }
+            revisionProtections.delete(key)
+            existing = undefined
+          }
+        }
+        if (existing && intent === 'modify') {
+          let current: Awaited<ReturnType<typeof readStableWorkspaceOutputBytes>>
+          try {
+            current = await readStableWorkspaceOutputBytes(
+              inspected.cwd, spec.path, signal, options.sessionOutputInternals,
+            )
+          } catch (cause) {
+            if (signal?.aborted) throw cause
+            throw new WorkError(
+              'work/session-output-conflict',
+              'The current file changed while its revision lease was being checked.',
+              { cause },
+            )
+          }
+          const currentDigest = createHash('sha256').update(current.data).digest('hex')
+          const recognizedFailedBytes = existing.retryableContentDigest === currentDigest
+          if (recognizedFailedBytes) recognizedRetryDigest = currentDigest
+          if (current.normalizedPath !== normalizedPath
+            || (currentDigest !== existing.contentDigest && !recognizedFailedBytes)) {
+            throw new WorkError(
+              'work/session-output-conflict',
+              'The current file has external changes. Refresh it before modifying.',
+            )
+          }
+        }
+        if (existing) {
           const requestedDigest = intent === 'restore' ? baseVersion?.contentDigest ?? null : null
           const samePendingRequest = existing.intent === intent
             && existing.requiredContentDigest === requestedDigest
@@ -3944,6 +4145,10 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
             existing.preparedAfterSeq = latestEventSeq
             existing.retryableContentDigest = recognizedRetryDigest
             existing.lastFailureTurn = null
+            existing.failureMessage = null
+            existing.acceptedTurn = null
+            existing.acceptedBytes = null
+            existing.acceptedContentDigest = null
           }
           existing.intent = intent
           existing.requiredContentDigest = requestedDigest
@@ -3959,6 +4164,24 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
         }
         const preparedAfterTurn = latestEndedTurn
         const preparedAfterSeq = latestEventSeq
+        const baselineDigest = restoreCurrent?.contentDigest ?? content!.contentDigest
+        const competing = [...revisionProtections.values()].some(candidate =>
+          candidate.globalKey === globalKey && candidate.sessionId !== spec.sessionId)
+        const installedHead = workspaceRevisionHeads.get(globalKey)
+        if (installedHead !== undefined && installedHead !== baselineDigest && competing) {
+          throw new WorkError(
+            'work/session-output-conflict',
+            'Another Session changed this file before the revision lease was acquired.',
+          )
+        }
+        workspaceRevisionHeads.set(globalKey, baselineDigest)
+        const leaseId = createHash('sha256').update([
+          spec.sessionId,
+          globalKey,
+          baselineDigest,
+          String(preparedAfterTurn),
+          String(preparedAfterSeq),
+        ].join('\0')).digest('hex').slice(0, 32)
         const protection: RevisionProtection = {
           sessionId: spec.sessionId,
           sourceTurn: restoreCurrent?.sourceTurn ?? spec.turn,
@@ -3971,12 +4194,18 @@ export function createWorkController(options: WorkControllerOptions): WorkContro
           workspacePath,
           bytes: restoreCurrent?.bytes ?? Buffer.from(content!.content, 'utf8'),
           mediaType: restoreCurrent?.mediaType ?? content!.mediaType,
-          contentDigest: restoreCurrent?.contentDigest ?? content!.contentDigest,
+          contentDigest: baselineDigest,
+          globalKey,
+          leaseId,
           intent,
           requiredContentDigest: intent === 'restore' ? baseVersion?.contentDigest ?? null : null,
           retryableContentDigest: null,
           lastCheckedTurn: preparedAfterTurn,
           lastFailureTurn: null,
+          failureMessage: null,
+          acceptedTurn: null,
+          acceptedBytes: null,
+          acceptedContentDigest: null,
         }
         revisionProtections.set(key, protection)
         return asRevision(protection, baseVersion)

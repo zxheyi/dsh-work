@@ -1,5 +1,6 @@
 type PresentationCode = DshWorkRuntimeCode | 'desktop-unavailable'
 type PresentationStatus = Omit<DshWorkRuntimeStatus, 'code'> & { readonly code: PresentationCode | null }
+const MAX_RECOVERY_CONTEXT_BYTES = 64 * 1024
 
 const labels: Record<DshWorkRuntimeState, readonly [string, string]> = {
   stopped: ['准备开始', '工作台尚未打开，你可以重新尝试。'],
@@ -33,7 +34,7 @@ const recover = element<HTMLButtonElement>('recover')
 const retained = element<HTMLElement>('retained')
 retained.hidden = !(window.dshWork.hasRetainedContext
   || (typeof window.name === 'string' && window.name.startsWith('dsh-work-recovery:v1:')
-    && window.name.length <= 32 * 1024))
+    && window.name.length <= MAX_RECOVERY_CONTEXT_BYTES))
 
 const render = (value: PresentationStatus): void => {
   const [label, detail] = labels[value.state]
