@@ -133,6 +133,8 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
     { name: 'shell.overlay' },
   ])
   assert.match(source, /data-dsh-work-brand/)
+  assert.match(source, /data-dsh-work-brand": "mark"[\s\S]{0,100}, "DW"\)\)\)/u)
+  assert.match(source, /--work-accent: #2f63e9/u)
   assert.match(source, /data-work-legacy-deliverable-open/)
   assert.match(source, /data-work-legacy-deliverable-preview/)
   assert.match(source, /data-work-session-resource/)

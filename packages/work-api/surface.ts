@@ -2307,29 +2307,29 @@ function NativeSessionOutputPreview({
 
 const styles = `
 :root {
-  --work-bg: #f5f6f4;
-  --work-sidebar: #ecefed;
+  --work-bg: #ffffff;
+  --work-sidebar: #f5f6f8;
   --work-surface: #ffffff;
-  --work-surface-subtle: #f8f9f7;
-  --work-text: #17202e;
-  --work-muted: #697386;
-  --work-faint: #8a93a2;
-  --work-border: #dde1e7;
-  --work-border-strong: #c9cfd8;
-  --work-accent: #315cf4;
-  --work-accent-hover: #2449ce;
-  --work-accent-subtle: #e9eeff;
-  --work-success: #25845b;
+  --work-surface-subtle: #f5f7fa;
+  --work-text: #111826;
+  --work-muted: #657080;
+  --work-faint: #929ba8;
+  --work-border: #e4e8ee;
+  --work-border-strong: #cbd3df;
+  --work-accent: #2f63e9;
+  --work-accent-hover: #2454d1;
+  --work-accent-subtle: #edf3ff;
+  --work-success: #24866f;
   --work-warning: #b96912;
-  --work-danger: #b84a3a;
-  --work-shadow: 0 12px 32px rgba(35, 50, 76, .08);
+  --work-danger: #c84a51;
+  --work-shadow: 0 12px 35px rgba(26, 39, 59, .09);
   --work-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 body[data-ds-dark-theme] {
-  --work-bg: #171a20;
-  --work-sidebar: #20242b;
-  --work-surface: #22262e;
-  --work-surface-subtle: #292e37;
+  --work-bg: #15171a;
+  --work-sidebar: #1b1d21;
+  --work-surface: #202328;
+  --work-surface-subtle: #24272c;
   --work-text: #eef1f5;
   --work-muted: #aeb6c3;
   --work-faint: #8993a2;
@@ -2344,7 +2344,7 @@ body[data-ds-dark-theme] {
   --work-shadow: 0 12px 32px rgba(0, 0, 0, .22);
 }
 .dsh-work-sidebar, .dsh-work-home { font-family: var(--work-font); color: var(--work-text); }
-.dsh-work-native-brand-mark { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: white; background: #365eca; font: 700 13px/1 var(--work-font); }
+.dsh-work-native-brand-mark { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 9px; color: white; background: #07162f; font: 760 10px/1 var(--work-font); letter-spacing: -.04em; }
 [data-approval-key] { font-family: var(--work-font); }
 [data-approval-key] > div { border-color: color-mix(in srgb, var(--work-warning) 46%, var(--work-border)) !important; border-radius: 14px !important; box-shadow: var(--work-shadow) !important; }
 .dsh-work-session-outputs { display: grid; gap: 10px; margin-top: 16px; color: var(--work-text); font-family: var(--work-font); }
@@ -2815,7 +2815,7 @@ export function registerWorkSurface(ctx: Context, works: IWorks): () => void {
     className: 'dsh-work-native-brand-mark',
     'data-dsh-work-brand': 'mark',
     'aria-hidden': 'true',
-  }, 'W')))
+  }, 'DW')))
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action',
     id: 'dsh-work-legacy-deliverable-open',
