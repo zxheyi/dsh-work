@@ -75,6 +75,8 @@ try {
           const button = [...document.querySelectorAll('button')].find(item => item.textContent?.trim() === label);
           if (button) button.click();
         }
+        const expand = [...document.querySelectorAll('button')].find(item => ['打开侧边栏', 'Open sidebar'].includes(item.getAttribute('aria-label') ?? ''));
+        if (expand) expand.click();
         return { loopback: location.hostname === '127.0.0.1', brand: Boolean(document.querySelector('[data-dsh-work-brand="name"]')), composer: Boolean(document.querySelector('[data-composer-card]')), state: document.body.dataset.state ?? '', diagnostic: document.querySelector('#diagnostic')?.textContent ?? '', body: document.body.innerText.slice(0, 1200) };
       })()`, returnByValue: true })
       lastProbe = response.result?.value
