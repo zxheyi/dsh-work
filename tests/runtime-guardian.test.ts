@@ -104,6 +104,29 @@ test('a clean guardian stop is reusable across guardian processes', async () => 
   } finally { fs.rmSync(owned.productRoot, { recursive: true, force: true }) }
 })
 
+test('guardian service forwards the validated surface outside its bounded status snapshot', async () => {
+  const owned = fixture()
+  try {
+    const surfaces: string[] = []
+    const unsubscribe = owned.service.subscribeSurface(url => surfaces.push(url))
+    const starting = owned.service.start()
+    childAt(owned, 0).emit('message', {
+      protocol: 'dsh-work.lifecycle.v1',
+      event: 'surface',
+      url: 'http://127.0.0.1:43127/?token=launch-token',
+    })
+    owned.message('ready')
+    await starting
+    assert.deepEqual(surfaces, ['http://127.0.0.1:43127/?token=launch-token'])
+    assert.deepEqual(Object.keys(owned.service.snapshot()).sort(), [
+      'canRecover', 'canStart', 'canStop', 'code', 'state',
+    ])
+    unsubscribe()
+    const stop = owned.service.stop(); owned.message('disposed'); childAt(owned, 0).emit('close', 0, null); await stop
+    await owned.service.dispose()
+  } finally { fs.rmSync(owned.productRoot, { recursive: true, force: true }) }
+})
+
 test('collision fails closed and explicit recovery starts a distinct generation', async () => {
   const owned = fixture()
   try {

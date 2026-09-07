@@ -6,10 +6,17 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const output = path.join(root, 'dist')
 const compiler = path.join(root, 'node_modules/typescript/bin/tsc')
+const bundler = path.join(root, 'node_modules/tsdown/dist/run.mjs')
 
 if (!fs.existsSync(compiler)) throw new Error('TypeScript compiler unavailable; run pnpm install')
+if (!fs.existsSync(bundler)) throw new Error('Client bundler unavailable; run pnpm install')
 fs.rmSync(output, { recursive: true, force: true })
 execFileSync(process.execPath, [compiler, '-p', path.join(root, 'tsconfig.build.json')], {
+  cwd: root,
+  env: process.env,
+  stdio: 'inherit',
+})
+execFileSync(process.execPath, [bundler, '--config', path.join(root, 'scripts/tsdown.work-client.config.mjs')], {
   cwd: root,
   env: process.env,
   stdio: 'inherit',
@@ -18,6 +25,9 @@ execFileSync(process.execPath, [compiler, '-p', path.join(root, 'tsconfig.build.
 const assets = [
   'packages/lifecycle-bundle/package.json',
   'packages/lifecycle-bundle/cordis.patch.yml',
+  'packages/work-bundle/package.json',
+  'packages/work-bundle/cordis.patch.yml',
+  'packages/work-api/package.json',
   'apps/desktop/index.html',
   'apps/desktop/style.css',
 ]

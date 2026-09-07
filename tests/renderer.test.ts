@@ -67,6 +67,7 @@ test('a late initial snapshot cannot overwrite a newer live status', async () =>
     initial: ((status: RuntimeStatus) => void) | null
   } = { listener: null, initial: null }
   const window = { dshWork: {
+    hasRetainedContext: false,
     subscribe: (listener: (status: RuntimeStatus) => void) => { callbacks.listener = listener },
     snapshot: () => new Promise<RuntimeStatus>(resolve => { callbacks.initial = resolve }),
   } }
@@ -84,20 +85,42 @@ test('abnormal runtime failures require explicit isolated recovery after direct-
     const { document, elements } = createDocument()
     const callbacks: { listener: ((status: RuntimeStatus) => void) | null } = { listener: null }
     const window = { dshWork: {
+      hasRetainedContext: false,
       subscribe: (listener: (status: RuntimeStatus) => void) => { callbacks.listener = listener },
       snapshot: () => new Promise<RuntimeStatus>(() => {}),
     } }
     await withRenderer(document, window, () => {
       callbacks.listener?.({ state: 'failed', code, canStart: false, canStop: false, canRecover: false })
-      assert.match(elements.get('detail')?.textContent ?? '', /直接子进程/)
+      assert.match(elements.get('detail')?.textContent ?? '', /安全恢复/)
       assert.equal(elements.get('start')?.disabled, true)
       callbacks.listener?.({ state: 'failed', code, canStart: false, canStop: false, canRecover: true })
       assert.equal(elements.get('start')?.disabled, true)
-      assert.equal(elements.get('start')?.textContent, '启动已阻止')
+      assert.equal(elements.get('start')?.textContent, '等待安全恢复')
       assert.equal(elements.get('recover')?.hidden, false)
       assert.equal(elements.get('stop')?.disabled, true)
     })
   }
+})
+
+test('runtime failure page reports retained conversation context without enabling writes', async () => {
+  const { document, elements } = createDocument()
+  const callbacks: { listener: ((status: RuntimeStatus) => void) | null } = { listener: null }
+  const window = {
+    name: 'dsh-work-recovery:v1:{"bounded":true}',
+    dshWork: {
+      hasRetainedContext: true,
+      subscribe: (listener: (status: RuntimeStatus) => void) => { callbacks.listener = listener },
+      snapshot: () => new Promise<RuntimeStatus>(() => {}),
+      recover: async () => {}, start: async () => {}, stop: async () => {},
+    },
+  }
+  await withRenderer(document, window, () => {
+    callbacks.listener?.({ state: 'failed', code: 'unexpected-exit', canStart: false, canStop: false, canRecover: true })
+    assert.equal(elements.get('retained')?.hidden, false)
+    assert.equal(elements.get('start')?.disabled, true)
+    assert.equal(elements.get('stop')?.disabled, true)
+    assert.equal(elements.get('recover')?.disabled, false)
+  })
 })
 
 test('uncertain generation requires a distinct explicit recovery action', async () => {
@@ -106,6 +129,7 @@ test('uncertain generation requires a distinct explicit recovery action', async 
   const callbacks: { listener: ((status: RuntimeStatus) => void) | null } = { listener: null }
   let recoverCalls = 0
   const window = { dshWork: {
+    hasRetainedContext: false,
     subscribe: (listener: (status: RuntimeStatus) => void) => { callbacks.listener = listener },
     snapshot: () => new Promise<RuntimeStatus>(() => {}),
     recover: async () => { recoverCalls++ }, start: async () => {}, stop: async () => {},
@@ -115,8 +139,18 @@ test('uncertain generation requires a distinct explicit recovery action', async 
     assert.equal(elements.get('start')?.disabled, true)
     assert.equal(elements.get('recover')?.hidden, false)
     assert.equal(elements.get('recover')?.disabled, false)
-    assert.match(elements.get('detail')?.textContent ?? '', /旧数据不会被复用或删除/)
+    assert.match(elements.get('detail')?.textContent ?? '', /原有数据不会被自动删除/)
     actions.get('recover')?.()
     assert.equal(recoverCalls, 1)
   })
+})
+
+test('local shell copy uses product language instead of Harness configuration vocabulary', () => {
+  const visibleSources = [
+    fs.readFileSync(new URL('../apps/desktop/index.html', import.meta.url), 'utf8'),
+    fs.readFileSync(new URL('../apps/desktop/renderer.ts', import.meta.url), 'utf8'),
+  ].join('\n')
+  assert.doesNotMatch(visibleSources, /DSH Web|Workspace|Session|Profile|CLI|generation/u)
+  assert.match(visibleSources, /DSH Work/u)
+  assert.match(visibleSources, /安全恢复/u)
 })

@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-work-navigation-test-setup
+      name: '@dsh-work/navigation-test-setup'

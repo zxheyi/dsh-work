@@ -14,6 +14,7 @@ import type {
   RuntimeSnapshot,
 } from '../runtime-contract/index.ts'
 import {
+  boundedGuardianSurface,
   boundedGuardianSnapshot,
   GUARDIAN_PROTOCOL,
 } from './protocol.ts'
@@ -43,6 +44,7 @@ interface PendingRequest {
 }
 
 export interface GuardianClient extends RuntimeControl {
+  subscribeSurface(listener: (url: string) => void): () => void
   dispose(waitMs?: number): Promise<boolean>
 }
 
@@ -93,6 +95,7 @@ export async function createGuardianClient(
   let terminated = false
   let disposing = false
   const listeners = new Set<(snapshot: RuntimeSnapshot) => void>()
+  const surfaceListeners = new Set<(url: string) => void>()
   const pending = new Map<number, PendingRequest>()
 
   const publish = (value: RuntimeSnapshot): void => {
@@ -119,7 +122,13 @@ export async function createGuardianClient(
     child.on('message', (message: unknown) => {
       const record = asRecord(message)
       if (!record || record.protocol !== GUARDIAN_PROTOCOL) return
-      if (record.event === 'guardian-ready' && !settled) {
+      if (record.event === 'surface') {
+        const url = boundedGuardianSurface(record)
+        if (!url) return
+        for (const listener of [...surfaceListeners]) {
+          try { listener(url) } catch {}
+        }
+      } else if (record.event === 'guardian-ready' && !settled) {
         const value = boundedGuardianSnapshot(record.value)
         if (!value) return
         settled = true
@@ -171,6 +180,10 @@ export async function createGuardianClient(
     subscribe(listener: (snapshot: RuntimeSnapshot) => void): () => void {
       listeners.add(listener)
       return () => listeners.delete(listener)
+    },
+    subscribeSurface(listener: (url: string) => void): () => void {
+      surfaceListeners.add(listener)
+      return () => surfaceListeners.delete(listener)
     },
     async dispose(waitMs = 3_000): Promise<boolean> {
       if (!child.connected) return child.exitCode !== null

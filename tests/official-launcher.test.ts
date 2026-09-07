@@ -51,12 +51,28 @@ test('Profile preparation refreshes only the managed Profile, preserves generati
     fs.writeFileSync(path.join(home, 'user-content'), 'preserved')
     prepareDevelopmentProfile(home)
     assert.equal(fs.readFileSync(path.join(home, 'user-content'), 'utf8'), 'preserved')
-    assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'profiles/dsh-work/package.json'), 'utf8')).dsh.profile.patchReload, 'startup')
+    const profileManifest = JSON.parse(fs.readFileSync(path.join(home, 'profiles/dsh-work/package.json'), 'utf8'))
+    assert.equal(profileManifest.dsh.profile.patchReload, 'startup')
+    assert.deepEqual(profileManifest.dsh.profile.bundles, [
+      '@deepseek-ai/dsh-base',
+      '@deepseek-ai/dsh-web-app',
+      '@dsh-work/work',
+      '@dsh-work/lifecycle',
+    ])
     const bundle = path.join(home, 'profiles/dsh-work/node_modules/@dsh-work/lifecycle')
     const bundleManifest = JSON.parse(fs.readFileSync(path.join(bundle, 'package.json'), 'utf8'))
     assert.equal(bundleManifest.exports['.'], './index.js')
     assert.equal(fs.existsSync(path.join(bundle, 'index.js')), true)
     assert.equal(fs.existsSync(path.join(bundle, 'index.ts')), false)
+    const workBundle = path.join(home, 'profiles/dsh-work/node_modules/@dsh-work/work')
+    assert.equal(fs.existsSync(path.join(workBundle, 'index.js')), true)
+    assert.equal(fs.existsSync(path.join(workBundle, 'cordis.patch.yml')), true)
+    assert.equal(fs.existsSync(path.join(home, 'profiles/dsh-work/node_modules/@dsh-work/work-domain/index.js')), true)
+    assert.equal(fs.existsSync(path.join(home, 'profiles/dsh-work/node_modules/@dsh-work/work-api/index.js')), true)
+    assert.equal(fs.realpathSync(path.join(home, 'profiles/dsh-work/node_modules/@deepseek-ai/cordis')).length > 0, true)
+    assert.equal(fs.realpathSync(path.join(home, 'profiles/dsh-work/node_modules/@deepseek-ai/dsh-storage-domain')).length > 0, true)
+    assert.equal(fs.realpathSync(path.join(home, 'profiles/dsh-work/node_modules/@deepseek-ai/dsh-typert-protocol')).length > 0, true)
+    assert.equal(fs.realpathSync(path.join(home, 'profiles/dsh-work/node_modules/zod')).length > 0, true)
     prepareDevelopmentProfile(home)
     assert.equal(fs.readFileSync(path.join(home, 'user-content'), 'utf8'), 'preserved')
     fs.rmSync(path.join(home, 'profiles'), { recursive: true, force: true })

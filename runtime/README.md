@@ -12,17 +12,18 @@ Install exactly the accepted dependency graph without running package lifecycle 
 pnpm install --frozen-lockfile --ignore-scripts
 pnpm runtime:prepare
 pnpm runtime:verify
+pnpm runtime:stage
 pnpm test
 pnpm check
 ```
 
-The preparation command is a controlled build/verification action. It downloads the pinned official artifacts into a temporary directory and writes only an ignored `artifacts/runtime/context.json` receipt path into the repository. It is never part of ordinary application launch.
+The preparation command is a controlled build/verification action. It downloads the pinned official artifacts into a temporary directory and writes only an ignored `artifacts/runtime/context.json` receipt path into the repository. It is never part of ordinary application launch. After the same provenance verification passes, `runtime:stage` copies the verified Node tree to `artifacts/product-resources/runtime/node` and writes `runtime/manifest.json`; a release packager must place that `runtime` directory at the application Resources root.
 
 The verifier checks the exact upstream remote, tag, commit and byte-clean source; official root npm archive bytes against the installed package; official Node archive and executable bytes; the locked DSH-family version set; and the root lockfile integrity. The native CI matrix repeats this on macOS arm64 and Windows x64.
 
 ## Current boundary
 
-This baseline makes `main` installable and independently verifiable. The repository also contains a separately reviewable development-only [Electron lifecycle slice](../docs/acceptance/electron-lifecycle-slice.md) with a persistent product-owned Profile generation and external runtime guardian. It does not provide packaging, signing, user workspace migration, or a runnable release.
+This baseline makes `main` installable and independently verifiable. The repository also contains a separately reviewable [Electron lifecycle slice](../docs/acceptance/electron-lifecycle-slice.md) with a persistent product-owned Profile generation and external runtime guardian. Packaged desktop startup resolves only `Resources/runtime/node` and never accepts `DSH_WORK_NODE` or a global Node fallback. Development startup retains the explicit variable below. Runtime staging is implemented, but final application packaging, signing, transitive notices, native package smoke, user workspace migration, and a runnable release remain separate gates.
 
 Only Electron's install script is allowed by the root manifest when scripts are enabled. No Harness source build or patch step is introduced. The known upstream React/React DOM peer mismatch remains a browser-rendering gate, not a reason for an unreviewed override.
 

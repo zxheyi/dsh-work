@@ -18,6 +18,7 @@ export const requiredFiles = [
   'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md',
   'docs/decisions/0004-crash-safe-runtime-ownership.md',
   'docs/decisions/0005-typescript-product-source.md',
+  'docs/decisions/0006-work-as-product-owned-aggregate.md',
   'docs/upstream-compatibility.md',
   '.github/ISSUE_TEMPLATE/config.yml',
   '.github/ISSUE_TEMPLATE/feature_request.yml',
@@ -55,6 +56,10 @@ export const requiredFiles = [
   'packages/lifecycle-bundle/cordis.patch.yml',
   'packages/lifecycle-bundle/index.ts',
   'packages/lifecycle-bundle/package.json',
+  'packages/work-domain/index.ts',
+  'packages/work-bundle/cordis.patch.yml',
+  'packages/work-bundle/index.ts',
+  'packages/work-bundle/package.json',
   'packages/runtime-contract/index.ts',
   'packages/runtime-host/index.ts',
   'packages/runtime-host/official-launcher.ts',
@@ -86,6 +91,8 @@ export const requiredFiles = [
   'tests/fixtures/delayed-startup/index.mjs',
   'tests/fixtures/delayed-startup/package.json',
   'tests/typescript-toolchain.test.ts',
+  'tests/work-controller.test.ts',
+  'tests/work-bundle.test.ts',
   'tests/support/owned-test-home.ts',
   'tests/support/runtime-output-guard.ts',
 ]
@@ -107,6 +114,7 @@ const linkedMarkdownFiles = [
   'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md',
   'docs/decisions/0004-crash-safe-runtime-ownership.md',
   'docs/decisions/0005-typescript-product-source.md',
+  'docs/decisions/0006-work-as-product-owned-aggregate.md',
   'docs/upstream-compatibility.md',
   '.github/BRANCH_PROTECTION.md',
 ]
@@ -244,6 +252,18 @@ export function verifyContract(root) {
     'Keep repository bootstrap, provenance, build orchestration, and contract-verification scripts as directly executable `.mjs`',
   ]) {
     requireText(errors, typescriptDecision, token, 'docs/decisions/0005-typescript-product-source.md')
+  }
+
+  const workDecision = read(root, 'docs/decisions/0006-work-as-product-owned-aggregate.md')
+  for (const token of [
+    'Status: accepted',
+    'Work as a product-owned aggregate over Harness Workspace and Session',
+    '`1 Work = 1 DSH Work-managed Workspace + 1 primary Session + many Turns + many deliverable versions`',
+    '`ctx.storageDomain`',
+    '`ctx.workspaceRegistry`',
+    '`ctx.sessionController`',
+  ]) {
+    requireText(errors, workDecision, token, 'docs/decisions/0006-work-as-product-owned-aggregate.md')
   }
 
   const expectedNodeArtifacts = {
@@ -441,6 +461,17 @@ export function verifyContract(root) {
     "protocol: 'dsh-work.lifecycle.v1'",
   ]) {
     requireText(errors, lifecycleBundle, token, 'packages/lifecycle-bundle/index.ts')
+  }
+
+  const workBundle = read(root, 'packages/work-bundle/index.ts')
+  for (const token of [
+    "from '@deepseek-ai/dsh-storage-domain'",
+    "name: 'dsh_work'",
+    "context.provide('workController'",
+    'createDomainWorkStore(domain.global)',
+    'createHarnessWorkPort(context)',
+  ]) {
+    requireText(errors, workBundle, token, 'packages/work-bundle/index.ts')
   }
 
   const launcher = read(root, 'packages/runtime-host/official-launcher.ts')

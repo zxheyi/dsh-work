@@ -1,0 +1,51 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "meta": {
+    "name": "DSH Work Home v2",
+    "inherits": "work-home-v1.tokens.json",
+    "canvas": { "width": 1440, "height": 900 },
+    "change": "Consolidated resource entry without Workspace directory selection"
+  },
+  "component": {
+    "resourceEntry": {
+      "height": 36,
+      "triggerMinWidth": 104,
+      "triggerPaddingInline": 12,
+      "triggerRadius": 9,
+      "helperGap": 12
+    },
+    "resourceMenu": {
+      "width": 240,
+      "padding": 6,
+      "offset": 8,
+      "radius": 10,
+      "itemHeight": 44,
+      "itemPaddingInline": 10,
+      "itemRadius": 7,
+      "zIndex": 10
+    },
+    "resourceHelper": {
+      "fontSize": 12,
+      "lineHeight": 18
+    },
+    "resourceStageLabel": {
+      "fontSize": 11,
+      "lineHeight": 16
+    },
+    "dropTarget": {
+      "activeBorderWidth": 2,
+      "activeBorderColor": "#315CF4",
+      "activeBackground": "#F5F7FF"
+    }
+  },
+  "shadow": {
+    "resourceMenu": "0 14px 32px rgba(35, 50, 76, 0.14)"
+  },
+  "copy": {
+    "entry": "添加资料",
+    "helper": "可选，文件和文件夹即将支持",
+    "placeholder": "描述目标，或将文件和文件夹拖到这里（即将支持）",
+    "items": ["添加文件", "添加文件夹", "添加网页", "粘贴内容"],
+    "stage": "即将支持"
+  }
+}

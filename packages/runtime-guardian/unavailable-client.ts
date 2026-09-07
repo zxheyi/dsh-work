@@ -36,6 +36,7 @@ export function createUnavailableGuardianClient(): GuardianClient {
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
+    subscribeSurface: () => () => {},
     dispose: async () => true,
   })
 }

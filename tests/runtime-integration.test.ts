@@ -29,9 +29,14 @@ test('product Bundle runs through the official CLI for three ready/EOF/restart c
       child.stderr.on('data', bytes => guard.observe(bytes, 'stderr'))
       return child
     } })
+    const surfaces: string[] = []
+    host.subscribeSurface(url => surfaces.push(url))
     for (let cycle = 0; cycle < 3; cycle++) {
-      assert.equal((await host.start()).state, 'ready')
-      const stopped = await host.stop()
+      const started: RuntimeHostSnapshot = await host.start()
+      assert.equal(started.state, 'ready', started.code ?? 'runtime did not become ready')
+      assert.equal(surfaces.length, cycle + 1)
+      assert.match(surfaces[cycle] ?? '', /^http:\/\/127\.0\.0\.1:\d+\/\?token=[A-Za-z0-9_-]+$/u)
+      const stopped: RuntimeHostSnapshot = await host.stop()
       assert.equal(stopped.state, 'stopped')
       assert.equal(stopped.code, null)
     }

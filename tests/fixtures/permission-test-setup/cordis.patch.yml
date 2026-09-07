@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-work-permission-test-setup
+      name: '@dsh-work/permission-test-setup'

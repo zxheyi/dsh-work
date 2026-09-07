@@ -70,6 +70,35 @@ test('command responses resolve callers without duplicating the guardian status 
   assert.deepEqual(observed, ['starting'])
 })
 
+test('guardian client exposes validated surfaces only through its trusted callback', async () => {
+  const child = new FakeGuardianProcess()
+  const creating = createGuardianClient({ node: process.execPath, productRoot: os.tmpdir() }, {
+    probe: () => 'v24.11.1\n', spawnProcess: () => child as unknown as ChildProcess,
+  })
+  const stopped = { state: 'stopped', code: null, canStart: true, canStop: false, canRecover: false }
+  process.nextTick(() => child.emit('message', {
+    protocol: GUARDIAN_PROTOCOL, event: 'guardian-ready', value: stopped,
+  }))
+  const client = await creating
+  const surfaces: string[] = []
+  const unsubscribe = client.subscribeSurface(url => surfaces.push(url))
+  child.emit('message', {
+    protocol: GUARDIAN_PROTOCOL,
+    event: 'surface',
+    url: 'http://127.0.0.1:43127/?token=launch-token',
+  })
+  child.emit('message', {
+    protocol: GUARDIAN_PROTOCOL,
+    event: 'surface',
+    url: 'https://example.com/?token=private',
+  })
+  assert.deepEqual(surfaces, ['http://127.0.0.1:43127/?token=launch-token'])
+  assert.deepEqual(Object.keys(client.snapshot()).sort(), [
+    'canRecover', 'canStart', 'canStop', 'code', 'state',
+  ])
+  unsubscribe()
+})
+
 test('guardian readiness timeout disconnects the detached process for bounded cleanup', async () => {
   const child = new FakeGuardianProcess()
   let disconnects = 0

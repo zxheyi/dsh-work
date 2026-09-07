@@ -12,11 +12,6 @@ import {
 } from '../packages/runtime-guardian/generation-store.ts'
 import { removeOwnedTestHome } from './support/owned-test-home.ts'
 
-const emittedDesktopEntry: string = '../dist/apps/desktop/main.js'
-const { desktop } = await import(emittedDesktopEntry) as {
-  desktop: Promise<DesktopSession>
-}
-
 const output = path.resolve('artifacts/desktop/runtime-recovery')
 const configuredProductRoot = process.env.DSH_WORK_E2E_USER_DATA
 assert.ok(configuredProductRoot)
@@ -33,6 +28,10 @@ const claimed = (selection: GenerationSelection): ClaimedGeneration => {
 }
 const stale = claimed(staleStore.claim())
 fs.writeFileSync(path.join(stale.home, 'uncertain.txt'), 'preserved')
+const emittedDesktopEntry: string = '../dist/apps/desktop/main.js'
+const { desktop } = await import(emittedDesktopEntry) as {
+  desktop: Promise<DesktopSession>
+}
 let phase = 'boot'
 let host: DesktopSession['host'] | null = null
 const screenshots: string[] = []
@@ -52,7 +51,7 @@ async function run(): Promise<void> {
     const wait = async (condition: string): Promise<void> => {
       const deadline = Date.now() + 35_000
       while (Date.now() < deadline) {
-        if (await js(condition)) return
+        try { if (await js(condition)) return } catch {}
         await new Promise(resolve => setTimeout(resolve, 25))
       }
       throw new Error('state timeout')
@@ -61,25 +60,35 @@ async function run(): Promise<void> {
       fs.writeFileSync(path.join(output, file), (await active.window.webContents.capturePage()).toPNG())
       screenshots.push(file)
     }
-    await wait("document.body.dataset.state === 'stopped'")
     phase = 'ordinary-start-refuses-uncertain-generation'
-    await js("document.getElementById('start').click()")
     await wait("document.body.dataset.state === 'failed'")
     assert.equal(active.host.snapshot().code, 'recovery-required')
     assert.equal(await js("document.getElementById('start').disabled"), true)
     assert.equal(await js("document.getElementById('recover').hidden"), false)
+    assert.doesNotMatch(await js<string>('document.body.innerText'), /DSH Web|Workspace|Session|Profile|CLI|generation/u)
     assert.equal(fs.readFileSync(path.join(stale.home, 'uncertain.txt'), 'utf8'), 'preserved')
     await capture('recovery-required.png')
 
     phase = 'explicit-isolated-recovery'
     await js("document.getElementById('recover').click()")
-    await wait("document.body.dataset.state === 'ready'")
+    await wait(`(() => {
+      for (const label of ['继续', 'Continue', '稍后配置', 'Configure later']) {
+        const button = Array.from(document.querySelectorAll('button'))
+          .find(item => item.textContent?.trim() === label)
+        if (button instanceof HTMLButtonElement) button.click()
+      }
+      const expandSidebar = Array.from(document.querySelectorAll('button'))
+        .find(item => ['打开侧边栏', 'Open sidebar'].includes(item.getAttribute('aria-label') ?? ''))
+      if (expandSidebar instanceof HTMLButtonElement) expandSidebar.click()
+      return Boolean(document.querySelector('[data-dsh-work-brand="name"]')
+        && document.querySelector('[data-composer-card]'))
+    })()`)
     const recoveredGeneration = JSON.parse(fs.readFileSync(path.join(productRoot, 'runtime/active.json'), 'utf8')).generation
     assert.notEqual(recoveredGeneration, stale.generation)
     assert.equal(fs.readFileSync(path.join(stale.home, 'uncertain.txt'), 'utf8'), 'preserved')
     assert.equal(fs.readdirSync(path.join(productRoot, 'runtime/quarantine')).length, 1)
     await capture('recovered.png')
-    await js("document.getElementById('stop').click()")
+    await active.host.stop()
     await wait("document.body.dataset.state === 'stopped'")
 
     phase = 'window-close-disposes-guardian'

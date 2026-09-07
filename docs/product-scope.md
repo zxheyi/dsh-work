@@ -29,15 +29,16 @@ DSH Work composes Harness; it does not modify, copy, or reimplement Harness-owne
 
 ## Current milestone
 
-The current milestone is defined by [`acceptance/m0.md`](acceptance/m0.md). It proves the architecture and the smallest desktop lifecycle before broader work surfaces are built.
+The active product milestone is [familiar DSH conversations and file outcomes](acceptance/familiar-work-v5.md), adopted by [ADR 0014](decisions/0014-familiar-conversations-and-versioned-files.md). The local implementation issue is [Familiar Work v5](implementation/familiar-v5.md). The existing [M0 lifecycle criteria](acceptance/m0.md) remain release gates; adopting the product milestone does not declare those gates complete.
 
 ## In scope now
 
-- Select and record the desktop technology stack through an accepted decision.
-- Select and record the exact upstream source and runtime package strategy.
-- Prove start, readiness, stop, abnormal-exit reporting, and recovery for a local Harness runtime.
-- Prove one Harness-native Profile or Bundle composition without a parallel extension API.
-- Establish automated contract, integration, and platform verification for the milestone.
+- Preserve native Workspace, Session, model, mode, permission and settings navigation through the accepted alpha.2 public composition boundaries.
+- Deliver ordinary conversations without a required Work goal or output-type form.
+- Attach real files, review safe Markdown beside the conversation, revise in the original composer, and save independently of adoption.
+- Add immutable file versions, comparison, restore and per-version adoption in independently verified slices.
+- Keep existing lifecycle, authenticated surface handoff, plugin ownership and recovery guarantees while retaining old Work data.
+- Treat full migration, native Save As, platform packaging and additional document formats as separately verified follow-on work.
 
 ## Explicit non-goals
 

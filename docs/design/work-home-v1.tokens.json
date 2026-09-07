@@ -1,0 +1,91 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "meta": {
+    "name": "DSH Work Home v1",
+    "canvas": { "width": 1440, "height": 900 },
+    "baseUnit": 4,
+    "density": 6,
+    "motion": 3,
+    "variance": 4
+  },
+  "harness": {
+    "slots": ["sidebar", "conversation"],
+    "replacementPriority": -100
+  },
+  "color": {
+    "background": "#F5F6F4",
+    "sidebar": "#ECEFED",
+    "surface": "#FFFFFF",
+    "surfaceSubtle": "#F8F9F7",
+    "textPrimary": "#17202E",
+    "textSecondary": "#697386",
+    "textTertiary": "#8A93A2",
+    "border": "#DDE1E7",
+    "borderStrong": "#C9CFD8",
+    "accent": "#315CF4",
+    "accentHover": "#2449CE",
+    "accentSubtle": "#E9EEFF",
+    "success": "#25845B",
+    "warning": "#B96912",
+    "danger": "#B84A3A"
+  },
+  "layout": {
+    "sidebarWidth": 280,
+    "sidebarMinimumWidth": 264,
+    "sidebarMaximumWidth": 420,
+    "sidebarCompactWidth": 56,
+    "topbarHeight": 64,
+    "contentMaxWidth": 1120,
+    "contentPaddingWide": 48,
+    "contentPaddingMedium": 32,
+    "contentPaddingCompact": 24,
+    "minimumViewportWidth": 960,
+    "minimumViewportHeight": 680
+  },
+  "radius": {
+    "control": 10,
+    "card": 12,
+    "feature": 14
+  },
+  "space": {
+    "1": 4,
+    "2": 8,
+    "3": 12,
+    "4": 16,
+    "5": 20,
+    "6": 24,
+    "8": 32,
+    "10": 40,
+    "12": 48
+  },
+  "type": {
+    "family": "-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif",
+    "pageTitle": { "size": 24, "lineHeight": 32, "weight": 650 },
+    "composerTitle": { "size": 28, "lineHeight": 36, "weight": 650 },
+    "sectionTitle": { "size": 18, "lineHeight": 26, "weight": 650 },
+    "body": { "size": 14, "lineHeight": 22, "weight": 400 },
+    "control": { "size": 14, "lineHeight": 20, "weight": 550 },
+    "caption": { "size": 12, "lineHeight": 18, "weight": 400 }
+  },
+  "component": {
+    "primaryButton": { "height": 40, "minWidth": 112 },
+    "secondaryButton": { "height": 36 },
+    "sidebarAction": { "defaultWidth": 240, "widthMode": "fill", "height": 44 },
+    "sidebarRow": { "defaultWidth": 240, "widthMode": "fill", "height": 40 },
+    "composer": { "minHeight": 286, "padding": 28 },
+    "composerInput": { "height": 118, "paddingInline": 16, "paddingBlock": 14 },
+    "shortcut": { "height": 88, "padding": 16 },
+    "workRow": { "height": 58 },
+    "statusColumn": { "width": 120 },
+    "progressColumn": { "width": 140 }
+  },
+  "motion": {
+    "durationFastMs": 150,
+    "pressTranslateY": 1,
+    "focusRingWidth": 2,
+    "focusRingOffset": 2
+  },
+  "shadow": {
+    "composer": "0 12px 32px rgba(35, 50, 76, 0.08)"
+  }
+}
