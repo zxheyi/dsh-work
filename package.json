@@ -41,7 +41,9 @@
     "prepackage:desktop": "pnpm build",
     "package:desktop": "node scripts/package-desktop.mjs",
     "test:package": "node scripts/run-packaged-smoke.mjs",
-    "capture:familiar-v5": "node scripts/capture-familiar-v5.mjs"
+    "capture:familiar-v5": "node scripts/capture-familiar-v5.mjs",
+    "notices:generate": "node scripts/distribution-notices.mjs",
+    "notices:verify-release": "node scripts/distribution-notices.mjs --release"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.2",
@@ -68,5 +70,7 @@
     "onlyBuiltDependencies": [
       "electron"
     ]
-  }
+  },
+  "license": "MIT",
+  "author": "DSH Work contributors"
 }
