@@ -24,6 +24,9 @@ assert.ok(!fs.existsSync(path.join(resources, 'app/node_modules/@electron/packag
 let child
 let socket
 let clean = false
+let phase = 'relocate'
+let lastProbe
+let sendCommand
 const until = async (action, requireRunning = true) => {
   const deadline = Date.now() + 90000
   while (Date.now() < deadline) {
@@ -39,6 +42,7 @@ try {
     fs.rmSync(path.join(userData, 'DevToolsActivePort'), { force: true })
     const env = { ...process.env, DSH_HOME: path.join(temporary, 'empty-harness'), DSH_WORK_NODE: path.join(temporary, 'deliberately-missing-node'), PATH: path.dirname(executable) }
     delete env.ELECTRON_RUN_AS_NODE
+    phase = `launch-${pass + 1}`
     child = spawn(executable, [`--user-data-dir=${userData}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1', '--disable-background-networking'], { cwd: temporary, env, stdio: 'ignore' })
     let launchError
     child.on('error', error => { launchError = error })
@@ -63,18 +67,22 @@ try {
       const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timeout: ${method}`)) }, 10000)
       pending.set(id, { resolve, reject, timer }); socket.send(JSON.stringify({ id, method, params }))
     })
+    sendCommand = send
+    phase = `surface-${pass + 1}`
     await until(async () => {
       const response = await send('Runtime.evaluate', { expression: `(() => {
         for (const label of ['继续', 'Continue', '稍后配置', 'Configure later']) {
           const button = [...document.querySelectorAll('button')].find(item => item.textContent?.trim() === label);
           if (button) button.click();
         }
-        return location.hostname === '127.0.0.1' && Boolean(document.querySelector('[data-dsh-work-brand="name"]')) && Boolean(document.querySelector('[data-composer-card]'));
+        return { loopback: location.hostname === '127.0.0.1', brand: Boolean(document.querySelector('[data-dsh-work-brand="name"]')), composer: Boolean(document.querySelector('[data-composer-card]')), state: document.body.dataset.state ?? '', diagnostic: document.querySelector('#diagnostic')?.textContent ?? '', body: document.body.innerText.slice(0, 1200) };
       })()`, returnByValue: true })
-      return response.result?.value === true
+      lastProbe = response.result?.value
+      return lastProbe?.loopback && lastProbe?.brand && lastProbe?.composer
     })
     const screenshot = await send('Page.captureScreenshot')
     fs.writeFileSync(path.join(root, `artifacts/package/smoke-${pass + 1}.png`), Buffer.from(screenshot.data, 'base64'))
+    phase = `quit-${pass + 1}`
     await send('Page.close')
     await until(() => child.exitCode !== null)
     assert.equal(child.exitCode, 0)
@@ -88,6 +96,16 @@ try {
   clean = true
   fs.writeFileSync(output, JSON.stringify({ status: 'pass', revision: receipt.revision, platform: process.platform, arch: process.arch, distribution: receipt.distribution, relocated: true, launches: 2, cleanShutdown: true, developerNodeIgnored: true }, null, 2))
   console.log('Relocated packaged desktop: two launches, native surface, clean shutdown passed')
+} catch (error) {
+  if (sendCommand && socket?.readyState === WebSocket.OPEN) {
+    try {
+      const capture = await sendCommand('Page.captureScreenshot')
+      fs.writeFileSync(path.join(root, 'artifacts/package/smoke-failure.png'), Buffer.from(capture.data, 'base64'))
+    } catch {}
+  }
+  fs.writeFileSync(output, JSON.stringify({ status: 'fail', phase, probe: lastProbe, error: error.message }, null, 2))
+  console.error(JSON.stringify({ phase, probe: lastProbe }))
+  throw error
 } finally {
   socket?.close()
   if (child && child.exitCode === null) child.kill()
