@@ -17,6 +17,8 @@ export type RuntimeLaunchMode = 'normal' | 'recover' | 'safe'
 
 export interface GuardianService extends RuntimeControl {
   subscribeSurface(listener: (url: string) => void): () => void
+  active(): boolean
+  subscribeActivity(listener: (active: boolean) => void): () => void
   dispose(): Promise<boolean>
 }
 
@@ -39,9 +41,11 @@ export function createGuardianService({ store, prepare, launcher, onReady }: Gua
   let runtime: RuntimeHost | null = null
   let unsubscribe: (() => void) | null = null
   let unsubscribeSurface: (() => void) | null = null
+  let unsubscribeActivity: (() => void) | null = null
   let status = bounded({ state: 'stopped', code: null, canStart: true, canStop: false })
   const listeners = new Set<(snapshot: RuntimeSnapshot) => void>()
   const surfaceListeners = new Set<(url: string) => void>()
+  const activityListeners = new Set<(active: boolean) => void>()
   let disposing = false
   let disposePromise: Promise<boolean> | null = null
   let resolveDispose: ((value: boolean) => void) | null = null
@@ -59,6 +63,8 @@ export function createGuardianService({ store, prepare, launcher, onReady }: Gua
     unsubscribe = null
     unsubscribeSurface?.()
     unsubscribeSurface = null
+    unsubscribeActivity?.()
+    unsubscribeActivity = null
     resolveDispose?.(true)
     resolveDispose = null
   }
@@ -88,6 +94,7 @@ export function createGuardianService({ store, prepare, launcher, onReady }: Gua
   const attach = (selected: ClaimedGeneration, mode: RuntimeLaunchMode): void => {
     unsubscribe?.()
     unsubscribeSurface?.()
+    unsubscribeActivity?.()
     claim = selected
     launchMode = mode
     prepare(selected.home, mode)
@@ -96,6 +103,11 @@ export function createGuardianService({ store, prepare, launcher, onReady }: Gua
     unsubscribeSurface = runtime.subscribeSurface(url => {
       for (const listener of [...surfaceListeners]) {
         try { listener(url) } catch {}
+      }
+    })
+    unsubscribeActivity = runtime.subscribeActivity(active => {
+      for (const listener of [...activityListeners]) {
+        try { listener(active) } catch {}
       }
     })
     publish(translate(runtime.snapshot()))
@@ -130,6 +142,11 @@ export function createGuardianService({ store, prepare, launcher, onReady }: Gua
     subscribeSurface(listener: (url: string) => void): () => void {
       surfaceListeners.add(listener)
       return () => surfaceListeners.delete(listener)
+    },
+    active: (): boolean => runtime?.active() ?? false,
+    subscribeActivity(listener: (active: boolean) => void): () => void {
+      activityListeners.add(listener)
+      return () => activityListeners.delete(listener)
     },
     async start(): Promise<RuntimeSnapshot> {
       if (!runtime && !acquire(false, 'normal')) return status

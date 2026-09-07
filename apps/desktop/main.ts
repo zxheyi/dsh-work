@@ -1,4 +1,4 @@
-import { app, type BrowserWindow } from 'electron'
+import { app, nativeImage, Tray, type BrowserWindow } from 'electron'
 
 import { createGuardianClient, type GuardianClient } from '../../packages/runtime-guardian/client.ts'
 import { createUnavailableGuardianClient } from '../../packages/runtime-guardian/unavailable-client.ts'
@@ -9,6 +9,7 @@ import {
   type StartupSelection,
 } from '../../packages/runtime-profile/preferences.ts'
 import type { DesktopStartupContext } from './contracts.ts'
+import { windowCloseAction } from './close-policy.ts'
 import { resolveDesktopNodePath } from './runtime-paths.ts'
 import { createDesktopWindow, registerDesktopScheme } from './window.ts'
 
@@ -30,6 +31,17 @@ interface SecondaryDesktopSession {
 let session: DesktopSession | undefined
 let quitting = false
 let allowQuit = false
+let tray: Tray | undefined
+
+const revealWindow = (): void => {
+  const window = session?.window
+  if (!window || window.isDestroyed()) return
+  window.show()
+  window.focus()
+}
+
+app.on('activate', revealWindow)
+app.on('second-instance', revealWindow)
 
 const shutdown = async (): Promise<void> => {
   if (quitting) return
@@ -38,6 +50,8 @@ const shutdown = async (): Promise<void> => {
   // IPC disconnect transfers the remaining bounded cleanup to the external
   // guardian, so Electron may exit even if its short acknowledgement wait ends.
   try { await session?.host.dispose() } catch {}
+  tray?.destroy()
+  tray = undefined
   allowQuit = true
   app.quit()
 }
@@ -112,8 +126,17 @@ const createDesktopSession = async (): Promise<DesktopSession> => {
     const window = await createDesktopWindow(host, { accepting: () => !quitting, startup })
     const active = Object.freeze({ host, window })
     session = active
+    const icon = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" rx="9" fill="#315cf4"/><path d="M8 9l4 14 4-9 4 9 4-14" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    ).toString('base64')}`)
+    tray = new Tray(icon.resize({ width: 18, height: 18 }))
+    tray.setToolTip('DSH Work')
+    tray.on('click', revealWindow)
     window.on('close', event => {
-      if (!allowQuit) {
+      if (windowCloseAction(allowQuit, host.active()) === 'hide') {
+        event.preventDefault()
+        window.hide()
+      } else if (!allowQuit) {
         event.preventDefault()
         void shutdown()
       }

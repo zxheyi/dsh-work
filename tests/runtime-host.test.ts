@@ -92,6 +92,25 @@ test('a validated loopback surface is handed off without entering lifecycle snap
   const stopping = host.stop(); message('disposed'); children[0].emit('close', 0, null); await stopping
 })
 
+test('bounded Agent activity is independent of lifecycle message limits and clears on close', async () => {
+  const { host, children, message } = fixture()
+  const activity: boolean[] = []
+  host.subscribeActivity(value => activity.push(value))
+  const starting = host.start()
+  for (let index = 0; index < 8; index++) {
+    children[0].emit('message', {
+      protocol: 'dsh-work.lifecycle.v1', event: 'activity', active: index % 2 === 0,
+    })
+  }
+  assert.equal(host.active(), false)
+  children[0].emit('message', { protocol: 'dsh-work.lifecycle.v1', event: 'activity', active: true })
+  assert.equal(host.active(), true)
+  message('ready'); await starting
+  const stopping = host.stop(); message('disposed'); children[0].emit('close', 0, null); await stopping
+  assert.equal(host.active(), false)
+  assert.deepEqual(activity, [true, false, true, false, true, false, true, false, true, false])
+})
+
 test('early stop accepts a late surface without navigating or turning clean disposal into failure', async () => {
   const { host, children, message } = fixture()
   const surfaces: string[] = []

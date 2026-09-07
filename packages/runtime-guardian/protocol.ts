@@ -49,3 +49,10 @@ export function boundedGuardianSurface(value: unknown): string | null {
       !validDesktopSurfaceUrl(value.url)) return null
   return value.url
 }
+
+export function boundedGuardianActivity(value: unknown): boolean | null {
+  if (!exactKeys(value, ['protocol', 'event', 'active'])) return null
+  if (value.protocol !== GUARDIAN_PROTOCOL || value.event !== 'activity'
+    || typeof value.active !== 'boolean') return null
+  return value.active
+}

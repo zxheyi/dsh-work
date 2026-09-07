@@ -17,6 +17,7 @@ test('unavailable guardian is a bounded Runtime Control adapter', async () => {
   assert.deepEqual(await client.stop(), client.snapshot())
   assert.deepEqual(await client.recover(), client.snapshot())
   assert.deepEqual(await client.safeMode(), client.snapshot())
+  assert.equal(client.active(), false)
   assert.deepEqual(observed, ['failed:runtime-unavailable'])
   assert.equal(await client.dispose(), true)
   assert.equal(Object.isFrozen(client), true)

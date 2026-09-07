@@ -132,6 +132,22 @@ test('guardian service forwards the validated surface outside its bounded status
   } finally { fs.rmSync(owned.productRoot, { recursive: true, force: true }) }
 })
 
+test('guardian service forwards bounded Agent activity outside its status snapshot', async () => {
+  const owned = fixture()
+  try {
+    const activity: boolean[] = []
+    owned.service.subscribeActivity(value => activity.push(value))
+    const starting = owned.service.start()
+    childAt(owned, 0).emit('message', { protocol: 'dsh-work.lifecycle.v1', event: 'activity', active: true })
+    assert.equal(owned.service.active(), true)
+    owned.message('ready'); await starting
+    const stop = owned.service.stop(); owned.message('disposed'); childAt(owned, 0).emit('close', 0, null); await stop
+    assert.equal(owned.service.active(), false)
+    assert.deepEqual(activity, [true, false])
+    await owned.service.dispose()
+  } finally { fs.rmSync(owned.productRoot, { recursive: true, force: true }) }
+})
+
 test('collision fails closed and explicit recovery starts a distinct generation', async () => {
   const owned = fixture()
   try {
