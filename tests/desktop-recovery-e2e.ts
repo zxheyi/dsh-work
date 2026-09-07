@@ -72,11 +72,14 @@ async function run(): Promise<void> {
     phase = 'explicit-isolated-recovery'
     await js("document.getElementById('recover').click()")
     await wait(`(() => {
-      for (const label of ['继续', '稍后配置']) {
+      for (const label of ['继续', 'Continue', '稍后配置', 'Configure later']) {
         const button = Array.from(document.querySelectorAll('button'))
           .find(item => item.textContent?.trim() === label)
         if (button instanceof HTMLButtonElement) button.click()
       }
+      const expandSidebar = Array.from(document.querySelectorAll('button'))
+        .find(item => ['打开侧边栏', 'Open sidebar'].includes(item.getAttribute('aria-label') ?? ''))
+      if (expandSidebar instanceof HTMLButtonElement) expandSidebar.click()
       return Boolean(document.querySelector('[data-dsh-work-brand="name"]')
         && document.querySelector('[data-composer-card]'))
     })()`)
