@@ -60,6 +60,9 @@ try {
               .find(item => item.textContent?.trim() === label)
             if (button instanceof HTMLButtonElement) button.click()
           }
+          const expandSidebar = Array.from(document.querySelectorAll('button'))
+            .find(item => ['打开侧边栏', 'Open sidebar'].includes(item.getAttribute('aria-label') ?? ''))
+          if (expandSidebar instanceof HTMLButtonElement) expandSidebar.click()
           const brand = Boolean(document.querySelector('[data-dsh-work-brand="name"]'))
           const composer = Boolean(document.querySelector('[data-composer-card]'))
           return {
