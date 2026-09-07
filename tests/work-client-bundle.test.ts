@@ -147,6 +147,8 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   assert.equal(source.includes('data-work-legacy-open'), false)
   assert.equal(source.includes('data-work-legacy-surface'), false)
   assert.equal(source.includes('你想完成什么？'), false)
+  assert.equal(source.includes('data-work-goal'), false)
+  assert.equal(source.includes('.dsh-work-sidebar-create'), false)
   await dispose()
   assert.equal(source.includes('node:crypto'), false)
   assert.equal(source.includes('/Users/'), false)
