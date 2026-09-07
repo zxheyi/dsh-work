@@ -8,7 +8,10 @@ import { inspectNativeSurfaceCopy } from './support/native-surface-copy.ts'
 
 const missing = process.argv.includes('--missing-runtime')
 const rendererCrash = process.argv.includes('--renderer-crash')
-const name = missing ? 'missing' : rendererCrash ? 'renderer-crash' : 'normal'
+const localProfile = process.argv.includes('--local-profile')
+const relaunch = process.argv.includes('--relaunch')
+const name = missing ? 'missing' : rendererCrash ? 'renderer-crash'
+  : localProfile ? relaunch ? 'local-profile-relaunch' : 'local-profile' : 'normal'
 const output = path.resolve('artifacts/desktop', name)
 fs.mkdirSync(output, { recursive: true })
 const reportPath = path.join(output, 'result.json')
@@ -21,8 +24,9 @@ const write = (status: 'pass' | 'fail', extra: Record<string, unknown> = {}): vo
 write('fail')
 const progress = setInterval(() => write('fail'), 250)
 const userData = process.env.DSH_WORK_E2E_USER_DATA
-assert.ok(userData)
-app.setPath('userData', userData)
+if (!userData) throw new Error('desktop test user data unavailable')
+const ownedUserData = userData
+app.setPath('userData', ownedUserData)
 app.commandLine.appendSwitch('disable-background-networking')
 if (missing) process.env.DSH_WORK_NODE = path.join(output, 'deliberately-missing-node')
 const emittedDesktopEntry: string = '../dist/apps/desktop/main.js'
@@ -163,6 +167,29 @@ try {
     await js("document.getElementById('start').click()")
     await waitState('failed')
   } else {
+    if (localProfile && !relaunch) {
+      phase = 'local-profile-choice-precedes-start'
+      const context = await js<{
+        choiceRequired: boolean
+        homeLabel: string
+        profiles: Array<{ id: string; name: string }>
+      }>('window.dshWork.startup()')
+      assert.equal(context.choiceRequired, true)
+      assert.equal(context.homeLabel, '$DSH_HOME')
+      assert.deepEqual(context.profiles.map(item => item.name), ['web'])
+      assert.equal(active.host.snapshot().state, 'stopped')
+      assert.equal(await js("document.getElementById('onboarding').hidden"), false)
+      assert.doesNotMatch(await js<string>('document.body.innerText'), new RegExp(ownedUserData.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'))
+      await screenshot('onboarding.png')
+      phase = 'local-profile-selected'
+      await js("document.getElementById('use-local').click()")
+    } else if (relaunch) {
+      phase = 'remembered-choice-starts-automatically'
+      const context = await js<{ choiceRequired: boolean; selected: string }>('window.dshWork.startup()')
+      assert.equal(context.choiceRequired, false)
+      assert.match(context.selected, /^[a-f0-9]{24}$/u)
+      assert.equal(await js("document.getElementById('onboarding').hidden"), true)
+    }
     phase = 'automatic-native-surface'
     const surface = await waitForNativeSurface()
     const nativeCopy = inspectNativeSurfaceCopy(surface.text)
@@ -177,6 +204,18 @@ try {
     assert.doesNotMatch(surface.text, /你想完成什么？|常见工作|最近工作|旧版工作/u)
     phase = 'native-host-ready'
     assert.equal(active.host.snapshot().state, 'ready')
+    if (localProfile) {
+      phase = 'local-profile-source-unchanged'
+      const sourceManifest = path.join(process.env.DSH_HOME!, 'profiles', 'web', 'package.json')
+      assert.deepEqual(JSON.parse(fs.readFileSync(sourceManifest, 'utf8')), {
+        private: true,
+        dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'] } },
+      })
+      const choiceBytes = fs.readFileSync(path.join(ownedUserData, 'startup-preferences.json'), 'utf8')
+      const checkpointBytes = fs.readFileSync(path.join(ownedUserData, 'startup-checkpoint.json'), 'utf8')
+      assert.match(choiceBytes, /"kind": "shared"/u)
+      assert.doesNotMatch(checkpointBytes, new RegExp(ownedUserData.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'))
+    }
     await screenshot('ready.png')
   }
   phase = 'navigation-denied'
@@ -194,7 +233,8 @@ try {
     clearInterval(progress)
     const status = active.host.snapshot()
     const passed = status.canStart && (missing ? status.code === 'runtime-unavailable' : status.state === 'stopped') && (!rendererCrash || crashObserved)
-    write(passed ? 'pass' : 'fail', { terminal: status, crashObserved, screenshots: missing ? ['failed.png'] : ['ready.png'] })
+    write(passed ? 'pass' : 'fail', { terminal: status, crashObserved,
+      screenshots: missing ? ['failed.png'] : localProfile && !relaunch ? ['onboarding.png', 'ready.png'] : ['ready.png'] })
     if (!passed) process.exitCode = 1
   })
   if (rendererCrash) active.window.webContents.forcefullyCrashRenderer()

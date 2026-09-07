@@ -1,6 +1,6 @@
 # Familiar desktop startup acceptance
 
-Status: implementation in progress
+Status: implemented and verified
 
 Fact source: [ADR 0016](../decisions/0016-familiar-desktop-startup.md). Delivery issue: [#24](https://github.com/zxheyi/dsh-work/issues/24).
 

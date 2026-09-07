@@ -37,14 +37,14 @@ Each healthy startup records a bounded checkpoint of the selected mode and decla
 
 ## Acceptance and verification
 
-- [ ] `tests/official-launcher.test.ts` proves inherited commands and sensitive environment values cannot replace the pinned runtime.
-- [ ] Profile-discovery tests prove bounded admission, symbolic labels, deterministic ordering, and symlink/path refusal.
-- [ ] Shadow-profile tests prove source bytes remain unchanged and only owned generation paths are written.
-- [ ] Renderer and Electron tests prove the status surface precedes runtime start and persists an explicit first-run choice.
-- [ ] Guardian tests prove healthy checkpoint publication, retry admission, and isolated safe mode.
-- [ ] Lifecycle and close-policy tests prove active-Agent close hides without stopping while idle close quits.
-- [ ] Tray tests and Electron smoke prove reveal, stop, safe-mode, and quit actions use the bounded Guardian lifecycle.
-- [ ] `pnpm check`, `pnpm test`, affected runtime integration, and desktop E2E pass on the final revision.
+- [x] `tests/official-launcher.test.ts` proves inherited commands and sensitive environment values cannot replace the pinned runtime.
+- [x] Profile-discovery tests prove bounded admission, symbolic labels, deterministic ordering, and symlink/path refusal.
+- [x] Shadow-profile tests prove source bytes remain unchanged and only owned generation paths are written.
+- [x] Renderer and two-launch Electron tests prove the status surface precedes runtime start and persists an explicit first-run choice.
+- [x] Guardian tests prove healthy checkpoint publication, retry admission, and isolated safe mode.
+- [x] Lifecycle, native-conversation, and close-policy tests prove the bounded activity signal and active/idle close decision.
+- [x] Tray tests and Electron smoke prove reveal, stop, safe-mode, and quit actions use the bounded Guardian lifecycle.
+- [x] `pnpm check`, `pnpm test`, affected runtime integration, and desktop E2E pass on the final revision.
 
 ## Alternatives considered
 
