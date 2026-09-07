@@ -32,4 +32,6 @@ Use a decision record when a change affects the desktop stack, upstream integrat
 | [0015: Immutable Session output version journal](0015-immutable-session-output-versions.md) | implemented | Defines append-only, content-addressed Session file versions outside Harness, Workspace files and the legacy Work aggregate. |
 | [0016: Familiar desktop startup and local Harness compatibility](0016-familiar-desktop-startup.md) | accepted | Keeps the pinned runtime while adding source-clean profile discovery, shadow composition, safe mode, active-work close policy and native tray lifecycle. |
 
+| [0017: Standalone desktop packaging](0017-standalone-desktop-packaging.md) | accepted | Frozen production staging, native relocated package smoke and explicit signing gates. |
+
 ADR 0001, ADR 0003, ADR 0005, and ADR 0006 are accepted; ADR 0004 and ADR 0007 through ADR 0013 are implemented against the locked alpha.2 pair. Every unchecked M0 criterion remains a delivery gate rather than an implemented claim. Frozen research is evidence, not the product controller.

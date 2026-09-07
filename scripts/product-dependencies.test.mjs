@@ -21,6 +21,7 @@ test('product dependencies match the accepted baseline with a frozen DSH family'
     zod: '4.5.4',
   })
   assert.deepEqual(manifest.devDependencies, {
+    '@electron/packager': '20.3.0',
     '@types/node': '24.13.3',
     '@types/react': '18.3.28',
     electron: baseline.electron,
