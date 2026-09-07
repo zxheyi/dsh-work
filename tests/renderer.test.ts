@@ -3,7 +3,6 @@ import fs from 'node:fs'
 import test from 'node:test'
 import type { RuntimeStatus } from '../apps/desktop/contracts.ts'
 
-const source = fs.readFileSync(new URL('../dist/apps/desktop/renderer.js', import.meta.url), 'utf8')
 let moduleId = 0
 
 interface ElementFixture {
@@ -61,8 +60,7 @@ async function withRenderer(document: DocumentFixture, window: unknown, verify: 
   Reflect.set(globalThis, 'document', document)
   Reflect.set(globalThis, 'window', window)
   try {
-    const encoded = Buffer.from(source).toString('base64')
-    await import(`data:text/javascript;base64,${encoded}#${moduleId++}`)
+    await import(new URL(`../dist/apps/desktop/renderer.js?case=${String(moduleId++)}`, import.meta.url).href)
     await verify()
   } finally {
     if (hadDocument) Reflect.set(globalThis, 'document', previousDocument)
