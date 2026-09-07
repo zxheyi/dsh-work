@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths: ['apps/**', 'packages/**', 'runtime/**', 'scripts/**', 'package.json', 'pnpm-lock.yaml', '.github/workflows/desktop-package.yml', 'LICENSE', 'third-party/**']
   workflow_dispatch:
+concurrency:
+  group: desktop-package-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
