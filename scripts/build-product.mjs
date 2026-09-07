@@ -30,6 +30,7 @@ const assets = [
   'packages/work-api/package.json',
   'apps/desktop/index.html',
   'apps/desktop/style.css',
+  'apps/desktop/deepseek-whale.svg',
 ]
 for (const relativePath of assets) {
   const target = path.join(output, relativePath)

@@ -4,8 +4,9 @@ import { RUNTIME_COMMANDS, type RuntimeControl } from '../../packages/runtime-co
 import type { DesktopStartupContext, RuntimeStatus } from './contracts.ts'
 
 export const STATUS_URL = 'dsh-work://status/index.html'
-export const DESKTOP_ASSETS = ['index.html', 'renderer.js', 'style.css'] as const
+export const DESKTOP_ASSETS = ['index.html', 'renderer.js', 'style.css', 'deepseek-whale.svg'] as const
 export type DesktopAsset = typeof DESKTOP_ASSETS[number]
+export const STATUS_CONTENT_SECURITY_POLICY = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
 
 export type StatusHost = RuntimeControl
 

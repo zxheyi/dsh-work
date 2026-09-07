@@ -5,6 +5,7 @@ import {
   bindStatusBridge,
   isAllowedDesktopNavigation,
   resourceForRequest,
+  STATUS_CONTENT_SECURITY_POLICY,
   STATUS_URL,
   type StatusHost,
 } from '../apps/desktop/security.ts'
@@ -65,15 +66,18 @@ test('status bridge admits only the exact local main frame and zero-argument met
   dispose(); assert.equal(handlers.size, 0)
 })
 
-test('custom protocol exposes only three fixed local assets, never arbitrary paths', () => {
+test('custom protocol exposes only fixed local assets, never arbitrary paths', () => {
   assert.equal(resourceForRequest(STATUS_URL, 'GET'), 'index.html')
   assert.equal(resourceForRequest('dsh-work://status/renderer.js', 'GET'), 'renderer.js')
+  assert.equal(resourceForRequest('dsh-work://status/deepseek-whale.svg', 'GET'), 'deepseek-whale.svg')
   for (const url of ['file:///etc/passwd', 'dsh-work://other/index.html',
     'dsh-work://status/index.html?secret=1', 'dsh-work://status/../package.json',
     'dsh-work://user@status/index.html', 'dsh-work://status/%2e%2e/package.json']) {
     assert.equal(resourceForRequest(url, 'GET'), null)
   }
   assert.equal(resourceForRequest(STATUS_URL, 'POST'), null)
+  assert.match(STATUS_CONTENT_SECURITY_POLICY, /img-src 'self'/u)
+  assert.doesNotMatch(STATUS_CONTENT_SECURITY_POLICY, /https?:|data:/u)
 })
 
 test('desktop navigation admits only the private shell and one exact loopback surface origin', () => {

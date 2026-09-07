@@ -73,7 +73,7 @@ button:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 .runtime-visual { width: 82px; height: 82px; margin: 2px 0 26px; position: relative; display: grid; place-items: center; }
 .runtime-visual::before { content: ""; position: absolute; inset: 0; border: 1px solid #dbe4f5; border-top-color: var(--blue); border-radius: 50%; animation: orbit 1.4s linear infinite; }
 .runtime-visual::after { content: ""; position: absolute; inset: 12px; border-radius: 50%; background: var(--blue-soft); }
-.runtime-mark { position: relative; z-index: 1; color: var(--blue); font-size: 12px; font-weight: 800; }
+.runtime-whale { width: 31px; height: 31px; position: relative; z-index: 1; }
 .indicator { position: absolute; z-index: 2; right: 5px; bottom: 7px; width: 10px; height: 10px; border: 2px solid #fff; border-radius: 50%; background: #8a93a2; }
 .indicator[data-state="ready"] { background: var(--green); }
 .indicator[data-state="failed"] { background: var(--red); }
@@ -96,7 +96,7 @@ button:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 .failure-detail p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .diagnostic { display: block; margin-top: 11px; color: var(--faint); font: 11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
 body[data-scene="recovery"] .runtime-visual { width: 58px; height: 58px; border-radius: 18px; background: #fff1f1; color: var(--red); }
-body[data-scene="recovery"] .runtime-visual::before,body[data-scene="recovery"] .runtime-visual::after,body[data-scene="recovery"] .runtime-mark { display: none; }
+body[data-scene="recovery"] .runtime-visual::before,body[data-scene="recovery"] .runtime-visual::after,body[data-scene="recovery"] .runtime-whale { display: none; }
 body[data-scene="recovery"] .runtime-visual::after { content: "!"; display: grid; inset: 0; place-items: center; background: transparent; font-size: 24px; }
 body[data-scene="recovery"] .runtime-progress,body[data-scene="stopped"] .runtime-progress { display: none; }
 body[data-scene="recovery"] .failure-detail { display: block; }
