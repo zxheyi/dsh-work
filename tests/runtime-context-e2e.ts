@@ -219,8 +219,9 @@ async function run(): Promise<void> {
     step = 'return-to-original-session'; write('fail')
     await js("document.getElementById('start')?.click()")
     const restored = await waitFor(nativeState,
-      value => value.ready && value.sessionId === before.sessionId && value.draft === draft,
-      'Runtime restart did not return to the original Session and draft')
+      value => value.ready && value.sessionId === before.sessionId && value.draft === draft
+        && value.turns === selected.turns && value.conversations === selected.conversations,
+      'Runtime restart did not restore the original Session, draft and complete history')
     assert.match(await js<string>('window.dshWorkRecovery.read()'), /^dsh-work-recovery:v1:/u)
     assert.equal(restored.turns, selected.turns)
     assert.equal(restored.conversations, selected.conversations)

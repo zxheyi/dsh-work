@@ -1,6 +1,6 @@
 # Familiar Work v5 evidence
 
-Status: automated macOS acceptance passed in this evidence commit; F13 human observation remains pending. The acceptance run started from product baseline `8a4d4c8f37e76be1fa7671bb338d60e519e46d0a` and its responsive version-action fix is included beside this record.
+Status: refreshed automated macOS acceptance passed on 2026-09-07; F13 human observation remains pending. The run started from `65ddccb` with the recovery-history readiness fix recorded by the source digests in this evidence commit.
 
 This record compares the four frozen product designs with real Electron surfaces and maps every PRD scenario to executable evidence. The actual UI keeps the locked DSH native sidebar, conversation, composer, approval card and tool activity. Visual acceptance checks the intended composition, hierarchy and behavior rather than replacing those native controls with the concept-image pixels.
 
@@ -47,3 +47,7 @@ The actual permission card follows the native bottom-composer takeover instead o
 F1-F12 have automated evidence. F13 remains pending because [the five-person observation record](familiar-work-v5-usability-observation.md) has no real participant results. The fixture model verifies routing and behavior without making a live-production-model claim. This set is macOS-only; Windows evidence remains a later release gate.
 
 The machine-readable [evidence manifest](familiar-work-v5-evidence.json) separates the pre-acceptance product base from the source files changed during acceptance. It freezes the renderer and screenshot-E2E source digests alongside each screenshot and passing command result, so the new responsive layout cannot be attributed to the older base commit. Run `pnpm verify:familiar-v5` to validate revision ancestry, exact source identity, criterion references and coverage, the exact command set, passing result JSON, complete PNG chunks/scanlines and SHA-256 digests.
+
+## Refresh procedure
+
+Run `pnpm capture:familiar-v5` on native macOS with a prepared runtime. It removes prior generated inputs, executes all seven suites, and only then freezes current result JSON and screenshots. `pnpm verify:familiar-v5` checks all seven E2E source digests and the product surface. The 2026-09-07 run fixed a test race: the restored composer became ready before historical turns were rendered. The recovery test now waits for matching history and retains the exact turn/conversation count assertions. All seven suites passed; conversation, restored-session and narrow version screenshots were inspected. This is automated evidence, not F13 participant observation.

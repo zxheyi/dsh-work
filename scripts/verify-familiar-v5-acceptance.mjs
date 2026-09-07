@@ -56,6 +56,10 @@ if (revision.status !== 0) fail('product base revision is not an ancestor of HEA
 exactValues(manifest.capturedSources.map(source => source.path), [
   'packages/work-api/surface.ts',
   'tests/native-conversation-e2e.ts',
+  'tests/workspace-sessions-e2e.ts',
+  'tests/session-navigation-e2e.ts',
+  'tests/session-resource-e2e.ts',
+  'tests/runtime-context-e2e.ts',
   'tests/session-output-e2e.ts',
   'tests/session-permission-e2e.ts',
 ], 'captured source paths')
