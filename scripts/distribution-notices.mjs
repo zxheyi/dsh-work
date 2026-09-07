@@ -82,9 +82,11 @@ export function generateDistributionNotices(application, resources) {
       }
       if (extra) item.notices.push(retain(extra.bytes, extra.source))
     }
-    if (item.name.startsWith('@img/sharp-libvips-')) {
-      const extra = supplemental('libvips-notices')
-      item.notices.push(retain(extra.bytes, extra.source))
+    if (item.name.startsWith('@img/sharp-libvips-') || item.name.startsWith('@img/sharp-win32-')) {
+      if (item.name.startsWith('@img/sharp-libvips-')) {
+        const extra = supplemental('libvips-notices')
+        item.notices.push(retain(extra.bytes, extra.source))
+      }
       const versions = path.join(application, item.path, 'versions.json')
       item.nativeComponents = fs.existsSync(versions) ? read(versions) : {}
       item.notices.push(retain(fs.readFileSync(path.join(application, item.path, 'README.md')), `${item.path}/README.md`))
