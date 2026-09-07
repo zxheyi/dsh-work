@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 import type { DesktopSession } from '../apps/desktop/main.ts'
+import { inspectNativeSurfaceCopy } from './support/native-surface-copy.ts'
 
 const userData = process.env.DSH_WORK_E2E_USER_DATA
 assert.ok(userData)
@@ -81,10 +82,11 @@ async function run(): Promise<void> {
     'Desktop did not enter the native conversation shell')
     assert.match(surface.url, /^http:\/\/127\.0\.0\.1:\d+\/$/u)
     assert.equal(surface.bridge, 'undefined')
-    assert.ok(surface.text.includes('DSH Work'))
-    assert.ok(surface.text.includes('新会话'))
-    assert.ok(surface.text.includes('工作区'))
-    assert.ok(surface.text.includes('设置'))
+    const nativeCopy = inspectNativeSurfaceCopy(surface.text)
+    assert.equal(nativeCopy.brand, true)
+    assert.equal(nativeCopy.newSession, true)
+    assert.equal(nativeCopy.workspace, true)
+    assert.equal(nativeCopy.settings, true)
     assert.doesNotMatch(surface.text, /旧版工作/u)
     assert.doesNotMatch(surface.text, /你想完成什么？|常见工作|最近工作/u)
     const preferences = active.window.webContents as unknown as {

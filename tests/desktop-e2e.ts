@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { DesktopSession } from '../apps/desktop/main.ts'
+import { inspectNativeSurfaceCopy } from './support/native-surface-copy.ts'
 
 const missing = process.argv.includes('--missing-runtime')
 const rendererCrash = process.argv.includes('--renderer-crash')
@@ -92,12 +93,17 @@ try {
   } else {
     phase = 'automatic-native-surface'
     const surface = await waitForNativeSurface()
+    const nativeCopy = inspectNativeSurfaceCopy(surface.text)
+    phase = 'native-surface-url'
     assert.match(surface.url, /^http:\/\/127\.0\.0\.1:\d+\/$/u)
+    phase = 'native-renderer-bridge'
     assert.equal(await js('typeof window.dshWork'), 'undefined')
-    assert.ok(surface.text.includes('DSH Work'))
-    assert.ok(surface.text.includes('新会话'))
-    assert.ok(surface.text.includes('设置'))
+    phase = 'native-brand-copy'; assert.equal(nativeCopy.brand, true)
+    phase = 'native-new-session-copy'; assert.equal(nativeCopy.newSession, true)
+    phase = 'native-settings-copy'; assert.equal(nativeCopy.settings, true)
+    phase = 'native-legacy-copy-absent'
     assert.doesNotMatch(surface.text, /你想完成什么？|常见工作|最近工作|旧版工作/u)
+    phase = 'native-host-ready'
     assert.equal(active.host.snapshot().state, 'ready')
     await screenshot('ready.png')
   }
@@ -121,9 +127,9 @@ try {
   })
   if (rendererCrash) active.window.webContents.forcefullyCrashRenderer()
   else active.window.close()
-} catch {
+} catch (error) {
   clearInterval(progress)
-  write('fail')
+  write('fail', { failure: error instanceof Error ? error.name : 'UnknownFailure' })
   if (host) await host.stop()
   app.exit(1)
 }

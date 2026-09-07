@@ -7,6 +7,7 @@ import path from 'node:path'
 
 import { createOfficialLauncher, prepareDevelopmentProfile } from '../packages/runtime-host/official-launcher.ts'
 import { createRuntimeHost, type RuntimeHost } from '../packages/runtime-host/index.ts'
+import { inspectNativeSurfaceCopy } from './support/native-surface-copy.ts'
 
 const requestedHome = process.env.DSH_WORK_E2E_HOME
 if (!requestedHome) throw new Error('explicit visual-test home is required')
@@ -168,10 +169,11 @@ async function run(): Promise<void> {
       'Native conversation surface did not become visible',
     )
     assert.deepEqual(surface.size, { width: 1440, height: 900 })
-    assert.ok(surface.text.includes('DSH Work'))
-    assert.ok(surface.text.includes('新会话'))
-    assert.ok(surface.text.includes('工作区'))
-    assert.ok(surface.text.includes('设置'))
+    const nativeCopy = inspectNativeSurfaceCopy(surface.text)
+    assert.equal(nativeCopy.brand, true)
+    assert.equal(nativeCopy.newSession, true)
+    assert.equal(nativeCopy.workspace, true)
+    assert.equal(nativeCopy.settings, true)
     assert.doesNotMatch(surface.text, /你想完成什么？|常见工作|最近工作/u)
     assert.equal(await window.webContents.executeJavaScript(
       "Boolean(document.querySelector('[data-slot=sidebar]') && document.querySelector('[data-slot=conversation]'))",
