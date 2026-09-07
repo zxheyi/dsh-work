@@ -7,29 +7,55 @@
   <link rel="stylesheet" href="style.css">
   <script type="module" src="renderer.js"></script>
 </head>
-<body>
-  <header><div class="brand"><span class="mark">W</span><strong>DSH Work</strong></div></header>
-  <main>
-    <p class="eyebrow">DSH WORK</p>
-    <h1>正在准备你的工作台</h1>
-    <p class="intro">稍等片刻，我们会继续你最近的工作。</p>
-    <section id="onboarding" class="onboarding" aria-labelledby="onboarding-title" hidden>
-      <p class="choice-kicker">首次打开</p>
-      <h2 id="onboarding-title">继续使用已有 DSH 配置</h2>
-      <p class="choice-detail">可以沿用熟悉的登录状态、设置与工作记录；DSH Work 只会在自己的目录中组合运行。</p>
-      <label for="profile-choice">选择已有配置</label>
-      <select id="profile-choice"></select>
-      <p id="profile-warning" class="choice-warning">使用已有配置时，请先关闭其他正在运行的 DSH 应用。</p>
-      <div class="actions"><button id="use-local">继续并打开</button><button id="use-isolated" class="secondary">使用全新环境</button></div>
-    </section>
-    <section class="runtime" aria-label="工作台状态">
-      <div class="status-row"><span id="indicator" class="indicator"></span><h2 id="state" aria-live="polite">正在读取状态</h2></div>
-      <p id="detail">正在连接桌面服务。</p>
-      <p id="diagnostic" class="diagnostic" hidden></p>
-      <p id="retained" class="retained" hidden>已保留当前会话中的未发送内容和文件选择，恢复后会回到原位置。</p>
-      <div class="actions"><button id="start" disabled>打开工作台</button><button id="recover" hidden disabled>重新准备</button><button id="safe-mode" class="secondary" hidden disabled>安全模式</button><button id="stop" class="secondary" disabled>取消</button></div>
-    </section>
-  </main>
-  <footer>已有工作会自动保留</footer>
+<body data-scene="preparing">
+  <div class="launch-shell">
+    <aside class="launch-brand">
+      <div class="brand-lockup"><span class="brand-mark">DW</span><strong>DSH Work</strong></div>
+      <div class="brand-story">
+        <p class="eyebrow">DEEPSEEK HARNESS WORKSPACE</p>
+        <h1>让工作继续，<br>从熟悉的地方开始。</h1>
+        <p>复用已有习惯，也可以从干净环境出发。DSH Work 只询问必要选择，剩下的准备交给系统。</p>
+      </div>
+      <div class="brand-foot"><span class="brand-status"></span><span>本机运行 · 数据保留在你的设备中</span></div>
+    </aside>
+    <main class="launch-main">
+      <div class="launch-content">
+        <div class="steps" aria-label="启动进度">
+          <span class="step step-choice"><b>1</b><span>选择环境</span></span><i></i>
+          <span class="step step-prepare"><b>2</b><span>准备工作台</span></span><i></i>
+          <span class="step step-enter"><b>3</b><span>进入首页</span></span>
+        </div>
+        <section id="onboarding" class="onboarding" aria-labelledby="onboarding-title" hidden>
+          <h2 id="onboarding-title">选择这次使用的工作环境</h2>
+          <p class="intro">检测到兼容的 DSH 配置。复用后，已有设置和工作记录会继续生效。</p>
+          <div id="profile-options" class="profile-options" role="radiogroup" aria-label="已有 DSH 配置"></div>
+          <select id="profile-choice" class="visually-hidden" tabindex="-1" aria-hidden="true"></select>
+          <button id="use-isolated" class="profile-card isolated" type="button">
+            <span class="profile-radio" aria-hidden="true"></span>
+            <span class="profile-copy"><strong>创建独立的 DSH Work 环境</strong><small>从默认设置开始，不影响其他 DSH 应用</small></span>
+            <span class="profile-meta">全新环境</span>
+          </button>
+          <p id="profile-warning" class="choice-warning"><span aria-hidden="true">i</span><span><strong>使用前请关闭其他 DSH 应用。</strong>多个应用同时使用同一配置时，可能造成设置冲突。</span></p>
+          <div class="actions profile-actions"><span></span><button id="use-local" disabled>准备工作台 <span aria-hidden="true">→</span></button></div>
+        </section>
+        <section id="runtime" class="runtime" aria-labelledby="state">
+          <div class="runtime-visual"><img class="runtime-whale" src="deepseek-whale.svg" alt="DeepSeek"><span id="indicator" class="indicator"></span></div>
+          <h2 id="state" aria-live="polite">正在读取状态</h2>
+          <p id="detail" class="intro">正在连接桌面服务。</p>
+          <div class="runtime-progress" aria-label="准备状态">
+            <p><span class="progress-icon done">✓</span><span><strong>工作环境</strong><small>选择已保存</small></span><em>完成</em></p>
+            <p><span class="progress-icon active"></span><span><strong>本机服务</strong><small>正在启动并连接工作台</small></span><em>进行中</em></p>
+            <p><span class="progress-icon pending">3</span><span><strong>工作首页</strong><small>服务就绪后自动进入</small></span><em>等待</em></p>
+          </div>
+          <p id="retained" class="retained" hidden>已保留当前会话中的未发送内容和文件选择，恢复后会回到原位置。</p>
+          <div class="failure-detail"><strong>可能原因</strong><p>另一个 DSH 应用仍在使用相同配置，或者上次退出时服务未完整关闭。</p><code id="diagnostic" class="diagnostic" hidden></code></div>
+          <div class="actions runtime-actions">
+            <button id="stop" class="secondary" disabled>取消</button>
+            <span class="action-group"><button id="safe-mode" class="secondary" hidden disabled>使用安全模式</button><button id="recover" hidden disabled>重新准备</button><button id="start" disabled>打开工作台</button></span>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
 </body>
 </html>

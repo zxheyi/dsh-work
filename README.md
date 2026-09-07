@@ -21,7 +21,7 @@ DSH Work 希望让普通用户从“我想完成什么”开始，而不是先�
 
 > **当前状态：** 已打通首个发行前闭环：单 Work、受管 Workspace、Primary Session、多 Turn、受控文件资料、单一 Markdown 成果生产、安全原文预览、自然语言修改、确认完成、导出副本与 Finder 展示；同时支持重启恢复、失败继续，以及把已有对话的可读内容安全复制到新 Work。安装包签名、升级、外部会话自动发现、多成果版本和 Office 格式仍未完成。
 
-**产品资料：** [查看 PRD 源文件](docs/product-prd.html) · [在线预览交互式 PRD](https://htmlpreview.github.io/?https://github.com/zxheyi/dsh-work/blob/main/docs/product-prd.html) · [阅读 Work 聚合 ADR](docs/decisions/0006-work-as-product-owned-aggregate.md)
+**产品资料：** [查看交互式启动与首页 PRD](docs/product-prd.html) · [阅读完整文字规格](docs/startup-and-home-prd.md) · [阅读熟悉会话与版本化文件 ADR](docs/decisions/0014-familiar-conversations-and-versioned-files.md)
 
 ## 用户可以完成什么
 

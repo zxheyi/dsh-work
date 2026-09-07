@@ -3,18 +3,20 @@ import fs from 'node:fs'
 import test from 'node:test'
 import type { RuntimeStatus } from '../apps/desktop/contracts.ts'
 
-const source = fs.readFileSync(new URL('../dist/apps/desktop/renderer.js', import.meta.url), 'utf8')
 let moduleId = 0
 
 interface ElementFixture {
   readonly dataset: Record<string, string>
+  readonly classList: { toggle(name: string, enabled?: boolean): void }
   disabled: boolean
   hidden: boolean
   textContent: string
   value: string
-  append(child: ElementFixture): void
+  append(...children: ElementFixture[]): void
   replaceChildren(): void
   addEventListener(name: string, action: () => void): void
+  setAttribute(name: string, value: string): void
+  querySelectorAll<T>(): T[]
 }
 
 interface DocumentFixture {
@@ -32,18 +34,20 @@ const createDocument = (actions?: Map<string, () => void>): {
     body: { dataset: {} },
     createElement(): ElementFixture {
       return {
-        dataset: {}, disabled: false, hidden: false, textContent: '', value: '',
+        dataset: {}, classList: { toggle: () => {} }, disabled: false, hidden: false, textContent: '', value: '',
         append: () => {}, replaceChildren: () => {}, addEventListener: () => {},
+        setAttribute: () => {}, querySelectorAll: () => [],
       }
     },
     getElementById(id: string): ElementFixture {
       let element = elements.get(id)
       if (!element) {
         element = {
-          dataset: {}, disabled: false, hidden: false, textContent: '', value: '',
-          append(child): void { if (!element?.value) element!.value = child.value },
+          dataset: {}, classList: { toggle: () => {} }, disabled: false, hidden: false, textContent: '', value: '',
+          append(...children): void { if (!element?.value && children[0]) element!.value = children[0].value },
           replaceChildren(): void { element!.value = '' },
           addEventListener: (_name: string, action: () => void): void => { actions?.set(id, action) },
+          setAttribute: () => {}, querySelectorAll: () => [],
         }
         elements.set(id, element)
       }
@@ -61,8 +65,7 @@ async function withRenderer(document: DocumentFixture, window: unknown, verify: 
   Reflect.set(globalThis, 'document', document)
   Reflect.set(globalThis, 'window', window)
   try {
-    const encoded = Buffer.from(source).toString('base64')
-    await import(`data:text/javascript;base64,${encoded}#${moduleId++}`)
+    await import(new URL(`../dist/apps/desktop/renderer.js?case=${String(moduleId++)}`, import.meta.url).href)
     await verify()
   } finally {
     if (hadDocument) Reflect.set(globalThis, 'document', previousDocument)
@@ -90,6 +93,7 @@ test('a late initial snapshot cannot overwrite a newer live status', async () =>
     callbacks.initial?.({ state: 'stopped', code: null, canStart: true, canStop: false, canRecover: false })
     await new Promise(resolve => setImmediate(resolve))
     assert.equal(document.body.dataset.state, 'ready')
+    assert.equal(document.body.dataset.scene, 'preparing')
     assert.equal(elements.get('start')?.disabled, true)
   })
 })
@@ -185,6 +189,7 @@ test('first launch offers bounded local choices and starts only after selection'
   await withRenderer(document, window, async () => {
     await new Promise(resolve => setImmediate(resolve))
     assert.equal(elements.get('onboarding')?.hidden, false)
+    assert.equal(document.body.dataset.scene, 'profile')
     assert.equal(elements.get('profile-choice')?.value, profileId)
     assert.equal(elements.get('use-local')?.disabled, false)
     actions.get('use-local')?.()
@@ -201,4 +206,7 @@ test('local shell copy uses product language instead of Harness configuration vo
   assert.doesNotMatch(visibleSources, /DSH Web|Workspace|Session|Profile|CLI|generation/u)
   assert.match(visibleSources, /DSH Work/u)
   assert.match(visibleSources, /安全模式/u)
+  assert.match(visibleSources, /class="launch-brand"/u)
+  assert.match(visibleSources, /id="profile-options"/u)
+  assert.match(visibleSources, /让工作继续/u)
 })

@@ -29,7 +29,7 @@ DSH Work composes Harness; it does not modify, copy, or reimplement Harness-owne
 
 ## Current milestone
 
-The active product milestone is [familiar DSH conversations and file outcomes](acceptance/familiar-work-v5.md), adopted by [ADR 0014](decisions/0014-familiar-conversations-and-versioned-files.md). The local implementation issue is [Familiar Work v5](implementation/familiar-v5.md). The existing [M0 lifecycle criteria](acceptance/m0.md) remain release gates; adopting the product milestone does not declare those gates complete.
+The active product milestone is [familiar DSH conversations and file outcomes](acceptance/familiar-work-v5.md), adopted by [ADR 0014](decisions/0014-familiar-conversations-and-versioned-files.md). The current end-to-end product shape is defined by the [startup and home PRD](startup-and-home-prd.md) and its [interactive review surface](product-prd.html). The local implementation issue is [Familiar Work v5](implementation/familiar-v5.md). The existing [M0 lifecycle criteria](acceptance/m0.md) remain release gates; adopting the product milestone does not declare those gates complete.
 
 ## In scope now
 

@@ -7,6 +7,7 @@ import {
   bindStatusBridge,
   isAllowedDesktopNavigation,
   resourceForRequest,
+  STATUS_CONTENT_SECURITY_POLICY,
   STATUS_URL,
   type DesktopAsset,
   type StatusHost,
@@ -50,12 +51,14 @@ export async function createDesktopWindow(
     const types: Record<DesktopAsset, string> = {
       'index.html': 'text/html',
       'renderer.js': 'text/javascript',
+      'startup-presentation.js': 'text/javascript',
       'style.css': 'text/css',
+      'deepseek-whale.svg': 'image/svg+xml',
     }
     const body = new Uint8Array(fs.readFileSync(path.join(root, resource)))
     return new Response(body, { headers: {
       'Content-Type': `${types[resource]}; charset=utf-8`,
-      'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
+      'Content-Security-Policy': STATUS_CONTENT_SECURITY_POLICY,
     } })
   })
   const window = new BrowserWindow({

@@ -21,7 +21,7 @@ It is neither a reimplementation of [DeepSeek Harness](https://github.com/deepse
 
 > **Current status:** the first pre-release Work loop is implemented: one Work, a managed Workspace, one Primary Session, bounded file sources, one Markdown deliverable, safe source preview, natural-language revision, explicit completion, managed export, and native delivery-location opening. Runtime recovery and readable conversation import are also present. Signing, upgrades, authorized external-conversation discovery, deliverable versions, and Office formats remain open.
 
-**Product material:** [PRD source](docs/product-prd.html) · [Interactive PRD preview](https://htmlpreview.github.io/?https://github.com/zxheyi/dsh-work/blob/main/docs/product-prd.html) · [Work aggregate ADR](docs/decisions/0006-work-as-product-owned-aggregate.md)
+**Product material:** [Interactive startup and home PRD](docs/product-prd.html) · [Complete written specification](docs/startup-and-home-prd.md) · [Familiar conversations and versioned files ADR](docs/decisions/0014-familiar-conversations-and-versioned-files.md)
 
 ## What users should be able to finish
 
