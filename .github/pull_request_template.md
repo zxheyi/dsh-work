@@ -4,7 +4,7 @@
 
 ## Related Issue / 关联 Issue
 
-<!-- Fixes #123, Closes #456, or N/A -->
+<!-- Required for Ready PRs: Fixes #123 or Closes #456; N/A is not accepted. -->
 
 ## Scope and boundary / 范围与边界
 

@@ -7,6 +7,8 @@ GitHub branch protection is repository state and cannot be enforced by checked-i
 ## Required settings now
 
 - Require a pull request before merging.
+- Use Merge commit to preserve original commits and revision-bound evidence. Enable `allow_merge_commit`; disable `allow_squash_merge` and `allow_rebase_merge` in repository settings.
+- Disable required linear history so PR merge commits are allowed.
 - Required approving reviews: `0` while the project has one active maintainer.
 - Require conversation resolution before merging.
 - Require status checks to pass before merging.
@@ -29,7 +31,7 @@ When a second active maintainer can provide timely reviews, raise required appro
      repos/zxheyi/dsh-work/branches/main/protection
    ```
 
-3. Read the protection endpoint back and compare required checks and enforcement fields with the JSON file.
+3. Set repository merge options with `gh api --method PATCH repos/zxheyi/dsh-work -F allow_merge_commit=true -F allow_squash_merge=false -F allow_rebase_merge=false`, then read them back. Read the protection endpoint back and compare required checks and enforcement fields with the JSON file.
 4. Confirm a direct update to `main` is rejected and a pull request with a failed required check cannot merge.
 5. Record the API response, rejected push, pull request, and CI links in the delivery evidence.
 
