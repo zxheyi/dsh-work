@@ -14,6 +14,7 @@ const recover = element<HTMLButtonElement>('recover')
 const safeMode = element<HTMLButtonElement>('safe-mode')
 const onboarding = element<HTMLElement>('onboarding')
 const profileChoice = element<HTMLSelectElement>('profile-choice')
+const profileOptions = element<HTMLElement>('profile-options')
 const useLocal = element<HTMLButtonElement>('use-local')
 const useIsolated = element<HTMLButtonElement>('use-isolated')
 const retained = element<HTMLElement>('retained')
@@ -23,9 +24,11 @@ const hasRetainedContext = window.dshWork.hasRetainedContext
 retained.hidden = !hasRetainedContext
 
 const render = (value: PresentationStatus): void => {
+  latestStatus = value
   const presentation = presentStartup(value, choiceRequired, hasRetainedContext)
   document.body.dataset.state = value.state
   document.body.dataset.scene = presentation.scene
+  onboarding.hidden = presentation.scene !== 'profile'
   element('state').textContent = presentation.title
   element('detail').textContent = presentation.detail
   element('indicator').dataset.state = value.state
@@ -53,26 +56,63 @@ const disconnected = (): void => render({
 })
 
 let choiceRequired = false
-const finishChoice = (): void => {
+let latestStatus: PresentationStatus | null = null
+const finishChoice = (value: PresentationStatus): void => {
   choiceRequired = false
-  onboarding.hidden = true
   useLocal.disabled = true
   useIsolated.disabled = true
+  render(value)
+}
+
+const selectProfileCard = (profileId: string): void => {
+  profileChoice.value = profileId
+  for (const candidate of profileOptions.querySelectorAll<HTMLButtonElement>('.profile-card')) {
+    const selected = candidate.dataset.profileId === profileId
+    candidate.classList.toggle('is-selected', selected)
+    candidate.setAttribute('aria-checked', String(selected))
+  }
+  useLocal.disabled = false
 }
 
 window.dshWork.startup().then(context => {
   choiceRequired = context.choiceRequired
-  if (!choiceRequired) return
-  onboarding.hidden = false
+  if (!choiceRequired) {
+    if (latestStatus) render(latestStatus)
+    return
+  }
   profileChoice.replaceChildren()
-  for (const profile of context.profiles) {
+  profileOptions.replaceChildren()
+  context.profiles.forEach((profile, index) => {
     const option = document.createElement('option')
     option.value = profile.id
     option.textContent = profile.name
     profileChoice.append(option)
-  }
+    const card = document.createElement('button')
+    card.type = 'button'
+    card.className = `profile-card${index === 0 ? ' is-selected' : ''}`
+    card.dataset.profileId = profile.id
+    card.setAttribute('role', 'radio')
+    card.setAttribute('aria-checked', String(index === 0))
+    const radio = document.createElement('span')
+    radio.className = 'profile-radio'
+    radio.setAttribute('aria-hidden', 'true')
+    const copy = document.createElement('span')
+    copy.className = 'profile-copy'
+    const name = document.createElement('strong')
+    name.textContent = `继续使用“${profile.name}”配置`
+    const description = document.createElement('small')
+    description.textContent = `沿用 ${context.homeLabel} 中已有的设置和工作记录`
+    copy.append(name, description)
+    const meta = document.createElement('span')
+    meta.className = 'profile-meta'
+    meta.textContent = index === 0 ? '建议使用' : '已有配置'
+    card.append(radio, copy, meta)
+    card.addEventListener('click', () => selectProfileCard(profile.id))
+    profileOptions.append(card)
+  })
   useLocal.disabled = context.profiles.length === 0
   start.disabled = true
+  if (latestStatus) render(latestStatus)
 }).catch(disconnected)
 
 // Subscribe before reading initial state; command responses are intentionally
