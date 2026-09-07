@@ -3,7 +3,7 @@ on:
   pull_request:
   push:
     branches: [main]
-    paths: ['apps/**', 'packages/**', 'runtime/**', 'scripts/**', 'package.json', 'pnpm-lock.yaml', '.github/workflows/desktop-package.yml']
+    paths: ['apps/**', 'packages/**', 'runtime/**', 'scripts/**', 'package.json', 'pnpm-lock.yaml', '.github/workflows/desktop-package.yml', 'LICENSE', 'third-party/**']
   workflow_dispatch:
 permissions:
   contents: read
@@ -33,3 +33,4 @@ jobs:
             artifacts/package/receipt.json
             artifacts/package/smoke.json
             artifacts/package/smoke-*.png
+            artifacts/package/resources/third-party/

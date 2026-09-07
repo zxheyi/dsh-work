@@ -150,6 +150,6 @@ DSH Work 是基于 DeepSeek Harness 构建的独立社区项目，与深度求�
 
 ## License
 
-项目计划以开源方式发布，但尚未选定许可证。正式接受实质性外部贡献前将补充许可证文件。
+项目采用 [MIT 许可证](LICENSE)，版权署名为 DSH Work contributors。第三方依赖保留各自许可证，见 [分发许可清单](third-party/README.md)；项目采用 MIT 不代表依赖都采用 MIT。
 
 > “DeepSeek Harness”是深度求索的注册商标。本文仅为准确说明兼容性、技术来源及与上游软件的关系而使用该名称。

@@ -23,7 +23,7 @@ The verifier checks the exact upstream remote, tag, commit and byte-clean source
 
 ## Current boundary
 
-This baseline makes `main` installable and independently verifiable. The repository also contains a separately reviewable [Electron lifecycle slice](../docs/acceptance/electron-lifecycle-slice.md) with a persistent product-owned Profile generation and external runtime guardian. Packaged desktop startup resolves only `Resources/runtime/node` and never accepts `DSH_WORK_NODE` or a global Node fallback. Development startup retains the explicit variable below. Runtime staging is implemented, but final application packaging, signing, transitive notices, native package smoke, user workspace migration, and a runnable release remain separate gates.
+This baseline makes `main` installable and independently verifiable. The repository also contains a separately reviewable [Electron lifecycle slice](../docs/acceptance/electron-lifecycle-slice.md) with a persistent product-owned Profile generation and external runtime guardian. Packaged desktop startup resolves only `Resources/runtime/node` and never accepts `DSH_WORK_NODE` or a global Node fallback. Development startup retains the explicit variable below. Runtime staging and [standalone internal-test packaging](../docs/packaging.md) are implemented. Packaging retains [distribution notices](../third-party/README.md). Signing, native-library distribution materials, user workspace migration and public release remain separate gates.
 
 Only Electron's install script is allowed by the root manifest when scripts are enabled. No Harness source build or patch step is introduced. The known upstream React/React DOM peer mismatch remains a browser-rendering gate, not a reason for an unreviewed override.
 

@@ -30,4 +30,4 @@ The build requires signing and notarization, then verifies codesign, the stapled
 
 ## Remaining release gates
 
-Current product acceptance, real F13 observations, MIT project license and complete third-party notices must be available before public release. Packaging evidence does not replace those checks. See [ADR 0017](decisions/0017-standalone-desktop-packaging.md).
+The project MIT license and generated production dependency inventory are included. Real F13 observations and complete native-library distribution materials remain required before public release. The current [license inventory](../third-party/README.md) identifies those materials, and `pnpm notices:verify-release` rejects unresolved gaps. Packaging evidence does not replace those checks. See [ADR 0017](decisions/0017-standalone-desktop-packaging.md).

@@ -147,6 +147,6 @@ DSH Work is an independent community project built on DeepSeek Harness. It is no
 
 ## License
 
-The project is intended to be released as open source, but a license has not been selected yet. A license file will be added before substantive external contributions are accepted.
+DSH Work is licensed under the [MIT License](LICENSE), attributed to DSH Work contributors. Dependencies retain their own licenses; see the [distribution inventory](third-party/README.md).
 
 > “DeepSeek Harness” is a registered trademark of DeepSeek. The name is used here solely to accurately describe compatibility, technical origin, and this project's relationship to upstream software.

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
+import { generateDistributionNotices } from './distribution-notices.mjs'
 import { stageProductRuntime } from './stage-product-runtime.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
@@ -41,11 +42,13 @@ export async function packageDesktop({ signed = false } = {}) {
   fs.copyFileSync(path.join(root, 'runtime/baseline.json'), path.join(stage, 'runtime/baseline.json'))
   fs.writeFileSync(path.join(stage, 'package.json'), JSON.stringify({
     name: manifest.name, version: manifest.version, private: true, type: 'module',
-    main: 'dist/apps/desktop/main.js', author: 'DSH Work contributors', dependencies: manifest.dependencies,
+    main: 'dist/apps/desktop/main.js', author: manifest.author, license: manifest.license, dependencies: manifest.dependencies,
   }, null, 2))
   fs.rmSync(path.join(stage, 'pnpm-lock.yaml'))
   const resources = path.join(output, 'resources')
   stageProductRuntime(context, resources)
+  const inventory = generateDistributionNotices(stage, resources)
+  if (signed && inventory.blockers.length) throw new Error('distribution material gate is not complete')
   const packages = await packager({
     dir: stage, out: path.join(output, 'bundles'), name: 'DSH Work',
     executableName: 'DSH Work', appBundleId: 'io.github.zxheyi.dsh-work',
@@ -53,7 +56,11 @@ export async function packageDesktop({ signed = false } = {}) {
     platform: process.platform, arch: process.arch,
     // The standalone Node guardian and Harness loader require ordinary filesystem paths.
     asar: false, prune: false, derefSymlinks: false, overwrite: true,
-    extraResource: [path.join(resources, 'runtime')], ...signing,
+    extraResource: ['runtime', 'third-party', 'LICENSE.dsh-work.txt'].map(name => path.join(resources, name)),
+    afterCopyExtraResources: [({ buildPath, platform }) => {
+      const target = path.join(buildPath, platform === 'darwin' ? 'DSH Work.app/Contents/Resources' : 'resources', 'third-party')
+      for (const file of ['LICENSE', 'LICENSES.chromium.html']) fs.copyFileSync(path.join(buildPath, file), path.join(target, `electron-${file}`))
+    }], ...signing,
   })
   if (signed) {
     const app = path.join(packages[0], 'DSH Work.app')

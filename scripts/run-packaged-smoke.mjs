@@ -21,6 +21,7 @@ const executable = process.platform === 'darwin'
 const resources = process.platform === 'darwin' ? path.join(installed, 'DSH Work.app/Contents/Resources') : path.join(installed, 'resources')
 assert.ok(fs.existsSync(path.join(resources, 'runtime/node', process.platform === 'win32' ? 'node.exe' : 'bin/node')))
 assert.ok(!fs.existsSync(path.join(resources, 'app/node_modules/@electron/packager')))
+for (const file of ['LICENSE.dsh-work.txt', 'third-party/inventory.json', 'third-party/electron-LICENSE', 'third-party/electron-LICENSES.chromium.html', 'runtime/node/LICENSE']) assert.ok(fs.existsSync(path.join(resources, file)), file)
 let child
 let socket
 let clean = false
