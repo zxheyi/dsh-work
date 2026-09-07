@@ -13,6 +13,7 @@ const output = path.resolve('artifacts/desktop', name)
 fs.mkdirSync(output, { recursive: true })
 const reportPath = path.join(output, 'result.json')
 let phase = 'boot'
+let nativeSurfaceProbe: Record<string, unknown> | null = null
 const write = (status: 'pass' | 'fail', extra: Record<string, unknown> = {}): void => fs.writeFileSync(reportPath, JSON.stringify({ status, phase,
   runId: process.env.DSH_WORK_E2E_RUN_ID,
   platform: process.platform, arch: process.arch, electron: process.versions.electron, ...extra }, null, 2))
@@ -45,19 +46,52 @@ try {
     const deadline = Date.now() + (process.platform === 'win32' ? 70_000 : 35_000)
     while (Date.now() < deadline) {
       try {
-        const value = await js<{ ready: boolean; text: string }>(`(() => {
+        const value = await js<{
+          ready: boolean
+          text: string
+          brand: boolean
+          composer: boolean
+          sidebar: boolean
+          conversation: boolean
+          dialog: boolean
+        }>(`(() => {
           for (const label of ['继续', '稍后配置']) {
             const button = Array.from(document.querySelectorAll('button'))
               .find(item => item.textContent?.trim() === label)
             if (button instanceof HTMLButtonElement) button.click()
           }
+          const brand = Boolean(document.querySelector('[data-dsh-work-brand="name"]'))
+          const composer = Boolean(document.querySelector('[data-composer-card]'))
           return {
-            ready: Boolean(document.querySelector('[data-dsh-work-brand="name"]')
-              && document.querySelector('[data-composer-card]')),
+            ready: brand && composer,
             text: document.body.innerText,
+            brand,
+            composer,
+            sidebar: Boolean(document.querySelector('[data-slot="sidebar"]')),
+            conversation: Boolean(document.querySelector('[data-slot="conversation"]')),
+            dialog: Boolean(document.querySelector('[role="dialog"]')),
           }
         })()`)
         const url = active.window.webContents.getURL()
+        let location = 'other'
+        if (url.startsWith('dsh-work:')) location = 'status'
+        else {
+          try {
+            const parsed = new URL(url)
+            if (parsed.protocol === 'http:' && parsed.hostname === '127.0.0.1') {
+              location = parsed.search ? 'loopback-query' : 'loopback-clean'
+            }
+          } catch {}
+        }
+        nativeSurfaceProbe = {
+          location,
+          brand: value.brand,
+          composer: value.composer,
+          sidebar: value.sidebar,
+          conversation: value.conversation,
+          dialog: value.dialog,
+          hostState: active.host.snapshot().state,
+        }
         if (value.ready) return { text: value.text, url }
       } catch {}
       await new Promise(resolve => setTimeout(resolve, 25))
@@ -129,7 +163,10 @@ try {
   else active.window.close()
 } catch (error) {
   clearInterval(progress)
-  write('fail', { failure: error instanceof Error ? error.name : 'UnknownFailure' })
+  write('fail', {
+    failure: error instanceof Error ? error.name : 'UnknownFailure',
+    nativeSurfaceProbe,
+  })
   if (host) await host.stop()
   app.exit(1)
 }
