@@ -33,6 +33,8 @@ export interface RuntimeHost {
   snapshot(): RuntimeHostSnapshot
   subscribe(listener: (snapshot: RuntimeHostSnapshot) => void): () => void
   subscribeSurface(listener: (url: string) => void): () => void
+  active(): boolean
+  subscribeActivity(listener: (active: boolean) => void): () => void
 }
 
 interface Deferred<T> {
@@ -52,6 +54,7 @@ interface Owner {
   bytes: number
   messages: number
   surface: boolean
+  active: boolean
   startTimer?: NodeJS.Timeout
   stopTimer?: NodeJS.Timeout
   reapTimer?: NodeJS.Timeout
@@ -68,7 +71,13 @@ interface LifecycleSurfaceMessage {
   readonly url: string
 }
 
-type LifecycleMessage = LifecycleStateMessage | LifecycleSurfaceMessage
+interface LifecycleActivityMessage {
+  readonly protocol: 'dsh-work.lifecycle.v1'
+  readonly event: 'activity'
+  readonly active: boolean
+}
+
+type LifecycleMessage = LifecycleStateMessage | LifecycleSurfaceMessage | LifecycleActivityMessage
 
 const deferred = <T>(): Deferred<T> => {
   let resolve!: Deferred<T>['resolve']
@@ -98,6 +107,9 @@ const isLifecycleMessage = (value: unknown): value is LifecycleMessage => {
   if (message.event === 'surface') {
     return Object.keys(message).length === 3 && validDesktopSurfaceUrl(message.url)
   }
+  if (message.event === 'activity') {
+    return Object.keys(message).length === 3 && typeof message.active === 'boolean'
+  }
   return Object.keys(message).length === 2 && (message.event === 'ready' || message.event === 'disposed')
 }
 
@@ -114,6 +126,7 @@ export function createRuntimeHost({
   let code: RuntimeHostCode | null = null
   const listeners = new Set<(snapshot: RuntimeHostSnapshot) => void>()
   const surfaceListeners = new Set<(url: string) => void>()
+  const activityListeners = new Set<(active: boolean) => void>()
   const notifications: RuntimeHostSnapshot[] = []
   let notifying = false
 
@@ -200,6 +213,7 @@ export function createRuntimeHost({
       bytes: 0,
       messages: 0,
       surface: false,
+      active: false,
     }
     current = owner
     state = 'starting'
@@ -215,7 +229,24 @@ export function createRuntimeHost({
     owner.startTimer = setTimeout(() => stopOwned(owner, 'startup-timeout'), startupMs)
     child.on('message', (message: unknown) => {
       if (current !== owner) return
-      if (!isLifecycleMessage(message) || ++owner.messages > 3) {
+      if (!isLifecycleMessage(message)) {
+        stopOwned(owner, 'invalid-lifecycle-message')
+        return
+      }
+      if (message.event === 'activity') {
+        if (owner.disposed || owner.exited) {
+          stopOwned(owner, 'invalid-lifecycle-message')
+          return
+        }
+        if (owner.active !== message.active) {
+          owner.active = message.active
+          for (const listener of [...activityListeners]) {
+            try { listener(message.active) } catch {}
+          }
+        }
+        return
+      }
+      if (++owner.messages > 3) {
         stopOwned(owner, 'invalid-lifecycle-message')
         return
       }
@@ -288,6 +319,12 @@ export function createRuntimeHost({
       clearTimeout(owner.reapTimer)
       const failure = owner.failure || (!owner.stopping ? 'unexpected-exit' :
         exitCode !== 0 || signal ? 'runtime-exit-failed' : !owner.disposed ? 'disposal-unconfirmed' : null)
+      if (owner.active) {
+        owner.active = false
+        for (const listener of [...activityListeners]) {
+          try { listener(false) } catch {}
+        }
+      }
       current = null
       publish(failure ? 'failed' : 'stopped', failure, value => settle(owner, value))
     })
@@ -311,6 +348,11 @@ export function createRuntimeHost({
     subscribeSurface(listener: (url: string) => void): () => void {
       surfaceListeners.add(listener)
       return () => surfaceListeners.delete(listener)
+    },
+    active: (): boolean => current?.active ?? false,
+    subscribeActivity(listener: (active: boolean) => void): () => void {
+      activityListeners.add(listener)
+      return () => activityListeners.delete(listener)
     },
   })
 }

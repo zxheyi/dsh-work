@@ -8,12 +8,17 @@ const safeRetry = new Set<RuntimeCode>(['runtime-unavailable'])
 
 interface GuardianServiceOptions {
   readonly store: GenerationStore
-  readonly prepare: (home: string) => void
+  readonly prepare: (home: string, mode: RuntimeLaunchMode) => void
   readonly launcher: (home: string) => () => RuntimeChild
+  readonly onReady?: (home: string, mode: RuntimeLaunchMode) => void
 }
+
+export type RuntimeLaunchMode = 'normal' | 'recover' | 'safe'
 
 export interface GuardianService extends RuntimeControl {
   subscribeSurface(listener: (url: string) => void): () => void
+  active(): boolean
+  subscribeActivity(listener: (active: boolean) => void): () => void
   dispose(): Promise<boolean>
 }
 
@@ -31,17 +36,21 @@ const bounded = (
   ...changes,
 })
 
-export function createGuardianService({ store, prepare, launcher }: GuardianServiceOptions): GuardianService {
+export function createGuardianService({ store, prepare, launcher, onReady }: GuardianServiceOptions): GuardianService {
   let claim: ClaimedGeneration | null = null
   let runtime: RuntimeHost | null = null
   let unsubscribe: (() => void) | null = null
   let unsubscribeSurface: (() => void) | null = null
+  let unsubscribeActivity: (() => void) | null = null
   let status = bounded({ state: 'stopped', code: null, canStart: true, canStop: false })
   const listeners = new Set<(snapshot: RuntimeSnapshot) => void>()
   const surfaceListeners = new Set<(url: string) => void>()
+  const activityListeners = new Set<(active: boolean) => void>()
   let disposing = false
   let disposePromise: Promise<boolean> | null = null
   let resolveDispose: ((value: boolean) => void) | null = null
+  let launchMode: RuntimeLaunchMode = 'normal'
+  let checkpointedGeneration: string | null = null
 
   const finalizeDispose = (): void => {
     if (!disposing) return
@@ -54,6 +63,8 @@ export function createGuardianService({ store, prepare, launcher }: GuardianServ
     unsubscribe = null
     unsubscribeSurface?.()
     unsubscribeSurface = null
+    unsubscribeActivity?.()
+    unsubscribeActivity = null
     resolveDispose?.(true)
     resolveDispose = null
   }
@@ -74,29 +85,42 @@ export function createGuardianService({ store, prepare, launcher }: GuardianServ
     return bounded(value, { canStart: false, canRecover: true })
   }
 
-  const attach = (selected: ClaimedGeneration): void => {
+  const checkpointReady = (value: RuntimeHostSnapshot): void => {
+    if (value.state !== 'ready' || !claim || checkpointedGeneration === claim.generation) return
+    try { onReady?.(claim.home, launchMode) } catch {}
+    checkpointedGeneration = claim.generation
+  }
+
+  const attach = (selected: ClaimedGeneration, mode: RuntimeLaunchMode): void => {
     unsubscribe?.()
     unsubscribeSurface?.()
+    unsubscribeActivity?.()
     claim = selected
-    prepare(selected.home)
+    launchMode = mode
+    prepare(selected.home, mode)
     runtime = createRuntimeHost({ launch: launcher(selected.home) })
-    unsubscribe = runtime.subscribe(value => publish(translate(value)))
+    unsubscribe = runtime.subscribe(value => { checkpointReady(value); publish(translate(value)) })
     unsubscribeSurface = runtime.subscribeSurface(url => {
       for (const listener of [...surfaceListeners]) {
         try { listener(url) } catch {}
       }
     })
+    unsubscribeActivity = runtime.subscribeActivity(active => {
+      for (const listener of [...activityListeners]) {
+        try { listener(active) } catch {}
+      }
+    })
     publish(translate(runtime.snapshot()))
   }
 
-  const acquire = (recover: boolean): boolean => {
+  const acquire = (recover: boolean, mode: RuntimeLaunchMode): boolean => {
     const selected = recover ? store.recover() : store.claim()
     if (selected.status !== 'claimed') {
       publish(bounded({ state: 'failed', code: selected.code, canStart: false, canStop: false }, { canRecover: true }))
       return false
     }
     try {
-      attach(selected)
+      attach(selected, mode)
     } catch {
       publish(bounded({
         state: 'failed',
@@ -119,10 +143,17 @@ export function createGuardianService({ store, prepare, launcher }: GuardianServ
       surfaceListeners.add(listener)
       return () => surfaceListeners.delete(listener)
     },
+    active: (): boolean => runtime?.active() ?? false,
+    subscribeActivity(listener: (active: boolean) => void): () => void {
+      activityListeners.add(listener)
+      return () => activityListeners.delete(listener)
+    },
     async start(): Promise<RuntimeSnapshot> {
-      if (!runtime && !acquire(false)) return status
+      if (!runtime && !acquire(false, 'normal')) return status
       if (status.canRecover) return status
-      return translate(await runtime!.start())
+      const value = await runtime!.start()
+      checkpointReady(value)
+      return translate(value)
     },
     async stop(): Promise<RuntimeSnapshot> {
       if (!runtime) return status
@@ -131,8 +162,18 @@ export function createGuardianService({ store, prepare, launcher }: GuardianServ
     async recover(): Promise<RuntimeSnapshot> {
       if (runtime && !runtime.snapshot().canStart) return status
       if (!status.canRecover) return status
-      if (!acquire(true)) return status
-      return translate(await runtime!.start())
+      if (!acquire(true, 'recover')) return status
+      const value = await runtime!.start()
+      checkpointReady(value)
+      return translate(value)
+    },
+    async safeMode(): Promise<RuntimeSnapshot> {
+      if (runtime && !runtime.snapshot().canStart) return status
+      if (!status.canRecover) return status
+      if (!acquire(true, 'safe')) return status
+      const value = await runtime!.start()
+      checkpointReady(value)
+      return translate(value)
     },
     dispose(): Promise<boolean> {
       if (disposePromise) return disposePromise

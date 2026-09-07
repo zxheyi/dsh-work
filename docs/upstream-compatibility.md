@@ -40,6 +40,12 @@ The repository gate must verify:
 - the absence of a parallel DSH Work implementation of Harness-owned services;
 - Windows and macOS behavior affected by the update.
 
+## Local Profile compatibility
+
+[ADR 0016](decisions/0016-familiar-desktop-startup.md) permits an explicit local-data mode without changing the selected runtime pair. Discovery reads only regular profile manifests below the resolved local Harness home. The runtime launches an owned shadow of an admitted base-plus-web Profile and applies product plugins through final `--patch` overlays; it never executes a system `dsh` or writes the source Profile.
+
+The shadow may point the pinned official settings, credential, session, attachment and storage providers at the user-selected Harness home. This is Harness-native provider configuration rather than a copied persistence implementation. Compatibility verification must prove the exact provider row ids and configuration fields against the pinned package family, prove source Profile bytes stay unchanged, and prove safe mode uses no selected external path. A future upstream pin that changes these rows or path contracts blocks shared-profile mode until its dedicated compatibility change passes.
+
 ## DSH Desktop reference
 
 [DSH Desktop](https://github.com/anywhere-labs/dsh-desktop) is an architectural reference, not an implementation dependency. At reviewed revision [`8bfc99c`](https://github.com/anywhere-labs/dsh-desktop/tree/8bfc99c1597a10966f3d20f963cd2efe82d6f4b1), it demonstrates three useful boundaries:

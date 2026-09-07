@@ -14,6 +14,7 @@ import type {
   RuntimeSnapshot,
 } from '../runtime-contract/index.ts'
 import {
+  boundedGuardianActivity,
   boundedGuardianSurface,
   boundedGuardianSnapshot,
   GUARDIAN_PROTOCOL,
@@ -45,6 +46,8 @@ interface PendingRequest {
 
 export interface GuardianClient extends RuntimeControl {
   subscribeSurface(listener: (url: string) => void): () => void
+  active(): boolean
+  subscribeActivity(listener: (active: boolean) => void): () => void
   dispose(waitMs?: number): Promise<boolean>
 }
 
@@ -96,6 +99,8 @@ export async function createGuardianClient(
   let disposing = false
   const listeners = new Set<(snapshot: RuntimeSnapshot) => void>()
   const surfaceListeners = new Set<(url: string) => void>()
+  const activityListeners = new Set<(active: boolean) => void>()
+  let active = false
   const pending = new Map<number, PendingRequest>()
 
   const publish = (value: RuntimeSnapshot): void => {
@@ -115,6 +120,12 @@ export async function createGuardianClient(
       terminated = true
       clearTimeout(timeout)
       if (!disposing) publish(unavailable)
+      if (active) {
+        active = false
+        for (const listener of [...activityListeners]) {
+          try { listener(false) } catch {}
+        }
+      }
       for (const item of pending.values()) item.reject(new Error('guardian unavailable'))
       pending.clear()
       if (!settled) reject(new Error('guardian unavailable'))
@@ -127,6 +138,13 @@ export async function createGuardianClient(
         if (!url) return
         for (const listener of [...surfaceListeners]) {
           try { listener(url) } catch {}
+        }
+      } else if (record.event === 'activity') {
+        const next = boundedGuardianActivity(record)
+        if (next === null || next === active) return
+        active = next
+        for (const listener of [...activityListeners]) {
+          try { listener(next) } catch {}
         }
       } else if (record.event === 'guardian-ready' && !settled) {
         const value = boundedGuardianSnapshot(record.value)
@@ -176,6 +194,7 @@ export async function createGuardianClient(
     start: () => request('start'),
     stop: () => request('stop'),
     recover: () => request('recover'),
+    safeMode: () => request('safeMode'),
     snapshot: () => status,
     subscribe(listener: (snapshot: RuntimeSnapshot) => void): () => void {
       listeners.add(listener)
@@ -184,6 +203,11 @@ export async function createGuardianClient(
     subscribeSurface(listener: (url: string) => void): () => void {
       surfaceListeners.add(listener)
       return () => surfaceListeners.delete(listener)
+    },
+    active: (): boolean => active,
+    subscribeActivity(listener: (active: boolean) => void): () => void {
+      activityListeners.add(listener)
+      return () => activityListeners.delete(listener)
     },
     async dispose(waitMs = 3_000): Promise<boolean> {
       if (!child.connected) return child.exitCode !== null

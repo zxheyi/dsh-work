@@ -31,6 +31,11 @@ const element = <T extends HTMLElement>(id: string): T => {
 const start = element<HTMLButtonElement>('start')
 const stop = element<HTMLButtonElement>('stop')
 const recover = element<HTMLButtonElement>('recover')
+const safeMode = element<HTMLButtonElement>('safe-mode')
+const onboarding = element<HTMLElement>('onboarding')
+const profileChoice = element<HTMLSelectElement>('profile-choice')
+const useLocal = element<HTMLButtonElement>('use-local')
+const useIsolated = element<HTMLButtonElement>('use-isolated')
 const retained = element<HTMLElement>('retained')
 retained.hidden = !(window.dshWork.hasRetainedContext
   || (typeof window.name === 'string' && window.name.startsWith('dsh-work-recovery:v1:')
@@ -45,10 +50,12 @@ const render = (value: PresentationStatus): void => {
   const diagnostic = element('diagnostic')
   diagnostic.hidden = !value.code
   diagnostic.textContent = value.code ?? ''
-  start.disabled = !value.canStart
+  start.disabled = choiceRequired || !value.canStart
   stop.disabled = !value.canStop
   recover.hidden = !value.canRecover
   recover.disabled = !value.canRecover
+  safeMode.hidden = !value.canRecover
+  safeMode.disabled = !value.canRecover
   start.textContent = value.canRecover ? '等待安全恢复' : value.state === 'failed' ? '重试打开' : '打开工作台'
 }
 
@@ -59,6 +66,29 @@ const disconnected = (): void => render({
   canStop: false,
   canRecover: false,
 })
+
+let choiceRequired = false
+const finishChoice = (): void => {
+  choiceRequired = false
+  onboarding.hidden = true
+  useLocal.disabled = true
+  useIsolated.disabled = true
+}
+
+window.dshWork.startup().then(context => {
+  choiceRequired = context.choiceRequired
+  if (!choiceRequired) return
+  onboarding.hidden = false
+  profileChoice.replaceChildren()
+  for (const profile of context.profiles) {
+    const option = document.createElement('option')
+    option.value = profile.id
+    option.textContent = profile.name
+    profileChoice.append(option)
+  }
+  useLocal.disabled = context.profiles.length === 0
+  start.disabled = true
+}).catch(disconnected)
 
 // Subscribe before reading initial state; command responses are intentionally
 // ignored because a newer subscription event may already have arrived.
@@ -72,6 +102,21 @@ window.dshWork.snapshot().then(value => {
 }).catch(() => {
   if (!receivedLiveStatus) disconnected()
 })
-start.addEventListener('click', () => { window.dshWork.start().catch(disconnected) })
+start.addEventListener('click', () => {
+  if (!choiceRequired) window.dshWork.start().catch(disconnected)
+})
 stop.addEventListener('click', () => { window.dshWork.stop().catch(disconnected) })
 recover.addEventListener('click', () => { window.dshWork.recover().catch(disconnected) })
+safeMode.addEventListener('click', () => { window.dshWork.safeMode().catch(disconnected) })
+useLocal.addEventListener('click', () => {
+  const profileId = profileChoice.value
+  if (!/^[a-f0-9]{24}$/u.test(profileId)) return
+  useLocal.disabled = true
+  useIsolated.disabled = true
+  window.dshWork.selectProfile(profileId).then(finishChoice).catch(disconnected)
+})
+useIsolated.addEventListener('click', () => {
+  useLocal.disabled = true
+  useIsolated.disabled = true
+  window.dshWork.selectProfile(null).then(finishChoice).catch(disconnected)
+})

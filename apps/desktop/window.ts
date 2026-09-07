@@ -13,6 +13,7 @@ import {
 } from './security.ts'
 import { validDesktopSurfaceUrl } from '../../packages/runtime-host/index.ts'
 import type { GuardianClient } from '../../packages/runtime-guardian/client.ts'
+import type { DesktopStartupContext, RuntimeStatus } from './contracts.ts'
 import {
   parseWorkRecoveryContext,
   serializeWorkRecoveryContext,
@@ -20,6 +21,10 @@ import {
 
 interface StatusWindowOptions {
   readonly accepting?: () => boolean
+  readonly startup?: {
+    snapshot(): DesktopStartupContext
+    select(profileId: string | null): Promise<RuntimeStatus>
+  }
 }
 
 const root = path.dirname(fileURLToPath(import.meta.url))
@@ -33,7 +38,7 @@ export function registerDesktopScheme(): void {
 
 export async function createDesktopWindow(
   host: StatusHost & Pick<GuardianClient, 'subscribeSurface'>,
-  { accepting = () => true }: StatusWindowOptions = {},
+  { accepting = () => true, startup }: StatusWindowOptions = {},
 ): Promise<BrowserWindow> {
   const isolated = session.fromPartition('dsh-work-shell')
   isolated.setPermissionRequestHandler((_contents, _permission, done) => done(false))
@@ -156,7 +161,7 @@ export async function createDesktopWindow(
     if (!isAllowedDesktopNavigation(details.url, surfaceOrigin)) details.preventDefault()
   })
   contents.on('will-attach-webview', event => event.preventDefault())
-  const dispose = bindStatusBridge({ ipcMain, window, host, accepting })
+  const dispose = bindStatusBridge({ ipcMain, window, host, accepting, ...(startup ? { startup } : {}) })
   window.on('closed', () => {
     unsubscribeSurface()
     unsubscribeStatus()

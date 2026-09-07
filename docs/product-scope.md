@@ -38,6 +38,8 @@ The active product milestone is [familiar DSH conversations and file outcomes](a
 - Attach real files, review safe Markdown beside the conversation, revise in the original composer, and save independently of adoption.
 - Add immutable file versions, comparison, restore and per-version adoption in independently verified slices.
 - Keep existing lifecycle, authenticated surface handoff, plugin ownership and recovery guarantees while retaining old Work data.
+- Let existing Harness users explicitly reuse a compatible local data home through an owned shadow profile, while preserving the selected source Profile byte-for-byte and keeping the packaged runtime authoritative.
+- Keep active Agent work alive behind a native tray when its window closes, with isolated safe mode and explicit bounded quit.
 - Treat full migration, native Save As, platform packaging and additional document formats as separately verified follow-on work.
 
 ## Explicit non-goals

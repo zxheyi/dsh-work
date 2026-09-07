@@ -32,6 +32,7 @@ app.commandLine.appendSwitch('force-device-scale-factor', '1')
 
 let step = 'boot'
 let host: RuntimeHost | null = null
+const activity: boolean[] = []
 let window: BrowserWindow | null = null
 const diagnostics: string[] = []
 const writeReport = (status: 'pass' | 'fail', detail?: string): void => {
@@ -114,6 +115,7 @@ async function run(): Promise<void> {
       })
       return child
     } })
+    host.subscribeActivity(value => activity.push(value))
     assert.equal((await host.start()).state, 'ready')
     const authenticated = await Promise.race([
       announcedUrl,
@@ -384,6 +386,11 @@ async function run(): Promise<void> {
         value => value,
         'Running ordinary reply did not expose the native Stop action',
       )
+      await waitFor(
+        async () => host?.active() ?? false,
+        value => value,
+        'Harness did not publish active Agent state',
+      )
       fs.writeFileSync(path.join(output, 'generation.png'),
         (await window.webContents.capturePage()).toPNG())
       await js(`document.querySelector('button[aria-label="停止生成"]')?.click()`)
@@ -400,6 +407,12 @@ async function run(): Promise<void> {
         value => value,
         'Stopped reply did not return the composer to idle',
       )
+      await waitFor(
+        async () => host?.active() ?? true,
+        value => !value,
+        'Harness did not clear active Agent state',
+      )
+      assert.ok(activity.includes(true) && activity.at(-1) === false)
       assert.equal(await js<boolean>(`Boolean(document.querySelector('[data-work-legacy-surface]'))`), false)
       assert.doesNotMatch(await js<string>('document.body.innerText'), /Markdown 成果|确认完成|导出成果/u)
       assert.deepEqual(fs.readdirSync(path.join(home, 't03-chat-workspace')), [])

@@ -19,6 +19,8 @@ export const requiredFiles = [
   'docs/decisions/0004-crash-safe-runtime-ownership.md',
   'docs/decisions/0005-typescript-product-source.md',
   'docs/decisions/0006-work-as-product-owned-aggregate.md',
+  'docs/decisions/0016-familiar-desktop-startup.md',
+  'docs/acceptance/familiar-desktop-startup.md',
   'docs/upstream-compatibility.md',
   '.github/ISSUE_TEMPLATE/config.yml',
   '.github/ISSUE_TEMPLATE/feature_request.yml',
@@ -115,6 +117,8 @@ const linkedMarkdownFiles = [
   'docs/decisions/0004-crash-safe-runtime-ownership.md',
   'docs/decisions/0005-typescript-product-source.md',
   'docs/decisions/0006-work-as-product-owned-aggregate.md',
+  'docs/decisions/0016-familiar-desktop-startup.md',
+  'docs/acceptance/familiar-desktop-startup.md',
   'docs/upstream-compatibility.md',
   '.github/BRANCH_PROTECTION.md',
 ]
@@ -478,7 +482,7 @@ export function verifyContract(root) {
   for (const token of [
     'prepareProductProfile',
     "require.resolve('@deepseek-ai/dsh/package.json')",
-    "'--profile', 'dsh-work'",
+    "'--profile', profile",
     'shell: false',
     'DSH_TELEMETRY_DISABLED',
   ]) {

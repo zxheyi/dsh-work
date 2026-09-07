@@ -36,6 +36,8 @@ interface Fixture {
   readonly service: GuardianService
   readonly children: FakeRuntimeChild[]
   readonly homes: string[]
+  readonly modes: string[]
+  readonly healthy: string[]
   readonly message: (event: 'ready' | 'disposed', child?: FakeRuntimeChild) => void
 }
 
@@ -61,10 +63,13 @@ const fixture = (): Fixture => {
   const productRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-guardian-service-'))
   const children: FakeRuntimeChild[] = []
   const homes: string[] = []
+  const modes: string[] = []
+  const healthy: string[] = []
   let next = 0
   const store = createGenerationStore(productRoot, { id: () => `generation-${++next}` })
   const service = createGuardianService({ store,
-    prepare: home => { homes.push(home) },
+    prepare: (home, mode) => { homes.push(home); modes.push(mode) },
+    onReady: (_home, mode) => { healthy.push(mode) },
     launcher: home => () => {
       const child = new FakeRuntimeChild(home)
       children.push(child)
@@ -75,7 +80,7 @@ const fixture = (): Fixture => {
     assert.ok(child)
     child.emit('message', { protocol: 'dsh-work.lifecycle.v1', event })
   }
-  return { productRoot, store, service, children, homes, message }
+  return { productRoot, store, service, children, homes, modes, healthy, message }
 }
 
 test('a clean guardian stop is reusable across guardian processes', async () => {
@@ -127,6 +132,22 @@ test('guardian service forwards the validated surface outside its bounded status
   } finally { fs.rmSync(owned.productRoot, { recursive: true, force: true }) }
 })
 
+test('guardian service forwards bounded Agent activity outside its status snapshot', async () => {
+  const owned = fixture()
+  try {
+    const activity: boolean[] = []
+    owned.service.subscribeActivity(value => activity.push(value))
+    const starting = owned.service.start()
+    childAt(owned, 0).emit('message', { protocol: 'dsh-work.lifecycle.v1', event: 'activity', active: true })
+    assert.equal(owned.service.active(), true)
+    owned.message('ready'); await starting
+    const stop = owned.service.stop(); owned.message('disposed'); childAt(owned, 0).emit('close', 0, null); await stop
+    assert.equal(owned.service.active(), false)
+    assert.deepEqual(activity, [true, false])
+    await owned.service.dispose()
+  } finally { fs.rmSync(owned.productRoot, { recursive: true, force: true }) }
+})
+
 test('collision fails closed and explicit recovery starts a distinct generation', async () => {
   const owned = fixture()
   try {
@@ -158,6 +179,24 @@ test('runtime failure requires isolated recovery and never auto-restarts', async
     assert.notEqual(inspectedGeneration(owned.store), failedGeneration)
     assert.equal(owned.children.length, 2)
     const stop = owned.service.stop(); owned.message('disposed'); childAt(owned, 1).emit('close', 0, null); await stop
+    await owned.service.dispose()
+  } finally { fs.rmSync(owned.productRoot, { recursive: true, force: true }) }
+})
+
+test('safe mode always prepares a fresh isolated generation and checkpoints only after ready', async () => {
+  const owned = fixture()
+  try {
+    const stale = claimed(owned.store.claim())
+    const blocked = await owned.service.start()
+    assert.equal(blocked.canRecover, true)
+    const safe = owned.service.safeMode()
+    assert.deepEqual(owned.healthy, [])
+    owned.message('ready')
+    await safe
+    assert.deepEqual(owned.modes, ['safe'])
+    assert.deepEqual(owned.healthy, ['safe'])
+    assert.notEqual(inspectedGeneration(owned.store), stale.generation)
+    const stop = owned.service.stop(); owned.message('disposed'); childAt(owned, 0).emit('close', 0, null); await stop
     await owned.service.dispose()
   } finally { fs.rmSync(owned.productRoot, { recursive: true, force: true }) }
 })

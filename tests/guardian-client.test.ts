@@ -99,6 +99,25 @@ test('guardian client exposes validated surfaces only through its trusted callba
   unsubscribe()
 })
 
+test('guardian client exposes only exact boolean activity events', async () => {
+  const child = new FakeGuardianProcess()
+  const creating = createGuardianClient({ node: process.execPath, productRoot: os.tmpdir() }, {
+    probe: () => 'v24.11.1\n', spawnProcess: () => child as unknown as ChildProcess,
+  })
+  process.nextTick(() => child.emit('message', {
+    protocol: GUARDIAN_PROTOCOL, event: 'guardian-ready',
+    value: { state: 'stopped', code: null, canStart: true, canStop: false, canRecover: false },
+  }))
+  const client = await creating
+  const activity: boolean[] = []
+  client.subscribeActivity(value => activity.push(value))
+  child.emit('message', { protocol: GUARDIAN_PROTOCOL, event: 'activity', active: true })
+  child.emit('message', { protocol: GUARDIAN_PROTOCOL, event: 'activity', active: 'yes' })
+  child.emit('message', { protocol: GUARDIAN_PROTOCOL, event: 'activity', active: false, path: '/private' })
+  assert.equal(client.active(), true)
+  assert.deepEqual(activity, [true])
+})
+
 test('guardian readiness timeout disconnects the detached process for bounded cleanup', async () => {
   const child = new FakeGuardianProcess()
   let disconnects = 0

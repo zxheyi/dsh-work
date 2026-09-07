@@ -13,12 +13,21 @@
     <p class="eyebrow">DSH WORK</p>
     <h1>正在准备你的工作台</h1>
     <p class="intro">稍等片刻，我们会继续你最近的工作。</p>
+    <section id="onboarding" class="onboarding" aria-labelledby="onboarding-title" hidden>
+      <p class="choice-kicker">首次打开</p>
+      <h2 id="onboarding-title">继续使用已有 DSH 配置</h2>
+      <p class="choice-detail">可以沿用熟悉的登录状态、设置与工作记录；DSH Work 只会在自己的目录中组合运行。</p>
+      <label for="profile-choice">选择已有配置</label>
+      <select id="profile-choice"></select>
+      <p id="profile-warning" class="choice-warning">使用已有配置时，请先关闭其他正在运行的 DSH 应用。</p>
+      <div class="actions"><button id="use-local">继续并打开</button><button id="use-isolated" class="secondary">使用全新环境</button></div>
+    </section>
     <section class="runtime" aria-label="工作台状态">
       <div class="status-row"><span id="indicator" class="indicator"></span><h2 id="state" aria-live="polite">正在读取状态</h2></div>
       <p id="detail">正在连接桌面服务。</p>
       <p id="diagnostic" class="diagnostic" hidden></p>
       <p id="retained" class="retained" hidden>已保留当前会话中的未发送内容和文件选择，恢复后会回到原位置。</p>
-      <div class="actions"><button id="start" disabled>打开工作台</button><button id="recover" hidden disabled>安全恢复</button><button id="stop" class="secondary" disabled>取消</button></div>
+      <div class="actions"><button id="start" disabled>打开工作台</button><button id="recover" hidden disabled>重新准备</button><button id="safe-mode" class="secondary" hidden disabled>安全模式</button><button id="stop" class="secondary" disabled>取消</button></div>
     </section>
   </main>
   <footer>已有工作会自动保留</footer>
