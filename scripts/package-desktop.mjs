@@ -41,7 +41,7 @@ export async function packageDesktop({ signed = false } = {}) {
   fs.copyFileSync(path.join(root, 'runtime/baseline.json'), path.join(stage, 'runtime/baseline.json'))
   fs.writeFileSync(path.join(stage, 'package.json'), JSON.stringify({
     name: manifest.name, version: manifest.version, private: true, type: 'module',
-    main: 'dist/apps/desktop/main.js', dependencies: manifest.dependencies,
+    main: 'dist/apps/desktop/main.js', author: 'DSH Work contributors', dependencies: manifest.dependencies,
   }, null, 2))
   fs.rmSync(path.join(stage, 'pnpm-lock.yaml'))
   const resources = path.join(output, 'resources')
