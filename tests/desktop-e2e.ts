@@ -14,6 +14,7 @@ fs.mkdirSync(output, { recursive: true })
 const reportPath = path.join(output, 'result.json')
 let phase = 'boot'
 let nativeSurfaceProbe: Record<string, unknown> | null = null
+const clientDiagnostics: string[] = []
 const write = (status: 'pass' | 'fail', extra: Record<string, unknown> = {}): void => fs.writeFileSync(reportPath, JSON.stringify({ status, phase,
   runId: process.env.DSH_WORK_E2E_RUN_ID,
   platform: process.platform, arch: process.arch, electron: process.versions.electron, ...extra }, null, 2))
@@ -33,6 +34,28 @@ async function run(): Promise<void> {
 try {
   const active = await desktop
   host = active.host
+  active.window.webContents.on('console-message', event => {
+    if (clientDiagnostics.length >= 20) return
+    const categories = [
+      [/ChunkLoadError|Loading chunk/iu, 'chunk-load'],
+      [/SyntaxError/iu, 'syntax-error'],
+      [/ReferenceError/iu, 'reference-error'],
+      [/TypeError/iu, 'type-error'],
+      [/Failed to fetch|ERR_[A-Z_]+/u, 'network-error'],
+      [/module|import/iu, 'module-error'],
+      [/React/iu, 'react-error'],
+      [/WebSocket/iu, 'websocket-error'],
+      [/Content Security Policy/iu, 'content-security-policy'],
+      [/cordis/iu, 'cordis-error'],
+      [/Uncaught/iu, 'uncaught'],
+    ] as const
+    const category = categories.find(([pattern]) => pattern.test(event.message))?.[1] ?? 'other'
+    clientDiagnostics.push(`console:${event.level}:${category}`)
+  })
+  active.window.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _url, isMainFrame) => {
+    if (clientDiagnostics.length >= 20) return
+    clientDiagnostics.push(`load:${String(errorCode)}:${isMainFrame ? 'main' : 'sub'}`)
+  })
   const js = <T = unknown>(source: string): Promise<T> => active.window.webContents.executeJavaScript(source) as Promise<T>
   const waitState = async (state: string): Promise<void> => {
     const deadline = Date.now() + 35_000
@@ -54,6 +77,10 @@ try {
           sidebar: boolean
           conversation: boolean
           dialog: boolean
+          readyState: string
+          root: boolean
+          rootChildren: number
+          scripts: number
         }>(`(() => {
           for (const label of ['继续', 'Continue', '稍后配置', 'Configure later']) {
             const button = Array.from(document.querySelectorAll('button'))
@@ -73,6 +100,10 @@ try {
             sidebar: Boolean(document.querySelector('[data-slot="sidebar"]')),
             conversation: Boolean(document.querySelector('[data-slot="conversation"]')),
             dialog: Boolean(document.querySelector('[role="dialog"]')),
+            readyState: document.readyState,
+            root: Boolean(document.getElementById('root')),
+            rootChildren: document.getElementById('root')?.childElementCount ?? -1,
+            scripts: document.scripts.length,
           }
         })()`)
         const url = active.window.webContents.getURL()
@@ -93,6 +124,10 @@ try {
           sidebar: value.sidebar,
           conversation: value.conversation,
           dialog: value.dialog,
+          readyState: value.readyState,
+          root: value.root,
+          rootChildren: value.rootChildren,
+          scripts: value.scripts,
           hostState: active.host.snapshot().state,
         }
         if (value.ready) return { text: value.text, url }
@@ -169,6 +204,7 @@ try {
   write('fail', {
     failure: error instanceof Error ? error.name : 'UnknownFailure',
     nativeSurfaceProbe,
+    clientDiagnostics,
   })
   if (host) await host.stop()
   app.exit(1)
