@@ -69,6 +69,7 @@ test('status bridge admits only the exact local main frame and zero-argument met
 test('custom protocol exposes only fixed local assets, never arbitrary paths', () => {
   assert.equal(resourceForRequest(STATUS_URL, 'GET'), 'index.html')
   assert.equal(resourceForRequest('dsh-work://status/renderer.js', 'GET'), 'renderer.js')
+  assert.equal(resourceForRequest('dsh-work://status/startup-presentation.js', 'GET'), 'startup-presentation.js')
   assert.equal(resourceForRequest('dsh-work://status/deepseek-whale.svg', 'GET'), 'deepseek-whale.svg')
   for (const url of ['file:///etc/passwd', 'dsh-work://other/index.html',
     'dsh-work://status/index.html?secret=1', 'dsh-work://status/../package.json',

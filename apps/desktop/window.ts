@@ -51,6 +51,7 @@ export async function createDesktopWindow(
     const types: Record<DesktopAsset, string> = {
       'index.html': 'text/html',
       'renderer.js': 'text/javascript',
+      'startup-presentation.js': 'text/javascript',
       'style.css': 'text/css',
       'deepseek-whale.svg': 'image/svg+xml',
     }

@@ -17,6 +17,7 @@ fs.mkdirSync(output, { recursive: true })
 const reportPath = path.join(output, 'result.json')
 let phase = 'boot'
 let nativeSurfaceProbe: Record<string, unknown> | null = null
+let presentationProbe: Record<string, unknown> | null = null
 const clientDiagnostics: string[] = []
 const write = (status: 'pass' | 'fail', extra: Record<string, unknown> = {}): void => fs.writeFileSync(reportPath, JSON.stringify({ status, phase,
   runId: process.env.DSH_WORK_E2E_RUN_ID,
@@ -155,6 +156,10 @@ try {
   if (missing) {
     phase = 'automatic-start-failure'
     await waitState('failed')
+    phase = 'recovery-presentation'
+    assert.equal(await js("document.body.dataset.scene"), 'recovery')
+    assert.equal(await js("document.querySelector('.failure-detail')?.getAttribute('aria-hidden')"), null)
+    assert.equal(await js("document.querySelector('.runtime-whale')?.complete && document.querySelector('.runtime-whale')?.naturalWidth > 0"), true)
     phase = 'bridge-key-list'
     assert.equal(await js('JSON.stringify(Object.keys(window.dshWork).sort())'), JSON.stringify(['hasRetainedContext', 'recover', 'safeMode', 'selectProfile', 'snapshot', 'start', 'startup', 'stop', 'subscribe']))
     phase = 'renderer-globals'
@@ -174,11 +179,35 @@ try {
         homeLabel: string
         profiles: Array<{ id: string; name: string }>
       }>('window.dshWork.startup()')
+      phase = 'local-profile-choice-required'
       assert.equal(context.choiceRequired, true)
+      phase = 'local-profile-home-label'
       assert.equal(context.homeLabel, '$DSH_HOME')
+      phase = 'local-profile-list'
       assert.deepEqual(context.profiles.map(item => item.name), ['web'])
+      phase = 'local-profile-host-stopped'
       assert.equal(active.host.snapshot().state, 'stopped')
+      phase = 'local-profile-onboarding-visible'
+      {
+        const deadline = Date.now() + 5_000
+        while (await js("document.getElementById('onboarding').hidden") && Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 25))
+        }
+      }
+      presentationProbe = await js(`({
+        scene: document.body.dataset.scene,
+        state: document.body.dataset.state,
+        onboardingHidden: document.getElementById('onboarding')?.hidden,
+        profileCards: document.querySelectorAll('#profile-options .profile-card').length,
+        useLocalDisabled: document.getElementById('use-local')?.disabled,
+      })`)
       assert.equal(await js("document.getElementById('onboarding').hidden"), false)
+      phase = 'profile-presentation'
+      assert.equal(await js('document.body.dataset.scene'), 'profile')
+      assert.equal(await js("document.querySelectorAll('#profile-options .profile-card').length"), 1)
+      assert.equal(await js("document.querySelector('.launch-brand') !== null"), true)
+      assert.equal(await js("document.getElementById('onboarding-title').textContent"), '选择这次使用的工作环境')
+      assert.equal(await js("getComputedStyle(document.getElementById('runtime')).display"), 'none')
       assert.doesNotMatch(await js<string>('document.body.innerText'), new RegExp(ownedUserData.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'))
       await screenshot('onboarding.png')
       phase = 'local-profile-selected'
@@ -198,6 +227,10 @@ try {
     phase = 'native-renderer-bridge'
     assert.equal(await js('typeof window.dshWork'), 'undefined')
     phase = 'native-brand-copy'; assert.equal(nativeCopy.brand, true)
+    phase = 'native-brand-mark'
+    assert.equal(await js("document.querySelector('[data-dsh-work-brand=\"mark\"]')?.textContent"), 'DW')
+    phase = 'native-hero-whale'
+    assert.equal(await js("document.querySelector('svg[width=\"34\"][aria-hidden=\"true\"] path[fill=\"currentColor\"]') !== null"), true)
     phase = 'native-new-session-copy'; assert.equal(nativeCopy.newSession, true)
     phase = 'native-settings-copy'; assert.equal(nativeCopy.settings, true)
     phase = 'native-legacy-copy-absent'
@@ -244,6 +277,7 @@ try {
   write('fail', {
     failure: error instanceof Error ? error.name : 'UnknownFailure',
     nativeSurfaceProbe,
+    presentationProbe,
     clientDiagnostics,
   })
   if (host) await host.stop()

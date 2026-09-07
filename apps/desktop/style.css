@@ -44,6 +44,7 @@ body[data-scene="profile"] .step-choice,body[data-scene="preparing"] .step-prepa
 body[data-scene="profile"] .step-choice b,body[data-scene="preparing"] .step-prepare b,body[data-scene="recovery"] .step-prepare b,body[data-scene="stopped"] .step-prepare b { border-color: var(--blue); background: var(--blue); color: #fff; }
 body:not([data-scene="profile"]) .step-choice { color: var(--green); }
 body:not([data-scene="profile"]) .step-choice b { border-color: var(--green); background: #e9f6f2; }
+body[data-scene="profile"] .runtime { display: none; }
 h2 { margin: 0; color: var(--text); font-size: 28px; line-height: 1.28; letter-spacing: -.025em; font-weight: 640; }
 .intro { margin: 11px 0 26px; color: var(--muted); font-size: 14px; line-height: 1.65; }
 .profile-options { display: grid; gap: 11px; }
