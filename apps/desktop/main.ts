@@ -1,4 +1,4 @@
-import { app, nativeImage, Tray, type BrowserWindow } from 'electron'
+import { app, Menu, nativeImage, Tray, type BrowserWindow, type MenuItemConstructorOptions } from 'electron'
 
 import { createGuardianClient, type GuardianClient } from '../../packages/runtime-guardian/client.ts'
 import { createUnavailableGuardianClient } from '../../packages/runtime-guardian/unavailable-client.ts'
@@ -11,6 +11,7 @@ import {
 import type { DesktopStartupContext } from './contracts.ts'
 import { windowCloseAction } from './close-policy.ts'
 import { resolveDesktopNodePath } from './runtime-paths.ts'
+import { createDesktopTray, type DesktopTrayController } from './tray.ts'
 import { createDesktopWindow, registerDesktopScheme } from './window.ts'
 
 registerDesktopScheme()
@@ -31,7 +32,7 @@ interface SecondaryDesktopSession {
 let session: DesktopSession | undefined
 let quitting = false
 let allowQuit = false
-let tray: Tray | undefined
+let tray: DesktopTrayController | undefined
 
 const revealWindow = (): void => {
   const window = session?.window
@@ -50,7 +51,7 @@ const shutdown = async (): Promise<void> => {
   // IPC disconnect transfers the remaining bounded cleanup to the external
   // guardian, so Electron may exit even if its short acknowledgement wait ends.
   try { await session?.host.dispose() } catch {}
-  tray?.destroy()
+  tray?.dispose()
   tray = undefined
   allowQuit = true
   app.quit()
@@ -129,9 +130,13 @@ const createDesktopSession = async (): Promise<DesktopSession> => {
     const icon = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(
       '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" rx="9" fill="#315cf4"/><path d="M8 9l4 14 4-9 4 9 4-14" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     ).toString('base64')}`)
-    tray = new Tray(icon.resize({ width: 18, height: 18 }))
-    tray.setToolTip('DSH Work')
-    tray.on('click', revealWindow)
+    tray = createDesktopTray({
+      tray: new Tray(icon.resize({ width: 18, height: 18 })),
+      window,
+      host,
+      buildMenu: entries => Menu.buildFromTemplate(entries.map(entry => ({ ...entry })) as MenuItemConstructorOptions[]),
+      quit: () => { void shutdown() },
+    })
     window.on('close', event => {
       if (windowCloseAction(allowQuit, host.active()) === 'hide') {
         event.preventDefault()
