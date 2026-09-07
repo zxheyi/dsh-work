@@ -31,3 +31,5 @@ The build requires signing and notarization, then verifies codesign, the stapled
 ## Remaining release gates
 
 The project MIT license and generated production dependency inventory are included. Real F13 observations and complete native-library distribution materials remain required before public release. The current [license inventory](../third-party/README.md) identifies those materials, and `pnpm notices:verify-release` rejects unresolved gaps. Packaging evidence does not replace those checks. See [ADR 0017](decisions/0017-standalone-desktop-packaging.md).
+
+Release follow-ups: [Developer ID and real notarization #37](https://github.com/zxheyi/dsh-work/issues/37), [F13 human observation #36](https://github.com/zxheyi/dsh-work/issues/36), and [native distribution materials #38](https://github.com/zxheyi/dsh-work/issues/38).

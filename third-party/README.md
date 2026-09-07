@@ -12,7 +12,7 @@ For an existing staged package, run `pnpm notices:generate`. The generated table
 
 ## Current native distribution gap
 
-The macOS arm64 staged inventory contains 505 packages. Every package has license metadata and shipped or verified supplemental notice evidence. The sharp/libvips binary includes additional native libraries: its exact component versions and upstream license table are retained in the inventory. Full native component license texts and corresponding-source/relinking distribution still need completion before public redistribution. This is one explicit material blocker, not a completed license audit.
+The macOS arm64 staged inventory contains 505 packages. Every package has license metadata and shipped or verified supplemental notice evidence. The sharp/libvips binary includes additional native libraries: its exact component versions and upstream license table are retained in the inventory. Full native component license texts and corresponding-source/relinking distribution still need completion before public redistribution. This is one explicit material blocker, tracked in [Issue #38](https://github.com/zxheyi/dsh-work/issues/38), not a completed license audit.
 
 `pnpm notices:verify-release` rejects that blocker. Signed packaging also rejects incomplete distribution materials. Unsigned internal-test builds remain available for verification; they are not public releases. Do not remove the blocker merely because the npm wrapper declares LGPL or because its README lists library names. Record actual native materials before clearing it.
 
