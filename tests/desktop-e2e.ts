@@ -55,7 +55,7 @@ try {
           conversation: boolean
           dialog: boolean
         }>(`(() => {
-          for (const label of ['继续', '稍后配置']) {
+          for (const label of ['继续', 'Continue', '稍后配置', 'Configure later']) {
             const button = Array.from(document.querySelectorAll('button'))
               .find(item => item.textContent?.trim() === label)
             if (button instanceof HTMLButtonElement) button.click()
