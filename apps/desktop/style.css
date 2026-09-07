@@ -9,6 +9,14 @@ main { width: min(620px, calc(100% - 48px)); margin: 0 auto; padding: 13vh 0 24p
 h1 { font-size: 30px; font-weight: 650; letter-spacing: -.7px; margin: 0 0 12px; }
 .intro { color: #697386; font-size: 14px; line-height: 1.7; margin: 0 0 28px; }
 .runtime { background: #fff; border: 1px solid #dde1e7; border-radius: 14px; padding: 25px 27px; box-shadow: 0 12px 32px rgba(35, 50, 76, .08); }
+.onboarding { background: #fff; border: 1px solid #cfd7f1; border-radius: 14px; padding: 25px 27px; margin: 0 0 16px; box-shadow: 0 12px 32px rgba(35, 50, 76, .08); }
+.onboarding + .runtime { display: none; }
+.choice-kicker { color: #315cf4; font-size: 11px; font-weight: 700; margin: 0 0 10px; }
+.choice-detail, .choice-warning { color: #697386; font-size: 13px; line-height: 1.7; }
+.choice-detail { margin: 10px 0 20px; }
+.choice-warning { margin: 10px 0 20px; }
+label { display: block; color: #43506a; font-size: 12px; font-weight: 600; margin: 0 0 7px; }
+select { width: 100%; border: 1px solid #cbd2de; border-radius: 9px; background: #fff; color: #17202e; padding: 10px 12px; font: inherit; font-size: 13px; }
 .status-row { display: flex; align-items: center; gap: 10px; }
 .indicator { width: 10px; height: 10px; border-radius: 100%; background: #8a93a2; }
 .indicator[data-state="ready"] { background: #25845b; box-shadow: 0 0 0 4px #e9f4ee; }

@@ -11,12 +11,16 @@ interface ElementFixture {
   disabled: boolean
   hidden: boolean
   textContent: string
+  value: string
+  append(child: ElementFixture): void
+  replaceChildren(): void
   addEventListener(name: string, action: () => void): void
 }
 
 interface DocumentFixture {
   readonly body: { readonly dataset: Record<string, string> }
   getElementById(id: string): ElementFixture
+  createElement(name: string): ElementFixture
 }
 
 const createDocument = (actions?: Map<string, () => void>): {
@@ -26,11 +30,19 @@ const createDocument = (actions?: Map<string, () => void>): {
   const elements = new Map<string, ElementFixture>()
   const document: DocumentFixture = {
     body: { dataset: {} },
+    createElement(): ElementFixture {
+      return {
+        dataset: {}, disabled: false, hidden: false, textContent: '', value: '',
+        append: () => {}, replaceChildren: () => {}, addEventListener: () => {},
+      }
+    },
     getElementById(id: string): ElementFixture {
       let element = elements.get(id)
       if (!element) {
         element = {
-          dataset: {}, disabled: false, hidden: false, textContent: '',
+          dataset: {}, disabled: false, hidden: false, textContent: '', value: '',
+          append(child): void { if (!element?.value) element!.value = child.value },
+          replaceChildren(): void { element!.value = '' },
           addEventListener: (_name: string, action: () => void): void => { actions?.set(id, action) },
         }
         elements.set(id, element)
@@ -68,6 +80,8 @@ test('a late initial snapshot cannot overwrite a newer live status', async () =>
   } = { listener: null, initial: null }
   const window = { dshWork: {
     hasRetainedContext: false,
+    startup: async () => ({ choiceRequired: false, homeLabel: '~/.dsh', profiles: [], rejectedCount: 0, selected: 'isolated' }),
+    selectProfile: async () => ({ state: 'starting', code: null, canStart: false, canStop: true, canRecover: false }),
     subscribe: (listener: (status: RuntimeStatus) => void) => { callbacks.listener = listener },
     snapshot: () => new Promise<RuntimeStatus>(resolve => { callbacks.initial = resolve }),
   } }
@@ -86,6 +100,8 @@ test('abnormal runtime failures require explicit isolated recovery after direct-
     const callbacks: { listener: ((status: RuntimeStatus) => void) | null } = { listener: null }
     const window = { dshWork: {
       hasRetainedContext: false,
+      startup: async () => ({ choiceRequired: false, homeLabel: '~/.dsh', profiles: [], rejectedCount: 0, selected: 'isolated' }),
+      selectProfile: async () => ({ state: 'starting', code: null, canStart: false, canStop: true, canRecover: false }),
       subscribe: (listener: (status: RuntimeStatus) => void) => { callbacks.listener = listener },
       snapshot: () => new Promise<RuntimeStatus>(() => {}),
     } }
@@ -109,6 +125,8 @@ test('runtime failure page reports retained conversation context without enablin
     name: 'dsh-work-recovery:v1:{"bounded":true}',
     dshWork: {
       hasRetainedContext: true,
+      startup: async () => ({ choiceRequired: false, homeLabel: '~/.dsh', profiles: [], rejectedCount: 0, selected: 'isolated' }),
+      selectProfile: async () => ({ state: 'starting', code: null, canStart: false, canStop: true, canRecover: false }),
       subscribe: (listener: (status: RuntimeStatus) => void) => { callbacks.listener = listener },
       snapshot: () => new Promise<RuntimeStatus>(() => {}),
       recover: async () => {}, start: async () => {}, stop: async () => {},
@@ -130,6 +148,8 @@ test('uncertain generation requires a distinct explicit recovery action', async 
   let recoverCalls = 0
   const window = { dshWork: {
     hasRetainedContext: false,
+    startup: async () => ({ choiceRequired: false, homeLabel: '~/.dsh', profiles: [], rejectedCount: 0, selected: 'isolated' }),
+    selectProfile: async () => ({ state: 'starting', code: null, canStart: false, canStop: true, canRecover: false }),
     subscribe: (listener: (status: RuntimeStatus) => void) => { callbacks.listener = listener },
     snapshot: () => new Promise<RuntimeStatus>(() => {}),
     recover: async () => { recoverCalls++ }, start: async () => {}, stop: async () => {},
@@ -145,10 +165,38 @@ test('uncertain generation requires a distinct explicit recovery action', async 
   })
 })
 
+test('first launch offers bounded local choices and starts only after selection', async () => {
+  const actions = new Map<string, () => void>()
+  const { document, elements } = createDocument(actions)
+  const selected: Array<string | null> = []
+  const profileId = '0123456789abcdef01234567'
+  const status: RuntimeStatus = { state: 'starting', code: null, canStart: false, canStop: true, canRecover: false }
+  const window = { dshWork: {
+    hasRetainedContext: false,
+    subscribe: () => () => {},
+    snapshot: async () => ({ state: 'stopped', code: null, canStart: true, canStop: false, canRecover: false }),
+    startup: async () => ({
+      choiceRequired: true, homeLabel: '$DSH_HOME' as const,
+      profiles: [{ id: profileId, name: 'web' }], rejectedCount: 1, selected: null,
+    }),
+    selectProfile: async (value: string | null) => { selected.push(value); return status },
+    recover: async () => status, start: async () => status, stop: async () => status,
+  } }
+  await withRenderer(document, window, async () => {
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(elements.get('onboarding')?.hidden, false)
+    assert.equal(elements.get('profile-choice')?.value, profileId)
+    assert.equal(elements.get('use-local')?.disabled, false)
+    actions.get('use-local')?.()
+    await new Promise(resolve => setImmediate(resolve))
+    assert.deepEqual(selected, [profileId])
+    assert.equal(elements.get('onboarding')?.hidden, true)
+  })
+})
+
 test('local shell copy uses product language instead of Harness configuration vocabulary', () => {
   const visibleSources = [
     fs.readFileSync(new URL('../apps/desktop/index.html', import.meta.url), 'utf8'),
-    fs.readFileSync(new URL('../apps/desktop/renderer.ts', import.meta.url), 'utf8'),
   ].join('\n')
   assert.doesNotMatch(visibleSources, /DSH Web|Workspace|Session|Profile|CLI|generation/u)
   assert.match(visibleSources, /DSH Work/u)

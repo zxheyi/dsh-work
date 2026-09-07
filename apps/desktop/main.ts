@@ -2,6 +2,13 @@ import { app, type BrowserWindow } from 'electron'
 
 import { createGuardianClient, type GuardianClient } from '../../packages/runtime-guardian/client.ts'
 import { createUnavailableGuardianClient } from '../../packages/runtime-guardian/unavailable-client.ts'
+import { discoverLocalProfiles, publicProfileCatalog } from '../../packages/runtime-profile/discovery.ts'
+import {
+  readStartupSelection,
+  writeStartupSelection,
+  type StartupSelection,
+} from '../../packages/runtime-profile/preferences.ts'
+import type { DesktopStartupContext } from './contracts.ts'
 import { resolveDesktopNodePath } from './runtime-paths.ts'
 import { createDesktopWindow, registerDesktopScheme } from './window.ts'
 
@@ -48,6 +55,18 @@ const primary = app.requestSingleInstanceLock()
 if (!primary) app.quit()
 
 const createDesktopSession = async (): Promise<DesktopSession> => {
+  const productRoot = app.getPath('userData')
+  const catalog = discoverLocalProfiles({ environment: process.env, userHome: app.getPath('home') })
+  const publicCatalog = publicProfileCatalog(catalog)
+  const persisted = readStartupSelection(productRoot)
+  let selection: StartupSelection | null = persisted?.kind === 'shared'
+    && !catalog.profiles.some(profile => profile.id === persisted.profileId
+      && profile.name === persisted.profileName && profile.homePath === persisted.homePath)
+    ? null : persisted
+  if (!selection && catalog.profiles.length === 0) {
+    selection = Object.freeze({ kind: 'isolated' })
+    writeStartupSelection(productRoot, selection)
+  }
   let host: GuardianClient
   try {
     host = await createGuardianClient({
@@ -57,13 +76,40 @@ const createDesktopSession = async (): Promise<DesktopSession> => {
         platform: process.platform,
         environment: process.env,
       }),
-      productRoot: app.getPath('userData'),
+      productRoot,
     })
   } catch {
     host = createUnavailableGuardianClient()
   }
   try {
-    const window = await createDesktopWindow(host, { accepting: () => !quitting })
+    const startup = {
+      snapshot(): DesktopStartupContext {
+        return Object.freeze({
+          ...publicCatalog,
+          choiceRequired: selection === null,
+          selected: selection?.kind === 'shared' ? selection.profileId : selection?.kind ?? null,
+        })
+      },
+      async select(profileId: string | null) {
+        if (selection || host.snapshot().state !== 'stopped') throw new Error('Startup choice unavailable')
+        const next: StartupSelection = profileId === null
+          ? Object.freeze({ kind: 'isolated' })
+          : (() => {
+            const profile = catalog.profiles.find(candidate => candidate.id === profileId)
+            if (!profile) throw new Error('Startup choice unavailable')
+            return Object.freeze({
+              kind: 'shared' as const,
+              profileId: profile.id,
+              profileName: profile.name,
+              homePath: profile.homePath,
+            })
+          })()
+        writeStartupSelection(productRoot, next)
+        selection = next
+        return host.start()
+      },
+    }
+    const window = await createDesktopWindow(host, { accepting: () => !quitting, startup })
     const active = Object.freeze({ host, window })
     session = active
     window.on('close', event => {
@@ -74,7 +120,7 @@ const createDesktopSession = async (): Promise<DesktopSession> => {
     })
     window.webContents.on('render-process-gone', () => { void shutdown() })
     setImmediate(() => {
-      if (!quitting) void host.start().catch(() => {})
+      if (!quitting && !startup.snapshot().choiceRequired) void host.start().catch(() => {})
     })
     return active
   } catch (error: unknown) {

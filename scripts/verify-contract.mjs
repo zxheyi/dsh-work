@@ -482,7 +482,7 @@ export function verifyContract(root) {
   for (const token of [
     'prepareProductProfile',
     "require.resolve('@deepseek-ai/dsh/package.json')",
-    "'--profile', 'dsh-work'",
+    "'--profile', profile",
     'shell: false',
     'DSH_TELEMETRY_DISABLED',
   ]) {

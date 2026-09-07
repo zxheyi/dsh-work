@@ -26,6 +26,7 @@ for (const mode of selected) {
   const child = spawn(executable, args, {
     shell: false, env: { ...process.env, DSH_WORK_E2E_RUN_ID: runId,
       DSH_WORK_ELECTRON: electron, DSH_WORK_E2E_USER_DATA: userData,
+      DSH_HOME: path.join(userData, 'no-local-dsh'),
       ELECTRON_ENABLE_SECURITY_WARNINGS: '1' }, stdio: 'ignore',
   })
   const exit = await new Promise(resolve => {

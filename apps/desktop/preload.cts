@@ -1,6 +1,7 @@
 import electron = require('electron')
 
 type RuntimeStatus = import('./contracts.ts').RuntimeStatus
+type DesktopStartupContext = import('./contracts.ts').DesktopStartupContext
 
 const { contextBridge, ipcRenderer } = electron
 const MAX_RECOVERY_CONTEXT_BYTES = 64 * 1024
@@ -17,6 +18,13 @@ if (globalThis.location.href === 'dsh-work://status/index.html') contextBridge.e
   stop: (): Promise<RuntimeStatus> => ipcRenderer.invoke('dsh-work:stop'),
   recover: (): Promise<RuntimeStatus> => ipcRenderer.invoke('dsh-work:recover'),
   snapshot: (): Promise<RuntimeStatus> => ipcRenderer.invoke('dsh-work:snapshot'),
+  startup: (): Promise<DesktopStartupContext> => ipcRenderer.invoke('dsh-work:startup'),
+  selectProfile: (profileId: string | null): Promise<RuntimeStatus> => {
+    if (profileId !== null && (typeof profileId !== 'string' || !/^[a-f0-9]{24}$/u.test(profileId))) {
+      return Promise.reject(new TypeError('invalid profile choice'))
+    }
+    return ipcRenderer.invoke('dsh-work:select-profile', profileId)
+  },
   subscribe: (listener: (status: RuntimeStatus) => void): (() => void) => {
     if (typeof listener !== 'function') throw new TypeError('listener required')
     const receive = (_event: Electron.IpcRendererEvent, status: RuntimeStatus): void => listener(status)

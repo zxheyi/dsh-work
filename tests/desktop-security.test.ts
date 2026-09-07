@@ -36,6 +36,10 @@ test('status bridge admits only the exact local main frame and zero-argument met
     ipcMain: ipcMain as unknown as IpcMain,
     window: window as unknown as BrowserWindow,
     host,
+    startup: {
+      snapshot: () => ({ choiceRequired: false, homeLabel: '~/.dsh', profiles: [], rejectedCount: 0, selected: 'isolated' }),
+      select: async () => value,
+    },
   })
   const event = { sender: contents, senderFrame: mainFrame }
   const invoke = async (channel: string, candidate: unknown, ...args: unknown[]): Promise<unknown> => {
@@ -45,6 +49,9 @@ test('status bridge admits only the exact local main frame and zero-argument met
   }
   assert.deepEqual(await invoke('dsh-work:start', event), value)
   assert.deepEqual(await invoke('dsh-work:recover', event), value)
+  assert.equal((await invoke('dsh-work:startup', event) as { selected: string }).selected, 'isolated')
+  assert.deepEqual(await invoke('dsh-work:select-profile', event, null), value)
+  await assert.rejects(() => invoke('dsh-work:select-profile', event, '../web'), /denied/)
   for (const invalid of [
     { ...event, sender: {} }, { ...event, senderFrame: { url: STATUS_URL } },
     { ...event, senderFrame: null },
@@ -53,7 +60,7 @@ test('status bridge admits only the exact local main frame and zero-argument met
   mainFrame.url = 'https://example.com/'
   await assert.rejects(() => invoke('dsh-work:start', event), /denied/)
   assert.deepEqual(calls, ['start', 'recover'])
-  assert.deepEqual([...handlers.keys()].sort(), ['dsh-work:recover', 'dsh-work:snapshot', 'dsh-work:start', 'dsh-work:stop'])
+  assert.deepEqual([...handlers.keys()].sort(), ['dsh-work:recover', 'dsh-work:select-profile', 'dsh-work:snapshot', 'dsh-work:start', 'dsh-work:startup', 'dsh-work:stop'])
   dispose(); assert.equal(handlers.size, 0)
 })
 

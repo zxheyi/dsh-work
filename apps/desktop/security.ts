@@ -1,6 +1,7 @@
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 
 import { RUNTIME_COMMANDS, type RuntimeControl } from '../../packages/runtime-contract/index.ts'
+import type { DesktopStartupContext, RuntimeStatus } from './contracts.ts'
 
 export const STATUS_URL = 'dsh-work://status/index.html'
 export const DESKTOP_ASSETS = ['index.html', 'renderer.js', 'style.css'] as const
@@ -27,6 +28,10 @@ interface StatusBridgeOptions {
   readonly window: BrowserWindow
   readonly host: StatusHost
   readonly accepting?: () => boolean
+  readonly startup?: {
+    snapshot(): DesktopStartupContext
+    select(profileId: string | null): Promise<RuntimeStatus>
+  }
 }
 
 export function resourceForRequest(url: string, method: string): DesktopAsset | null {
@@ -42,6 +47,7 @@ export function bindStatusBridge({
   window,
   host,
   accepting = () => true,
+  startup,
 }: StatusBridgeOptions): () => void {
   const contents = window.webContents
   const trusted = (event: IpcMainInvokeEvent): boolean =>
@@ -50,10 +56,22 @@ export function bindStatusBridge({
     contents.getURL() === STATUS_URL
   for (const command of RUNTIME_COMMANDS) {
     ipcMain.handle(`dsh-work:${command}`, (event, ...args) => {
-      if (!trusted(event) || args.length || !accepting()) throw new Error('Request denied')
+      if (!trusted(event) || args.length || !accepting()
+        || (command === 'start' && startup?.snapshot().choiceRequired)) throw new Error('Request denied')
       return host[command]()
     })
   }
+  ipcMain.handle('dsh-work:startup', (event, ...args) => {
+    if (!trusted(event) || args.length || !accepting() || !startup) throw new Error('Request denied')
+    return startup.snapshot()
+  })
+  ipcMain.handle('dsh-work:select-profile', (event, profileId: unknown, ...args) => {
+    if (!trusted(event) || args.length || !accepting() || !startup
+      || (profileId !== null && (typeof profileId !== 'string' || !/^[a-f0-9]{24}$/u.test(profileId)))) {
+      throw new Error('Request denied')
+    }
+    return startup.select(profileId)
+  })
   const unsubscribe = host.subscribe(value => {
     if (!contents.isDestroyed() && contents.getURL() === STATUS_URL) {
       contents.send('dsh-work:status', value)
@@ -62,5 +80,7 @@ export function bindStatusBridge({
   return () => {
     unsubscribe()
     for (const command of RUNTIME_COMMANDS) ipcMain.removeHandler(`dsh-work:${command}`)
+    ipcMain.removeHandler('dsh-work:startup')
+    ipcMain.removeHandler('dsh-work:select-profile')
   }
 }
