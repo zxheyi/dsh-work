@@ -22,6 +22,8 @@ interface LauncherPaths {
   readonly node: string
   readonly home: string
   readonly port?: number
+  readonly profile?: string
+  readonly patches?: readonly string[]
 }
 
 interface LauncherDependencies {
@@ -122,7 +124,7 @@ export function prepareProductProfile(home: string): void {
 export const prepareDevelopmentProfile = prepareProductProfile
 
 export function createOfficialLauncher(
-  { node, home, port = 0 }: LauncherPaths,
+  { node, home, port = 0, profile = 'dsh-work', patches = [] }: LauncherPaths,
   { spawnProcess = spawnRuntime, probe = probeRuntime }: LauncherDependencies = {},
 ): () => RuntimeChild {
   return () => {
@@ -152,8 +154,11 @@ export function createOfficialLauncher(
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     if (version.trim() !== `v${baseline.runtime.node}`) throw new Error('Node version mismatch')
-    return spawnProcess(node, [path.join(installed, 'lib/bin.js'), '--profile', 'dsh-work',
-      '--no-open', '--host', '127.0.0.1', '--port', String(port)], {
+    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(profile)
+      || patches.some(patch => !path.isAbsolute(patch))) throw new Error('invalid runtime Profile selection')
+    const patchArgs = patches.flatMap(patch => ['--patch', patch])
+    return spawnProcess(node, [path.join(installed, 'lib/bin.js'), '--profile', profile,
+      ...patchArgs, '--no-open', '--host', '127.0.0.1', '--port', String(port)], {
       cwd: home,
       env,
       shell: false,

@@ -85,3 +85,25 @@ test('Profile preparation refreshes only the managed Profile, preserves generati
     fs.rmSync(outside, { recursive: true, force: true })
   }
 })
+
+test('launcher accepts only an explicit safe Profile and absolute final overlays', () => {
+  const patch = path.join(os.tmpdir(), 'dsh-work-overlay.json')
+  let argv: readonly string[] = []
+  createOfficialLauncher({ node: process.execPath, home: os.tmpdir(), profile: 'dsh-work', patches: [patch] }, {
+    probe: () => 'v24.11.1\n',
+    spawnProcess(_executable, args) {
+      argv = args
+      return {} as RuntimeChild
+    },
+  })()
+  assert.deepEqual(argv.slice(1), [
+    '--profile', 'dsh-work', '--patch', patch,
+    '--no-open', '--host', '127.0.0.1', '--port', '0',
+  ])
+  assert.throws(() => createOfficialLauncher({
+    node: process.execPath, home: os.tmpdir(), profile: '../web',
+  }, { probe: () => 'v24.11.1\n' })())
+  assert.throws(() => createOfficialLauncher({
+    node: process.execPath, home: os.tmpdir(), patches: ['relative.patch.json'],
+  }, { probe: () => 'v24.11.1\n' })())
+})
