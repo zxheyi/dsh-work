@@ -1,0 +1,35 @@
+name: Desktop package
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths: ['apps/**', 'packages/**', 'runtime/**', 'scripts/**', 'package.json', 'pnpm-lock.yaml', '.github/workflows/desktop-package.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.11.1
+      - run: npm install --global pnpm@10.34.4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm runtime:prepare
+      - run: pnpm package:desktop
+      - run: pnpm test:package
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: package-evidence-${{ matrix.os }}
+          path: |
+            artifacts/package/receipt.json
+            artifacts/package/smoke.json
+            artifacts/package/smoke-*.png
