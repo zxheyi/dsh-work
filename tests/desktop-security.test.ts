@@ -29,6 +29,7 @@ test('status bridge admits only the exact local main frame and zero-argument met
     start: () => command('start'),
     stop: () => command('stop'),
     recover: () => command('recover'),
+    safeMode: () => command('safeMode'),
     snapshot: () => value,
     subscribe: () => () => {},
   }
@@ -60,7 +61,7 @@ test('status bridge admits only the exact local main frame and zero-argument met
   mainFrame.url = 'https://example.com/'
   await assert.rejects(() => invoke('dsh-work:start', event), /denied/)
   assert.deepEqual(calls, ['start', 'recover'])
-  assert.deepEqual([...handlers.keys()].sort(), ['dsh-work:recover', 'dsh-work:select-profile', 'dsh-work:snapshot', 'dsh-work:start', 'dsh-work:startup', 'dsh-work:stop'])
+  assert.deepEqual([...handlers.keys()].sort(), ['dsh-work:recover', 'dsh-work:safeMode', 'dsh-work:select-profile', 'dsh-work:snapshot', 'dsh-work:start', 'dsh-work:startup', 'dsh-work:stop'])
   dispose(); assert.equal(handlers.size, 0)
 })
 

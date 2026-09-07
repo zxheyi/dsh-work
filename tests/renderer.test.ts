@@ -200,5 +200,5 @@ test('local shell copy uses product language instead of Harness configuration vo
   ].join('\n')
   assert.doesNotMatch(visibleSources, /DSH Web|Workspace|Session|Profile|CLI|generation/u)
   assert.match(visibleSources, /DSH Work/u)
-  assert.match(visibleSources, /安全恢复/u)
+  assert.match(visibleSources, /安全模式/u)
 })

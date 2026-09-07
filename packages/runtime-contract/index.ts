@@ -31,6 +31,7 @@ export const RUNTIME_COMMANDS = Object.freeze([
   'start',
   'stop',
   'recover',
+  'safeMode',
   'snapshot',
 ] as const)
 
@@ -54,6 +55,7 @@ export interface RuntimeControl {
   start(): Promise<RuntimeSnapshot>
   stop(): Promise<RuntimeSnapshot>
   recover(): Promise<RuntimeSnapshot>
+  safeMode(): Promise<RuntimeSnapshot>
   snapshot(): RuntimeSnapshot
   subscribe(listener: (snapshot: RuntimeSnapshot) => void): () => void
 }

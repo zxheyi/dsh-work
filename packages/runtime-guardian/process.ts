@@ -2,6 +2,7 @@ import path from 'node:path'
 
 import { createOfficialLauncher, prepareProductProfile } from '../runtime-host/official-launcher.ts'
 import { readStartupSelection, resolveSelectedProfile } from '../runtime-profile/preferences.ts'
+import { writeStartupCheckpoint } from '../runtime-profile/checkpoint.ts'
 import { prepareShadowProfile, type PreparedRuntimeProfile } from '../runtime-profile/shadow.ts'
 import { createGenerationStore } from './generation-store.ts'
 import { GUARDIAN_PROTOCOL, validGuardianCommand } from './protocol.ts'
@@ -13,10 +14,10 @@ if (!productRoot || !path.isAbsolute(productRoot) || !process.send) process.exit
 const plans = new Map<string, PreparedRuntimeProfile>()
 const service = createGuardianService({
   store: createGenerationStore(productRoot),
-  prepare(home) {
+  prepare(home, mode) {
     const selection = readStartupSelection(productRoot)
-    const source = resolveSelectedProfile(selection)
-    if (selection?.kind === 'shared' && !source) throw new Error('selected Profile unavailable')
+    const source = mode === 'safe' ? null : resolveSelectedProfile(selection)
+    if (mode !== 'safe' && selection?.kind === 'shared' && !source) throw new Error('selected Profile unavailable')
     const plan = source ? prepareShadowProfile(home, source) : (() => {
       prepareProductProfile(home)
       return Object.freeze({ home, profile: 'dsh-work' as const, patches: Object.freeze([]) })
@@ -27,6 +28,9 @@ const service = createGuardianService({
     const plan = plans.get(home)
     if (!plan) throw new Error('runtime Profile unavailable')
     return createOfficialLauncher({ node: process.execPath, ...plan })
+  },
+  onReady(_home, mode) {
+    writeStartupCheckpoint(productRoot, readStartupSelection(productRoot), mode === 'safe' ? 'safe' : 'selected')
   },
 })
 

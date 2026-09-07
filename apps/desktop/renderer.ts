@@ -31,6 +31,7 @@ const element = <T extends HTMLElement>(id: string): T => {
 const start = element<HTMLButtonElement>('start')
 const stop = element<HTMLButtonElement>('stop')
 const recover = element<HTMLButtonElement>('recover')
+const safeMode = element<HTMLButtonElement>('safe-mode')
 const onboarding = element<HTMLElement>('onboarding')
 const profileChoice = element<HTMLSelectElement>('profile-choice')
 const useLocal = element<HTMLButtonElement>('use-local')
@@ -53,6 +54,8 @@ const render = (value: PresentationStatus): void => {
   stop.disabled = !value.canStop
   recover.hidden = !value.canRecover
   recover.disabled = !value.canRecover
+  safeMode.hidden = !value.canRecover
+  safeMode.disabled = !value.canRecover
   start.textContent = value.canRecover ? '等待安全恢复' : value.state === 'failed' ? '重试打开' : '打开工作台'
 }
 
@@ -104,6 +107,7 @@ start.addEventListener('click', () => {
 })
 stop.addEventListener('click', () => { window.dshWork.stop().catch(disconnected) })
 recover.addEventListener('click', () => { window.dshWork.recover().catch(disconnected) })
+safeMode.addEventListener('click', () => { window.dshWork.safeMode().catch(disconnected) })
 useLocal.addEventListener('click', () => {
   const profileId = profileChoice.value
   if (!/^[a-f0-9]{24}$/u.test(profileId)) return

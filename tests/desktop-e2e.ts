@@ -152,7 +152,7 @@ try {
     phase = 'automatic-start-failure'
     await waitState('failed')
     phase = 'bridge-key-list'
-    assert.equal(await js('JSON.stringify(Object.keys(window.dshWork).sort())'), JSON.stringify(['hasRetainedContext', 'recover', 'selectProfile', 'snapshot', 'start', 'startup', 'stop', 'subscribe']))
+    assert.equal(await js('JSON.stringify(Object.keys(window.dshWork).sort())'), JSON.stringify(['hasRetainedContext', 'recover', 'safeMode', 'selectProfile', 'snapshot', 'start', 'startup', 'stop', 'subscribe']))
     phase = 'renderer-globals'
     assert.equal(await js('JSON.stringify([typeof require, typeof process, typeof ipcRenderer])'), JSON.stringify(['undefined', 'undefined', 'undefined']))
     assert.equal(active.host.snapshot().code, 'runtime-unavailable')

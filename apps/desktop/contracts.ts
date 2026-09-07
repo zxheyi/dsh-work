@@ -25,6 +25,7 @@ export interface DesktopBridge {
   start(): Promise<RuntimeStatus>
   stop(): Promise<RuntimeStatus>
   recover(): Promise<RuntimeStatus>
+  safeMode(): Promise<RuntimeStatus>
   snapshot(): Promise<RuntimeStatus>
   startup(): Promise<DesktopStartupContext>
   selectProfile(profileId: string | null): Promise<RuntimeStatus>

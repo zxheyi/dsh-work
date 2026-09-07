@@ -12,7 +12,7 @@ import {
 
 test('runtime contract is the single immutable lifecycle vocabulary', () => {
   assert.deepEqual(RUNTIME_STATES, ['stopped', 'starting', 'ready', 'stopping', 'failed'])
-  assert.deepEqual(RUNTIME_COMMANDS, ['start', 'stop', 'recover', 'snapshot'])
+  assert.deepEqual(RUNTIME_COMMANDS, ['start', 'stop', 'recover', 'safeMode', 'snapshot'])
   assert.deepEqual(RUNTIME_CODES, [
     ...RUNTIME_HOST_CODES,
     'recovery-required',
@@ -33,6 +33,7 @@ test('runtime control keeps renderer-independent lifecycle semantics', async () 
     start: async () => stopped,
     stop: async () => stopped,
     recover: async () => stopped,
+    safeMode: async () => stopped,
     snapshot: () => stopped,
     subscribe: () => () => {},
   }

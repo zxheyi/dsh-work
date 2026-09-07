@@ -176,6 +176,7 @@ export async function createGuardianClient(
     start: () => request('start'),
     stop: () => request('stop'),
     recover: () => request('recover'),
+    safeMode: () => request('safeMode'),
     snapshot: () => status,
     subscribe(listener: (snapshot: RuntimeSnapshot) => void): () => void {
       listeners.add(listener)

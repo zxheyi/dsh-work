@@ -31,6 +31,7 @@ export function createUnavailableGuardianClient(): GuardianClient {
     start: publishUnavailable,
     stop: async () => status,
     recover: async () => status,
+    safeMode: async () => status,
     snapshot: () => status,
     subscribe(listener: (snapshot: RuntimeSnapshot) => void): () => void {
       listeners.add(listener)

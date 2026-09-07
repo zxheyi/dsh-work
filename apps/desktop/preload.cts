@@ -17,6 +17,7 @@ if (globalThis.location.href === 'dsh-work://status/index.html') contextBridge.e
   start: (): Promise<RuntimeStatus> => ipcRenderer.invoke('dsh-work:start'),
   stop: (): Promise<RuntimeStatus> => ipcRenderer.invoke('dsh-work:stop'),
   recover: (): Promise<RuntimeStatus> => ipcRenderer.invoke('dsh-work:recover'),
+  safeMode: (): Promise<RuntimeStatus> => ipcRenderer.invoke('dsh-work:safeMode'),
   snapshot: (): Promise<RuntimeStatus> => ipcRenderer.invoke('dsh-work:snapshot'),
   startup: (): Promise<DesktopStartupContext> => ipcRenderer.invoke('dsh-work:startup'),
   selectProfile: (profileId: string | null): Promise<RuntimeStatus> => {
