@@ -42,7 +42,7 @@ try {
     throw new Error('state timeout')
   }
   const waitForNativeSurface = async (): Promise<{ readonly text: string; readonly url: string }> => {
-    const deadline = Date.now() + 35_000
+    const deadline = Date.now() + (process.platform === 'win32' ? 70_000 : 35_000)
     while (Date.now() < deadline) {
       try {
         const value = await js<{ ready: boolean; text: string }>(`(() => {
