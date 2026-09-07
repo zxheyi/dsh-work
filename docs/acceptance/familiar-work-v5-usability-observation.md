@@ -35,3 +35,7 @@ A participant succeeds when they complete the flow without terminology teaching,
 | P5 | not observed | not observed | — | — |
 
 F13 passes only after at least four rows contain a witnessed “yes”. Keep the implementation task pending until this table contains real observations from the recorded revision.
+
+## Release preparation handoff (2026-09-07)
+
+The owner confirmed no participant observations exist. Keep every row above unobserved. Use the current [automated evidence](familiar-work-v5-evidence.json) and [packaging instructions](../packaging.md) to prepare an isolated test installation, record its exact revision and platform, then recruit five existing DSH users. Do not enter an automated runner, the implementation agent or a simulated persona as a participant. Signing/notarization is separately pending; these records cannot satisfy that gate.

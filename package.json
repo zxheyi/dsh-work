@@ -40,7 +40,8 @@
     "verify:local": "node scripts/verify-local.mjs artifacts/runtime/context.json --desktop",
     "prepackage:desktop": "pnpm build",
     "package:desktop": "node scripts/package-desktop.mjs",
-    "test:package": "node scripts/run-packaged-smoke.mjs"
+    "test:package": "node scripts/run-packaged-smoke.mjs",
+    "capture:familiar-v5": "node scripts/capture-familiar-v5.mjs"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.2",

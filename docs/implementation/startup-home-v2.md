@@ -32,4 +32,6 @@ Electron 验收同时检查了沙箱、上下文隔离、禁用 Node 集成、�
 
 ## 证据边界
 
-`pnpm verify:familiar-v5` 会按设计拒绝当前源码，因为 [Familiar v5 冻结证据](../acceptance/familiar-work-v5-evidence.json)记录的是改造前 `surface.ts` 的摘要。这里没有改写旧截图、旧执行结果或待完成的 F13 真人观察来伪造一致性；若要重新发布 Familiar v5 验收，需要基于当前版本重新采集整套冻结证据。
+该改造合并时，`pnpm verify:familiar-v5` 按设计拒绝了当时源码，因为 [Familiar v5 冻结证据](../acceptance/familiar-work-v5-evidence.json)记录的是改造前 `surface.ts` 的摘要。这里没有改写旧截图、旧执行结果或待完成的 F13 真人观察来伪造一致性；若要重新发布 Familiar v5 验收，需要基于当前版本重新采集整套冻结证据。
+
+2026-09-07：发布准备重新执行七组自动化验收并采集当前截图及源码摘要，见 [当前验收证据](../acceptance/familiar-work-v5-evidence.md)。F13 真人观察仍待完成。
