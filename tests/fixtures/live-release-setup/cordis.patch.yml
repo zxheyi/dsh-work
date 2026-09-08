@@ -1,0 +1,3 @@
+- insert:
+    - id: live-release-setup
+      name: '@dsh-work/live-release-setup'
