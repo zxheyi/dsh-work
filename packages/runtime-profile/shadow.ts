@@ -92,6 +92,30 @@ const linkSourcePackage = (profile: string, source: DiscoveredLocalProfile, pack
   fs.symlinkSync(resolveSourcePackage(source, packageName), destination, 'junction')
 }
 
+/** Preserve the native user-root lookup and all Profile-owned preset configuration. */
+function linkSharedPresets(generationHome: string, sourceHome: string): void {
+  const source = path.join(sourceHome, '.agent-presets')
+  const destination = path.join(generationHome, '.agent-presets')
+  // Do not replace a previous generation's authored presets or a different mapping.
+  try {
+    const existing = fs.lstatSync(destination)
+    if (!existing.isSymbolicLink()
+      || path.resolve(path.dirname(destination), fs.readlinkSync(destination)) !== source) {
+      throw new Error('shared preset directory conflict')
+    }
+  } catch (error: unknown) {
+    if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error
+  }
+  // An absent user root is normal. Create only this directory, never the source Profile.
+  // A dangling junction would let listing appear empty but break native copy/create.
+  if (!fs.existsSync(source)) fs.mkdirSync(source, { mode: 0o700 })
+  if (!fs.statSync(source).isDirectory()) throw new Error('shared preset root is not a directory')
+  try { fs.lstatSync(destination) } catch (error: unknown) {
+    if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error
+    fs.symlinkSync(source, destination, 'junction')
+  }
+}
+
 /** Build a product-owned profile shadow while keeping the admitted source Profile byte-clean. */
 export function prepareShadowProfile(
   generationHome: string,
@@ -105,6 +129,7 @@ export function prepareShadowProfile(
   const manifest = readManifest(source)
   const sourcePatch = readOwnedFile(path.join(source.profilePath, 'cordis.patch.yml'), MAX_PATCH_BYTES, true)
   prepareProductProfile(generationHome)
+  linkSharedPresets(generationHome, source.homePath)
   const profile = path.join(generationHome, 'profiles', 'dsh-work')
   const thirdPartyBundles = source.bundles.filter(bundle => !CORE_BUNDLES.has(bundle))
   const packages = new Set([
