@@ -286,13 +286,14 @@ async function run(): Promise<void> {
     const sourceContent = '# Source brief\n\nOnly verified facts.\n'
     assert.equal(await setDraft(baseline.generateAPrompt), baseline.generateAPrompt)
     assert.equal(await selectFile(sourceName, 'text/markdown', sourceContent), true)
-    const sourceDraft = await waitFor(
+    await waitFor(
       () => js<{ body: string; draft: string }>("({ body: document.body.innerText, draft: document.querySelector('[data-composer-input]')?.textContent ?? '' })"),
-      value => value.body.includes(sourceName) && value.body.includes('已复制，发送后读取')
+      value => value.body.includes(sourceName) && !value.body.includes('attachment-')
         && value.draft.includes(sourceName) && value.draft.includes(baseline.generateAPrompt),
       'Session A source did not become ready',
     )
-    const sourcePath = /@(?:"([^"\r\n]+)"|([^\s"'<>]+))/u.exec(sourceDraft.draft)?.slice(1).find(Boolean)
+    const resourceProjection = await js<string>("JSON.parse(window.name.slice('dsh-work-recovery:v1:'.length)).draft")
+    const sourcePath = /@(?:"([^"\r\n]+)"|([^\s"'<>]+))/u.exec(resourceProjection)?.slice(1).find(Boolean)
     assert.ok(sourcePath)
     await clickSend()
     const names = await waitFor(
@@ -395,7 +396,7 @@ async function run(): Promise<void> {
     assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview-source] button')).find(item => item.textContent?.trim() === '在输入框引用'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
     await waitFor(
       () => js<string>("document.querySelector('[data-composer-input]')?.textContent ?? ''"),
-      text => text.includes(sourcePath),
+      text => text.includes(sourceName),
       'Verified source reference was not restored to the native composer',
     )
     await clickSend()
@@ -710,7 +711,7 @@ async function run(): Promise<void> {
     assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] button')).find(item => item.textContent?.trim() === '恢复 v1'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true })()"), true)
     await js("new Promise(resolve => setTimeout(resolve, 500))")
     const restorePreparation = await js<{ draft: string; status: string }>(`({
-      draft: document.querySelector('[data-composer-input]')?.textContent ?? '',
+      draft: JSON.parse(window.name.slice('dsh-work-recovery:v1:'.length)).draft,
       status: document.querySelector('.dsh-work-output-preview-actions > span')?.textContent ?? '',
     })`)
     const restoreDraft = restorePreparation.draft
@@ -722,7 +723,7 @@ async function run(): Promise<void> {
     assert.equal(fs.readFileSync(path.join(baseline.workspacePath, restoreReference), 'utf8'), reportA)
     assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] button')).find(item => item.textContent?.trim() === '恢复 v1'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true })()"), true)
     assert.equal(await waitFor(
-      () => js<string>("document.querySelector('[data-composer-input]')?.textContent ?? ''"),
+      () => js<string>("JSON.parse(window.name.slice('dsh-work-recovery:v1:'.length)).draft"),
       text => text === restoreDraft,
       'Retrying restore preparation duplicated the bound request',
     ), restoreDraft)
@@ -979,7 +980,7 @@ async function run(): Promise<void> {
         draft: document.querySelector('[data-composer-input]')?.textContent ?? '',
       })`),
       value => value.previewClosed && value.composerFocused
-        && value.draft.includes(sourcePath),
+        && value.draft.includes(sourceName),
       '390px source reference did not return to the composer with the managed source',
     )
 
