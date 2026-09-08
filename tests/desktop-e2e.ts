@@ -1,5 +1,5 @@
 // Explicit Electron entry point; never imported by headless unit tests.
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, nativeTheme } from 'electron'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -72,6 +72,7 @@ try {
   }
   const waitForNativeSurface = async (): Promise<{ readonly text: string; readonly url: string }> => {
     const deadline = Date.now() + (process.platform === 'win32' ? 70_000 : 35_000)
+    let readySince = 0
     while (Date.now() < deadline) {
       try {
         const value = await js<{
@@ -135,7 +136,11 @@ try {
           scripts: value.scripts,
           hostState: active.host.snapshot().state,
         }
-        if (value.ready) return { text: value.text, url }
+        // Native first-run dialogs can mount just after the composer appears.
+        if (value.ready && !value.dialog) {
+          readySince ||= Date.now()
+          if (Date.now() - readySince >= 500) return { text: value.text, url }
+        } else readySince = 0
       } catch {}
       await new Promise(resolve => setTimeout(resolve, 25))
     }
@@ -228,9 +233,19 @@ try {
     assert.equal(await js('typeof window.dshWork'), 'undefined')
     phase = 'native-brand-copy'; assert.equal(nativeCopy.brand, true)
     phase = 'native-brand-mark'
-    assert.equal(await js("document.querySelector('[data-dsh-work-brand=\"mark\"]')?.textContent"), 'DW')
-    phase = 'native-hero-whale'
-    assert.equal(await js("document.querySelector('svg[width=\"34\"][aria-hidden=\"true\"] path[fill=\"currentColor\"]') !== null"), true)
+    assert.equal(await js("document.querySelector('[data-dsh-work-brand=\"name\"]')?.closest('button')?.querySelector('img[data-dsh-work-brand=\"mark\"]')?.complete === true"), true)
+    assert.equal(await js("document.querySelector('[data-dsh-work-brand=\"name\"]')?.closest('button')?.textContent"), '基于DeepSeek Harness')
+    if (process.platform === 'darwin') {
+      phase = 'native-integrated-window-chrome'
+      assert.equal(await js('document.documentElement.dataset.dshWorkPlatform'), 'darwin')
+      const [outerWidth, outerHeight] = active.window.getSize()
+      const [contentWidth, contentHeight] = active.window.getContentSize()
+      assert.equal(outerWidth, contentWidth)
+      assert.equal(outerHeight, contentHeight, 'content extends into the hidden title bar')
+      assert.equal(await js("getComputedStyle(document.querySelector('.dsh-work-window-drag')).getPropertyValue('-webkit-app-region')"), 'drag')
+    }
+    phase = 'native-hero-text-only'
+    assert.equal(await js("document.querySelector('svg[width=\"34\"][aria-hidden=\"true\"] path[fill=\"currentColor\"]') !== null"), false)
     phase = 'native-new-session-copy'; assert.equal(nativeCopy.newSession, true)
     phase = 'native-settings-copy'; assert.equal(nativeCopy.settings, true)
     phase = 'native-legacy-copy-absent'
@@ -249,7 +264,63 @@ try {
       assert.match(choiceBytes, /"kind": "shared"/u)
       assert.doesNotMatch(checkpointBytes, new RegExp(ownedUserData.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'))
     }
+    // Capture the brand after the native sidebar entrance animation has settled.
+    await js(`Promise.all(Array.from(document.getAnimations()).filter(animation =>
+      animation.effect?.getComputedTiming().iterations !== Infinity
+    ).map(animation => animation.finished.catch(() => {})))`)
     await screenshot('ready.png')
+    if (localProfile && !relaunch) {
+      phase = 'brand-responsive-layout'
+      const settle = async (): Promise<void> => {
+        await new Promise(resolve => setTimeout(resolve, 350))
+        await js(`Promise.all(Array.from(document.getAnimations()).filter(animation =>
+          animation.effect?.getComputedTiming().iterations !== Infinity
+        ).map(animation => animation.finished.catch(() => {})))`)
+      }
+      const clickSidebarToggle = async (): Promise<void> => {
+        active.window.focus()
+        active.window.webContents.focus()
+        await new Promise(resolve => setTimeout(resolve, 100))
+        const point = await js<{ x: number; y: number }>(`(() => {
+          const row = document.querySelector('[data-slot="sidebar"] > div > div:first-child')
+          const button = Array.from(row.querySelectorAll('button')).find(item => ['打开侧边栏', 'Open sidebar', '收起侧边栏', 'Collapse sidebar'].includes(item.getAttribute('aria-label')))
+          const r = button.getBoundingClientRect()
+          return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
+        })()`)
+        active.window.webContents.sendInputEvent({ type: 'mouseMove', ...point })
+        await new Promise(resolve => setTimeout(resolve, 50))
+        active.window.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...point })
+        await new Promise(resolve => setTimeout(resolve, 50))
+        active.window.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...point })
+        await new Promise(resolve => setTimeout(resolve, 100))
+        active.window.webContents.sendInputEvent({ type: 'mouseMove', x: 500, y: 80 })
+        await settle()
+      }
+      await clickSidebarToggle()
+      phase = 'sidebar-collapsed-after-pointer-click'
+      assert.equal(await js('document.querySelector("[data-dsh-work-brand=name]") === null'), true)
+      phase = 'sidebar-collapsed-traffic-light-clearance'
+      assert.equal(await js(`document.querySelector('[data-dsh-work-brand="mark"]').closest('button').getBoundingClientRect().top >= 42`), process.platform === 'darwin')
+      await screenshot('sidebar-collapsed.png')
+      await clickSidebarToggle()
+      assert.equal(await js('document.querySelector("[data-dsh-work-brand=name]") !== null'), true)
+      active.window.setSize(960, 680)
+      await settle()
+      await clickSidebarToggle()
+      assert.equal(await js(`(() => {
+        const name = document.querySelector('[data-dsh-work-brand="name"]')
+        return !!name && name.scrollWidth <= name.clientWidth
+      })()`), true, 'source name fits the minimum-width expanded sidebar')
+      await screenshot('minimum-width.png')
+      active.window.setSize(1440, 900)
+      await settle()
+      phase = 'native-dark-theme'
+      nativeTheme.themeSource = 'dark'
+      await settle()
+      assert.equal(await js('document.body.hasAttribute("data-ds-dark-theme")'), true)
+      await screenshot('dark.png')
+      nativeTheme.themeSource = 'system'
+    }
   }
   phase = 'navigation-denied'
   const allowedUrl = active.window.webContents.getURL()
@@ -267,7 +338,7 @@ try {
     const status = active.host.snapshot()
     const passed = status.canStart && (missing ? status.code === 'runtime-unavailable' : status.state === 'stopped') && (!rendererCrash || crashObserved)
     write(passed ? 'pass' : 'fail', { terminal: status, crashObserved,
-      screenshots: missing ? ['failed.png'] : localProfile && !relaunch ? ['onboarding.png', 'ready.png'] : ['ready.png'] })
+      screenshots: missing ? ['failed.png'] : localProfile && !relaunch ? ['onboarding.png', 'ready.png', 'sidebar-collapsed.png', 'minimum-width.png', 'dark.png'] : ['ready.png'] })
     if (!passed) process.exitCode = 1
   })
   if (rendererCrash) active.window.webContents.forcefullyCrashRenderer()

@@ -54,6 +54,7 @@ export async function packageDesktop({ signed = false } = {}) {
     executableName: 'DSH Work', appBundleId: 'io.github.zxheyi.dsh-work',
     appVersion: manifest.version, electronVersion: baseline.electron,
     platform: process.platform, arch: process.arch,
+    icon: path.join(root, 'assets/brand', process.platform === 'darwin' ? 'app-icon.icns' : 'app-icon.ico'),
     // The standalone Node guardian and Harness loader require ordinary filesystem paths.
     asar: false, prune: false, derefSymlinks: false, overwrite: true,
     extraResource: ['runtime', 'third-party', 'LICENSE.dsh-work.txt'].map(name => path.join(resources, name)),
