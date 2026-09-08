@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   LatestPreviewRequest,
+  nextSessionResourceReference,
   matchesSessionOutputVersionSelection,
   matchesSessionOutputSelection,
   parseSafeMarkdown,
@@ -274,4 +275,22 @@ test('reports identical content and bounds large or dense comparisons', () => {
   })
   assert.equal(planTextDiff('a\n'.repeat(2_001), 'b\n').mode, 'bounded')
   assert.equal(planTextDiff('a'.repeat(512 * 1024 + 1), 'b').mode, 'bounded')
+})
+
+
+test('promotes copied file references while preserving native chip coordinates and labels', () => {
+  const first = '@attachment-aaaaaaaaaaaa-bbbbbbbbbbbb-brief.md'
+  const second = '@"attachment-aaaaaaaaaaaa-cccccccccccc-中文 source.txt"'
+  const input = { draft: `${first} ${second} 请总结`, draftRev: 7, phase: 'plain', occurrences: [] }
+  assert.equal(nextSessionResourceReference(input)?.reference.label, 'brief.md')
+  assert.equal(nextSessionResourceReference({ ...input, draft: `${second}请总结` })?.reference.label, '中文 source.txt')
+  const next = nextSessionResourceReference({ ...input, occurrences: [{ offset: 0, length: first.length }] })
+  assert.equal(next?.reference.label, '中文 source.txt')
+  assert.equal(next?.reference.ref, second)
+  assert.deepEqual(next?.span, { start: 2, end: 2 + second.length, draftRev: 7 })
+  assert.equal(nextSessionResourceReference({ ...input, phase: 'submitting' }), null)
+  assert.equal(nextSessionResourceReference({ ...input, draft: '@ordinary.md' }), null)
+  assert.equal(nextSessionResourceReference({ ...input, occurrences: [
+    { offset: 0, length: first.length }, { offset: first.length + 1, length: second.length },
+  ] }), null)
 })

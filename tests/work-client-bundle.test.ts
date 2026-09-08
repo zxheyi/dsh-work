@@ -10,7 +10,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   ))
   assert.equal(manifest.exports['./client'], './client.js')
   assert.deepEqual(manifest.dsh.client, {
-    external: ['@deepseek-ai/dsh-api-gateway/client', 'react'],
+    external: ['@deepseek-ai/dsh-api-gateway/client', '@deepseek-ai/dsh-client-ui-primitives', 'react'],
     inject: [
       '@deepseek-ai/dsh-api-gateway',
       '@deepseek-ai/dsh-client-connection',
@@ -49,6 +49,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
     if (specifier === '@deepseek-ai/dsh-api-gateway/client') {
       return { RemoteSnapshotStream, RemoteStreamCarrierError }
     }
+    if (specifier === '@deepseek-ai/dsh-client-ui-primitives') return { IconPlusOutline16() {} }
     if (specifier === 'react') return {
       createElement() {},
       useCallback(value: unknown) { return value },
@@ -119,6 +120,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   assert.deepEqual(injectedSlots, [
     'sidebar.brand.name',
     'conversation.input.left',
+    'conversation.input.dock',
     'conversation.chat.turnTail',
     'sidebar.brand.mark',
     'conversation.hero.brand.mark',
@@ -128,6 +130,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   assert.deepEqual(registeredSlots, [
     { name: 'sidebar.brand.name', priority: -100 },
     { name: 'conversation.input.left' },
+    { name: 'conversation.input.dock' },
     { name: 'conversation.chat.turnTail', priority: -100 },
     { name: 'sidebar.brand.mark', priority: -100 },
     { name: 'conversation.hero.brand.mark', priority: -100 },

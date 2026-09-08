@@ -1,5 +1,6 @@
 const external = new Set([
   '@deepseek-ai/cordis',
+  '@deepseek-ai/dsh-client-ui-primitives',
   '@deepseek-ai/dsh-api-gateway/client',
   'react',
 ])
