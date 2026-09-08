@@ -3,13 +3,14 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
+import { execFileSync } from 'node:child_process'
 import { createOfficialLauncher, prepareDevelopmentProfile } from '../packages/runtime-host/official-launcher.ts'
 import type { RuntimeChild } from '../packages/runtime-host/index.ts'
 import { removeOwnedTestHome } from './support/owned-test-home.ts'
 
 test('launcher uses explicit CLI, loopback, empty control pipe and an environment allowlist', () => {
   const node = process.execPath, home = os.tmpdir()
-  const inherited = ['NODE_OPTIONS', 'NODE_PATH', 'ELECTRON_RUN_AS_NODE', 'DSH_HOME', 'DEEPSEEK_API_KEY']
+  const inherited = ['NODE_OPTIONS', 'NODE_PATH', 'ELECTRON_RUN_AS_NODE', 'DSH_HOME', 'DEEPSEEK_API_KEY', 'PATH']
   const before = Object.fromEntries(inherited.map(key => [key, process.env[key]]))
   for (const key of inherited) process.env[key] = 'forbidden-secret'
   try {
@@ -28,7 +29,8 @@ test('launcher uses explicit CLI, loopback, empty control pipe and an environmen
         assert.equal(options.shell, false)
         assert.deepEqual(options.stdio, ['pipe', 'pipe', 'pipe', 'ipc'])
         assert.equal(options.env?.DSH_HOME, home)
-        assert.equal(options.env?.PATH, path.dirname(node))
+        assert.deepEqual(options.env?.PATH?.split(path.delimiter), process.platform === 'darwin'
+          ? [path.dirname(node), '/usr/bin'] : [path.dirname(node)])
         assert.equal(JSON.stringify(options).includes('forbidden-secret'), false)
         return {} as RuntimeChild
       },
@@ -106,4 +108,28 @@ test('launcher accepts only an explicit safe Profile and absolute final overlays
   assert.throws(() => createOfficialLauncher({
     node: process.execPath, home: os.tmpdir(), patches: ['relative.patch.json'],
   }, { probe: () => 'v24.11.1\n' })())
+})
+
+// Exercise macOS command lookup without opening a graphical picker in unit tests.
+test('macOS launcher environment can execute the native picker interpreter', {
+  skip: process.platform !== 'darwin',
+}, () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-picker-env-'))
+  try {
+    createOfficialLauncher({ node: process.execPath, home }, {
+      probe: () => 'v24.11.1\n',
+      spawnProcess(_executable, _args, options) {
+        const output = execFileSync('osascript', ['-e', 'return "dsh-picker-ready"'], {
+          cwd: options.cwd,
+          env: options.env,
+          encoding: 'utf8',
+          timeout: 5_000,
+        })
+        assert.equal(output.trim(), 'dsh-picker-ready')
+        return {} as RuntimeChild
+      },
+    })()
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
 })

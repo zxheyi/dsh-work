@@ -34,4 +34,6 @@ Use a decision record when a change affects the desktop stack, upstream integrat
 
 | [0017: Standalone desktop packaging](0017-standalone-desktop-packaging.md) | accepted | Frozen production staging, native relocated package smoke and explicit signing gates. |
 
+| [0018: macOS runtime system utility path](0018-macos-runtime-system-utility-path.md) | accepted | Admits only `/usr/bin` after bundled Node for the pinned native picker; inherited PATH remains excluded. |
+
 ADR 0001, ADR 0003, ADR 0005, and ADR 0006 are accepted; ADR 0004 and ADR 0007 through ADR 0013 are implemented against the locked alpha.2 pair. Every unchecked M0 criterion remains a delivery gate rather than an implemented claim. Frozen research is evidence, not the product controller.

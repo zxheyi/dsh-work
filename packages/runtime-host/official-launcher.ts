@@ -140,7 +140,11 @@ export function createOfficialLauncher(
       APPDATA: home,
       LOCALAPPDATA: home,
       DSH_HOME: home,
-      PATH: path.dirname(node),
+      // The pinned macOS picker spawns osascript by name. Keep runtime Node
+      // first and admit only its fixed OS location, never the inherited PATH.
+      PATH: process.platform === 'darwin'
+        ? [path.dirname(node), '/usr/bin'].join(path.delimiter)
+        : path.dirname(node),
       DSH_TELEMETRY_DISABLED: '1',
       NO_COLOR: '1',
     }
