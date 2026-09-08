@@ -5,6 +5,7 @@ import path from 'node:path'
 import test from 'node:test'
 import { execFileSync } from 'node:child_process'
 import { createOfficialLauncher, prepareDevelopmentProfile } from '../packages/runtime-host/official-launcher.ts'
+import { runtimeSearchPath } from '../packages/runtime-host/environment.ts'
 import type { RuntimeChild } from '../packages/runtime-host/index.ts'
 import { removeOwnedTestHome } from './support/owned-test-home.ts'
 
@@ -29,8 +30,7 @@ test('launcher uses explicit CLI, loopback, empty control pipe and an environmen
         assert.equal(options.shell, false)
         assert.deepEqual(options.stdio, ['pipe', 'pipe', 'pipe', 'ipc'])
         assert.equal(options.env?.DSH_HOME, home)
-        assert.deepEqual(options.env?.PATH?.split(path.delimiter), process.platform === 'darwin'
-          ? [path.dirname(node), '/usr/bin', '/bin'] : [path.dirname(node)])
+        assert.equal(options.env?.PATH, runtimeSearchPath(node, process.platform, process.env))
         assert.equal(JSON.stringify(options).includes('forbidden-secret'), false)
         return {} as RuntimeChild
       },
@@ -164,4 +164,24 @@ test('Windows runtime can resolve its process-tree helper', {
       return {} as RuntimeChild
     },
   })()
+})
+
+
+test('runtime command lookup admits only fixed platform helpers after bundled Node', () => {
+  assert.equal(runtimeSearchPath('/app with spaces/node', 'darwin', { PATH: '/untrusted:.' }),
+    '/app with spaces:/usr/bin:/bin')
+  assert.equal(runtimeSearchPath('/app/node', 'linux', { PATH: '/untrusted:.' }), '/app')
+  for (const key of ['SystemRoot', 'SYSTEMROOT', 'systemroot', 'WINDIR']) {
+    assert.equal(runtimeSearchPath('D:\\DSH Work\\node.exe', 'win32', {
+      [key]: 'E:\\Windows', PATH: 'C:\\untrusted;.',
+    }), 'D:\\DSH Work;E:\\Windows\\System32')
+  }
+  for (const root of [undefined, '', 'relative-windows', '\\Windows', 'C:\\Windows;C:\\untrusted', 'C:\\Windows\0']) {
+    assert.equal(runtimeSearchPath('D:\\DSH Work\\node.exe', 'win32', {
+      SystemRoot: root, PATH: 'C:\\untrusted;.',
+    }), 'D:\\DSH Work')
+  }
+  assert.equal(runtimeSearchPath('D:\\DSH Work\\node.exe', 'win32', {
+    SystemRoot: 'E:\\Windows', WINDIR: 'F:\\other',
+  }), 'D:\\DSH Work;E:\\Windows\\System32')
 })

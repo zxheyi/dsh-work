@@ -7,6 +7,7 @@ Baseline: `6979cd5` (PR #42). Tracking: [Issue #43](https://github.com/zxheyi/ds
 | Priority | Trigger and observed failure before the fix | Cause | Correction and regression |
 | --- | --- | --- | --- |
 | P1 | A macOS foreground Bash operation fails before executing its command; direct `bash`, `sh`, `ls` probes all return ENOENT. | The pinned `@deepseek-ai/dsh-bash-local` invokes `bash` by name. The product runtime PATH excludes `/bin`, where macOS keeps these executables. | Admit fixed `/bin` after bundled Node and `/usr/bin`. `official-launcher.test.ts` runs real Bash and basic child commands using the exact launch environment. |
+| P1 | Windows process-tree helper cannot start; native CI returns `spawnSync taskkill ENOENT`. | The pinned subprocess provider invokes taskkill by name, but the runtime PATH omits System32; this can prevent cancellation/cleanup. | Append System32 from the validated OS root. A harmless native `taskkill /?` regression plus cross-platform path-source boundary tests. |
 | P2 | Start desktop with an incompatible `NODE_OPTIONS`; Node version probe exits with status 9 and the desktop falls back to guardian-unavailable. | `createGuardianClient` probes Node before constructing its allowlist, inheriting an option that is intentionally excluded from the actual guardian. | Use the same allowlisted environment for probe and spawn. `guardian-client.test.ts` starts a real guardian with invalid ambient Node options. |
 
 The Node-options test establishes startup contamination, not arbitrary preload execution: `node --version` did not execute a missing `--require` hook in the preliminary probe. The more severe interpretation was rejected.
@@ -17,9 +18,9 @@ The Node-options test establishes startup contamination, not arbitrary preload e
 | --- | --- |
 | macOS directory picker | Real noninteractive AppleScript still executes successfully. Upstream selection/cancellation behavior is unchanged; no OS chooser interaction is automated here. |
 | Windows native picker | Pinned provider spawns `process.execPath` with an absolute worker path, so it does not share the macOS interpreter lookup bug. Native GUI selection remains outside this check. |
-| Windows process-tree cleanup | Pinned subprocess provider invokes `taskkill` by name. A harmless `taskkill /?` test under the product environment is included for native CI; classify from its result, not POSIX emulation. |
+| Windows process-tree cleanup | Pinned subprocess provider invokes `taskkill` by name. A harmless `taskkill /?` test under the product environment failed with ENOENT in [native Windows CI](https://github.com/zxheyi/dsh-work/actions/runs/34185286190) on `b741b64`. This is a confirmed helper lookup defect. The test does not prove every process-tree cancellation scenario. |
 | Windows PowerShell | Pinned resolver probes known install locations and SystemRoot, then PATH. No blanket claim of PowerShell ENOENT is justified. Nonstandard install discovery remains constrained by the intentional PATH policy. |
-| Search helper | Pinned file-search provider resolves packaged `@vscode/ripgrep` to an absolute executable, not system `rg`; absence of global rg alone is not a bug. |
+| Search helper | Pinned file-search provider resolves packaged `@vscode/ripgrep` to an absolute executable, not system `rg`; absence of global rg alone is not a bug. The existing staged macOS package helper was executed with an empty PATH and returned `ripgrep 15.0.0`; this checks the installed helper, not a full model-driven search. |
 | Packaged Node and resources | Desktop uses `process.resourcesPath`; JS assets derive from `fileURLToPath(import.meta.url)`; Node/CLI are absolute argv entries, and packaging disables ASAR for external Node. Existing relocated package smoke validates a path containing the app name's space and ignores development overrides. |
 | Profile paths | Explicit owned homes, checked absolute overlays, source rediscovery, and managed generation cwd are retained. No user Profile bytes are modified by these fixes. |
 | Deleted parent cwd | A real isolated caller deleted its cwd before starting an idle guardian; startup still succeeded on macOS. Not reported as a defect; other platforms are not proven by this probe. |
@@ -29,6 +30,6 @@ The Node-options test establishes startup contamination, not arbitrary preload e
 
 ## Verification
 
-Before changes: both new defect regressions failed on macOS arm64 / Node 24.11.1; Bash returned ENOENT and the guardian probe exited 9. After changes: those regressions and the existing real AppleScript probe pass. Full product, runtime and native CI results are recorded with the PR; the report must not treat a successful startup smoke as proof of every lazy native tool path.
+Before changes: both new defect regressions failed on macOS arm64 / Node 24.11.1; Bash returned ENOENT and the guardian probe exited 9. After changes: those regressions and the existing real AppleScript probe pass. Local product tests, typecheck/contract, 11 runtime integration tests, and workspace empty/create/restore desktop checks passed for the first two fixes. Windows CI then established the third RED regression; its corrected revision reruns affected checks. Full revision-bound results are recorded with the PR; the report must not treat a successful startup smoke as proof of every lazy native tool path.
 
 See [ADR 0019](../decisions/0019-runtime-environment-compatibility.md) for the accepted environment policy and rollback.

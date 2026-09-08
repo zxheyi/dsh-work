@@ -10,6 +10,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 import type { RuntimeChild } from './index.ts'
+import { runtimeSearchPath } from './environment.ts'
 
 interface RuntimeBaseline {
   readonly runtime: {
@@ -140,11 +141,7 @@ export function createOfficialLauncher(
       APPDATA: home,
       LOCALAPPDATA: home,
       DSH_HOME: home,
-      // Native macOS picker and Bash providers resolve commands by name. Keep
-      // runtime Node first and admit fixed OS directories, never inherited PATH.
-      PATH: process.platform === 'darwin'
-        ? [path.dirname(node), '/usr/bin', '/bin'].join(path.delimiter)
-        : path.dirname(node),
+      PATH: runtimeSearchPath(node, process.platform, process.env),
       DSH_TELEMETRY_DISABLED: '1',
       NO_COLOR: '1',
     }
