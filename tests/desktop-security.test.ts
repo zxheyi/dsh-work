@@ -70,7 +70,7 @@ test('custom protocol exposes only fixed local assets, never arbitrary paths', (
   assert.equal(resourceForRequest(STATUS_URL, 'GET'), 'index.html')
   assert.equal(resourceForRequest('dsh-work://status/renderer.js', 'GET'), 'renderer.js')
   assert.equal(resourceForRequest('dsh-work://status/startup-presentation.js', 'GET'), 'startup-presentation.js')
-  assert.equal(resourceForRequest('dsh-work://status/deepseek-whale.svg', 'GET'), 'deepseek-whale.svg')
+  assert.equal(resourceForRequest('dsh-work://status/work-whale.png', 'GET'), 'work-whale.png')
   for (const url of ['file:///etc/passwd', 'dsh-work://other/index.html',
     'dsh-work://status/index.html?secret=1', 'dsh-work://status/../package.json',
     'dsh-work://user@status/index.html', 'dsh-work://status/%2e%2e/package.json']) {

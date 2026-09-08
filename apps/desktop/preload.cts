@@ -42,3 +42,12 @@ else if (globalThis.location.protocol === 'http:' && globalThis.location.hostnam
     ipcRenderer.send('dsh-work:recovery-context-update', value)
   },
 }))
+
+// Presentation-only host marker: no renderer API or additional IPC capability.
+if (process.platform === 'darwin') window.addEventListener('DOMContentLoaded', () => {
+  document.documentElement.dataset.dshWorkPlatform = 'darwin'
+  const drag = document.createElement('div')
+  drag.className = 'dsh-work-window-drag'
+  drag.setAttribute('aria-hidden', 'true')
+  document.body.appendChild(drag)
+}, { once: true })

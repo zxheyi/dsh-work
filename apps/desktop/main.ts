@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { app, Menu, nativeImage, Tray, type BrowserWindow, type MenuItemConstructorOptions } from 'electron'
 
 import { createGuardianClient, type GuardianClient } from '../../packages/runtime-guardian/client.ts'
@@ -127,11 +128,17 @@ const createDesktopSession = async (): Promise<DesktopSession> => {
     const window = await createDesktopWindow(host, { accepting: () => !quitting, startup })
     const active = Object.freeze({ host, window })
     session = active
-    const icon = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" rx="9" fill="#315cf4"/><path d="M8 9l4 14 4-9 4 9 4-14" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    ).toString('base64')}`)
+    const icon = nativeImage.createFromPath(fileURLToPath(new URL('./work-whale.png', import.meta.url)))
+    const appIcon = nativeImage.createFromPath(fileURLToPath(new URL('./app-icon.png', import.meta.url)))
+    app.dock?.setIcon(appIcon)
+    app.setAboutPanelOptions({
+      applicationName: 'DSH Work',
+      applicationVersion: app.getVersion(),
+      credits: '基于 DeepSeek Harness 构建。独立社区项目，非 DeepSeek 官方产品。',
+      iconPath: fileURLToPath(new URL('./app-icon.png', import.meta.url)),
+    })
     tray = createDesktopTray({
-      tray: new Tray(icon.resize({ width: 18, height: 18 })),
+      tray: new Tray(icon.resize({ width: 24, height: 24 })),
       window,
       host,
       buildMenu: entries => Menu.buildFromTemplate(entries.map(entry => ({ ...entry })) as MenuItemConstructorOptions[]),

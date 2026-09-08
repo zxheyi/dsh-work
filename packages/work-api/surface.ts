@@ -10,6 +10,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
+import { WORK_WHALE_DATA_URL } from './brand-assets.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -1832,7 +1833,26 @@ body[data-ds-dark-theme] {
   --work-danger: #dd7b6d;
   --work-shadow: 0 12px 32px rgba(0, 0, 0, .22);
 }
-.dsh-work-native-brand-mark { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 9px; color: white; background: #07162f; font: 760 10px/1 var(--work-font); letter-spacing: -.04em; }
+/* Product-owned artwork occupies the native brand slots without replacing navigation. */
+span:has(> [data-slot="conversation.hero.brand.mark"]) { display: none !important; }
+[data-composer-card] { --dsw-alias-button-info-fill: #248d78; --dsw-alias-button-info-hover: #1c7564; }
+/* Slot anchors keep the upstream navigation and collapsed rail intact. */
+.dsh-work-brand-whale { display: block; width: 40px; height: 40px; object-fit: contain; flex-shrink: 0; }
+button:has([data-dsh-work-brand="name"]) .dsh-work-brand-whale { width: 52px; height: 52px; }
+[data-dsh-work-brand="name"] { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 2px; color: var(--work-text); font: 600 15px/20px var(--work-font); letter-spacing: -.025em; white-space: nowrap; }
+[data-dsh-work-brand="name"] small { color: var(--work-muted); font-size: 11px; font-weight: 400; line-height: 15px; letter-spacing: 0; }
+button:has([data-dsh-work-brand="name"]) { padding-block: 4px; border-radius: 8px; }
+button:has([data-dsh-work-brand="name"]) > span { height: 52px; gap: 5px; }
+[data-slot="sidebar"] > div > div:first-child { height: 72px; }
+body:has([role="dialog"], .dsh-work-output-preview, .dsh-work-legacy-deliverable-overlay) .dsh-work-window-drag { display: none; }
+.dsh-work-window-drag { position: fixed; z-index: 1; top: 0; left: 90px; right: 0; height: 38px; -webkit-app-region: drag; pointer-events: none; }
+html[data-dsh-work-platform="darwin"] [data-slot="sidebar"] > div { position: relative; padding-top: 48px; }
+html[data-dsh-work-platform="darwin"] [data-slot="sidebar"] > div > div:first-child > button:last-child { position: absolute; z-index: 2; right: 14px; top: 10px; -webkit-app-region: no-drag; }
+html[data-dsh-work-platform="darwin"] [data-sidebar-collapsed] [data-slot="sidebar"] > div > div:first-child > button:last-child { position: static; }
+html[data-dsh-work-platform="darwin"] [data-sidebar-collapsed] [data-slot="sidebar"] > div > div:first-child { height: 36px; }
+html[data-dsh-work-platform="darwin"] [data-slot="conversation"] > div,
+html[data-dsh-work-platform="darwin"] [data-slot="details"] > div { padding-top: 38px; box-sizing: border-box; }
+
 [data-approval-key] { font-family: var(--work-font); }
 [data-approval-key] > div { border-color: color-mix(in srgb, var(--work-warning) 46%, var(--work-border)) !important; border-radius: 14px !important; box-shadow: var(--work-shadow) !important; }
 .dsh-work-session-outputs { display: grid; gap: 10px; margin-top: 16px; color: var(--work-text); font-family: var(--work-font); }
@@ -2117,7 +2137,8 @@ export function registerWorkSurface(ctx: Context, works: IWorks): () => void {
   ctx.slots.inject('sidebar.brand.name', () => ctx.slots.register({
     name: 'sidebar.brand.name',
     priority: -100,
-  }, () => h('span', { 'data-dsh-work-brand': 'name' }, 'DSH Work')))
+  }, () => h('span', { 'data-dsh-work-brand': 'name', title: 'DSH Work · 基于 DeepSeek Harness 构建' },
+    h('small', null, '基于'), h('span', null, 'DeepSeek Harness'))))
   ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
     name: 'conversation.input.left',
     id: 'dsh-work-session-resource',
@@ -2137,11 +2158,17 @@ export function registerWorkSurface(ctx: Context, works: IWorks): () => void {
   ctx.slots.inject('sidebar.brand.mark', () => ctx.slots.register({
     name: 'sidebar.brand.mark',
     priority: -100,
-  }, () => h('span', {
-    className: 'dsh-work-native-brand-mark',
+  }, () => h('img', {
+    className: 'dsh-work-brand-whale',
     'data-dsh-work-brand': 'mark',
+    src: WORK_WHALE_DATA_URL,
+    alt: '',
     'aria-hidden': 'true',
-  }, 'DW')))
+  })))
+  ctx.slots.inject('conversation.hero.brand.mark', () => ctx.slots.register({
+    name: 'conversation.hero.brand.mark',
+    priority: -100,
+  }, () => null))
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action',
     id: 'dsh-work-legacy-deliverable-open',
