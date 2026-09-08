@@ -1,6 +1,6 @@
 {
   "name": "dsh-work",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "description": "Electron desktop composition of the official DeepSeek Harness CLI",
@@ -9,7 +9,7 @@
     "build": "node scripts/build-product.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "pretest": "pnpm build",
-    "test": "node --test scripts/*.test.mjs tests/typescript-toolchain.test.ts tests/work-controller.test.ts tests/work-remote.test.ts tests/work-client.test.ts tests/work-client-bundle.test.ts tests/work-surface.test.ts tests/work-bundle.test.ts tests/lifecycle-activity.test.ts tests/runtime-contract.test.ts tests/runtime-host.test.ts tests/official-launcher.test.ts tests/local-profile-discovery.test.ts tests/shadow-profile.test.ts tests/startup-preferences.test.ts tests/startup-checkpoint.test.ts tests/startup-presentation.test.ts tests/desktop-runtime-paths.test.ts tests/desktop-security.test.ts tests/renderer.test.ts tests/close-policy.test.ts tests/tray.test.ts tests/owned-test-home.test.ts tests/generation-store.test.ts tests/runtime-guardian.test.ts tests/guardian-client.test.ts tests/unavailable-guardian-client.test.ts",
+    "test": "node --test scripts/*.test.mjs tests/typescript-toolchain.test.ts tests/work-controller.test.ts tests/work-remote.test.ts tests/work-client.test.ts tests/work-client-bundle.test.ts tests/work-surface.test.ts tests/work-bundle.test.ts tests/lifecycle-activity.test.ts tests/runtime-contract.test.ts tests/runtime-host.test.ts tests/official-launcher.test.ts tests/local-profile-discovery.test.ts tests/shadow-profile.test.ts tests/startup-preferences.test.ts tests/startup-checkpoint.test.ts tests/startup-presentation.test.ts tests/desktop-runtime-paths.test.ts tests/desktop-security.test.ts tests/renderer.test.ts tests/close-policy.test.ts tests/tray.test.ts tests/owned-test-home.test.ts tests/generation-store.test.ts tests/runtime-guardian.test.ts tests/guardian-client.test.ts tests/unavailable-guardian-client.test.ts tests/live-release-evidence.test.ts",
     "check": "pnpm typecheck && node scripts/verify-contract.mjs",
     "verify:familiar-v5": "node scripts/verify-familiar-v5-acceptance.mjs",
     "runtime:prepare": "node scripts/prepare-product-runtime.mjs",
@@ -43,7 +43,9 @@
     "test:package": "node scripts/run-packaged-smoke.mjs",
     "capture:familiar-v5": "node scripts/capture-familiar-v5.mjs",
     "notices:generate": "node scripts/distribution-notices.mjs",
-    "notices:verify-release": "node scripts/distribution-notices.mjs --release"
+    "notices:verify-release": "node scripts/distribution-notices.mjs --release",
+    "pretest:release-live": "pnpm build",
+    "test:release-live": "node scripts/run-live-release-test.mjs"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.2",

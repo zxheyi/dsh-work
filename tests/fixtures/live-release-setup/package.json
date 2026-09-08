@@ -1,0 +1,12 @@
+{
+  "name": "@dsh-work/live-release-setup",
+  "private": true,
+  "type": "module",
+  "main": "index.mjs",
+  "dsh": {
+    "bundle": {
+      "patch": "cordis.patch.yml"
+    }
+  },
+  "version": "0.0.0"
+}
