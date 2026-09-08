@@ -30,7 +30,7 @@ test('launcher uses explicit CLI, loopback, empty control pipe and an environmen
         assert.deepEqual(options.stdio, ['pipe', 'pipe', 'pipe', 'ipc'])
         assert.equal(options.env?.DSH_HOME, home)
         assert.deepEqual(options.env?.PATH?.split(path.delimiter), process.platform === 'darwin'
-          ? [path.dirname(node), '/usr/bin'] : [path.dirname(node)])
+          ? [path.dirname(node), '/usr/bin', '/bin'] : [path.dirname(node)])
         assert.equal(JSON.stringify(options).includes('forbidden-secret'), false)
         return {} as RuntimeChild
       },
@@ -132,4 +132,36 @@ test('macOS launcher environment can execute the native picker interpreter', {
   } finally {
     fs.rmSync(home, { recursive: true, force: true })
   }
+})
+
+// The default upstream foreground shell starts `bash` by name, then commands
+// such as ls/sh inherit the same runtime PATH (no login-shell startup files).
+test('macOS runtime can start Bash and its basic system commands', {
+  skip: process.platform !== 'darwin',
+}, () => {
+  createOfficialLauncher({ node: process.execPath, home: os.tmpdir() }, {
+    probe: () => 'v24.11.1\n',
+    spawnProcess(_executable, _args, options) {
+      assert.equal(execFileSync('bash', ['-c', 'ls -d . && sh -c "printf shell-ready"'], {
+        env: options.env, cwd: options.cwd, encoding: 'utf8', timeout: 5_000,
+      }), '.\nshell-ready')
+      return {} as RuntimeChild
+    },
+  })()
+})
+
+// Upstream process-tree cancellation invokes taskkill by name on Windows.
+// Help exercises native command resolution without terminating any process.
+test('Windows runtime can resolve its process-tree helper', {
+  skip: process.platform !== 'win32',
+}, () => {
+  createOfficialLauncher({ node: process.execPath, home: os.tmpdir() }, {
+    probe: () => 'v24.11.1\n',
+    spawnProcess(_executable, _args, options) {
+      execFileSync('taskkill', ['/?'], {
+        env: options.env, cwd: options.cwd, stdio: 'pipe', timeout: 5_000,
+      })
+      return {} as RuntimeChild
+    },
+  })()
 })

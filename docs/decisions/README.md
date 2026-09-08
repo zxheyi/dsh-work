@@ -36,4 +36,6 @@ Use a decision record when a change affects the desktop stack, upstream integrat
 
 | [0018: macOS runtime system utility path](0018-macos-runtime-system-utility-path.md) | accepted | Admits only `/usr/bin` after bundled Node for the pinned native picker; inherited PATH remains excluded. |
 
+| [0019: Runtime environment compatibility](0019-runtime-environment-compatibility.md) | accepted | Restores macOS basic shell commands and applies guardian environment isolation to version probing. |
+
 ADR 0001, ADR 0003, ADR 0005, and ADR 0006 are accepted; ADR 0004 and ADR 0007 through ADR 0013 are implemented against the locked alpha.2 pair. Every unchecked M0 criterion remains a delivery gate rather than an implemented claim. Frozen research is evidence, not the product controller.
