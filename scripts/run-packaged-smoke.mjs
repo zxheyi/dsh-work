@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { setTimeout as delay } from 'node:timers/promises'
+import { bundleSHA256 } from './bundle-digest.mjs'
 const root = path.resolve(import.meta.dirname, '..')
 const receipt = JSON.parse(fs.readFileSync(path.join(root, 'artifacts/package/receipt.json')))
 assert.equal(receipt.platform, process.platform)
@@ -13,7 +14,10 @@ const output = path.join(root, 'artifacts/package/smoke.json')
 fs.writeFileSync(output, JSON.stringify({ status: 'fail', phase: 'launch' }))
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-package-'))
 const installed = path.join(temporary, 'installed')
-fs.cpSync(path.join(root, receipt.bundle), installed, { recursive: true, verbatimSymlinks: true })
+const originalBundle = path.join(root, receipt.bundle)
+const testedBundleSHA256 = await bundleSHA256(originalBundle)
+fs.cpSync(originalBundle, installed, { recursive: true, verbatimSymlinks: true })
+assert.equal(await bundleSHA256(installed), testedBundleSHA256, 'relocated copy must match original bundle bytes')
 const userData = path.join(temporary, 'user-data')
 fs.mkdirSync(userData)
 const executable = process.platform === 'darwin'
@@ -96,8 +100,10 @@ try {
     assert.equal(JSON.parse(fs.readFileSync(terminal)).status, 'clean')
     if (pass === 1) assert.ok(fs.existsSync(path.join(userData, 'runtime/last-clean.json')))
   }
+  assert.equal(await bundleSHA256(installed), testedBundleSHA256, 'tested bundle changed during smoke')
+  assert.equal(await bundleSHA256(originalBundle), testedBundleSHA256, 'original bundle changed during smoke')
   clean = true
-  fs.writeFileSync(output, JSON.stringify({ status: 'pass', revision: receipt.revision, platform: process.platform, arch: process.arch, distribution: receipt.distribution, relocated: true, launches: 2, cleanShutdown: true, developerNodeIgnored: true }, null, 2))
+  fs.writeFileSync(output, JSON.stringify({ status: 'pass', revision: receipt.revision, platform: process.platform, arch: process.arch, distribution: receipt.distribution, bundleSHA256: testedBundleSHA256, relocated: true, launches: 2, cleanShutdown: true, developerNodeIgnored: true }, null, 2))
   console.log('Relocated packaged desktop: two launches, native surface, clean shutdown passed')
 } catch (error) {
   if (sendCommand && socket?.readyState === WebSocket.OPEN) {

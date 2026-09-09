@@ -1,2 +1,4 @@
 # Native material receipts bind exact bytes; Windows checkout must not convert line endings.
 third-party/native/** -text
+# Observation input has a published SHA-256 shared by both platforms.
+docs/acceptance/v0.0.1-alpha.1-source.md -text

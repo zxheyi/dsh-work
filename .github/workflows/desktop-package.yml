@@ -28,6 +28,14 @@ jobs:
       - run: pnpm runtime:prepare
       - run: pnpm package:desktop
       - run: pnpm test:package
+      - run: pnpm notices:verify-release
+      - run: pnpm package:archive
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-candidate-${{ matrix.os }}
+          path: artifacts/release/
+          if-no-files-found: error
+          compression-level: 0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
