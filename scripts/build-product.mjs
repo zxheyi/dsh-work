@@ -30,10 +30,13 @@ const assets = [
   'packages/work-api/package.json',
   'apps/desktop/index.html',
   'apps/desktop/style.css',
-  'apps/desktop/deepseek-whale.svg',
 ]
 for (const relativePath of assets) {
   const target = path.join(output, relativePath)
   fs.mkdirSync(path.dirname(target), { recursive: true })
   fs.copyFileSync(path.join(root, relativePath), target)
+}
+
+for (const name of ['work-whale.png', 'app-icon.png']) {
+  fs.copyFileSync(path.join(root, 'assets/brand', name), path.join(output, 'apps/desktop', name))
 }

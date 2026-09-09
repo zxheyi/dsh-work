@@ -10,7 +10,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   ))
   assert.equal(manifest.exports['./client'], './client.js')
   assert.deepEqual(manifest.dsh.client, {
-    external: ['@deepseek-ai/dsh-api-gateway/client', 'react'],
+    external: ['@deepseek-ai/dsh-api-gateway/client', '@deepseek-ai/dsh-client-ui-primitives', 'react'],
     inject: [
       '@deepseek-ai/dsh-api-gateway',
       '@deepseek-ai/dsh-client-connection',
@@ -49,6 +49,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
     if (specifier === '@deepseek-ai/dsh-api-gateway/client') {
       return { RemoteSnapshotStream, RemoteStreamCarrierError }
     }
+    if (specifier === '@deepseek-ai/dsh-client-ui-primitives') return { IconPlusOutline16() {} }
     if (specifier === 'react') return {
       createElement() {},
       useCallback(value: unknown) { return value },
@@ -119,21 +120,25 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   assert.deepEqual(injectedSlots, [
     'sidebar.brand.name',
     'conversation.input.left',
+    'conversation.input.dock',
     'conversation.chat.turnTail',
     'sidebar.brand.mark',
+    'conversation.hero.brand.mark',
     'sidebar.footer.action',
     'shell.overlay',
   ])
   assert.deepEqual(registeredSlots, [
     { name: 'sidebar.brand.name', priority: -100 },
     { name: 'conversation.input.left' },
+    { name: 'conversation.input.dock' },
     { name: 'conversation.chat.turnTail', priority: -100 },
     { name: 'sidebar.brand.mark', priority: -100 },
+    { name: 'conversation.hero.brand.mark', priority: -100 },
     { name: 'sidebar.footer.action' },
     { name: 'shell.overlay' },
   ])
   assert.match(source, /data-dsh-work-brand/)
-  assert.match(source, /data-dsh-work-brand": "mark"[\s\S]{0,100}, "DW"\)\)\)/u)
+  assert.equal(injectedSlots.includes('sidebar.brand.mark'), true, 'use the approved product whale in expanded and collapsed sidebars')
   assert.match(source, /--work-accent: #2f63e9/u)
   assert.match(source, /\.dsh-work-session-output \{[^}]*border-radius: 13px/su)
   assert.match(source, /\.dsh-work-output-preview-header \{[^}]*min-height: 49px/su)
@@ -152,4 +157,14 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   await dispose()
   assert.equal(source.includes('node:crypto'), false)
   assert.equal(source.includes('/Users/'), false)
+})
+
+
+test('desktop build includes the approved app and UI artwork', () => {
+  for (const name of ['app-icon.png', 'work-whale.png']) {
+    assert.deepEqual(
+      fs.readFileSync(new URL(`../dist/apps/desktop/${name}`, import.meta.url)),
+      fs.readFileSync(new URL(`../assets/brand/${name}`, import.meta.url)),
+    )
+  }
 })

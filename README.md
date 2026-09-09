@@ -1,5 +1,7 @@
 <h1 align="center">DSH Work</h1>
 
+DSH Work 基于 DeepSeek Harness 构建，是独立社区项目，非 DeepSeek 官方产品。
+
 <p align="center">
   <strong>面向普通用户的 AI 工作台，基于 DeepSeek Harness 构建。</strong>
 </p>

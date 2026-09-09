@@ -53,7 +53,7 @@ export async function createDesktopWindow(
       'renderer.js': 'text/javascript',
       'startup-presentation.js': 'text/javascript',
       'style.css': 'text/css',
-      'deepseek-whale.svg': 'image/svg+xml',
+      'work-whale.png': 'image/png',
     }
     const body = new Uint8Array(fs.readFileSync(path.join(root, resource)))
     return new Response(body, { headers: {
@@ -67,7 +67,12 @@ export async function createDesktopWindow(
     minWidth: 960,
     minHeight: 680,
     title: 'DSH Work',
-    backgroundColor: '#f5f4f0',
+    icon: path.join(root, 'app-icon.png'),
+    backgroundColor: '#ffffff',
+    ...(process.platform === 'darwin' ? {
+      titleBarStyle: 'hidden' as const,
+      trafficLightPosition: { x: 20, y: 18 },
+    } : {}),
     show: false,
     webPreferences: {
       session: isolated,

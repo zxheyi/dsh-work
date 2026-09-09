@@ -7,9 +7,11 @@ import {
   useState,
   useSyncExternalStore,
   type ChangeEvent,
+  type ComponentType,
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
+import { WORK_WHALE_DATA_URL } from './brand-assets.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -56,6 +58,7 @@ interface WorkSessionNavigationContext {
       readonly subscribe: (listener: () => void) => () => void
     }
     readonly open: (sessionId: string) => void
+    readonly scope: (sessionId: string) => NativeReferenceScope | undefined
   }
 }
 
@@ -83,9 +86,23 @@ interface SessionResourceEntryState {
   readonly error: string | null
 }
 
+interface NativeReferenceRequest {
+  readonly reference: { readonly source: string; readonly ref: string; readonly label: string; readonly appearance: 'file'; readonly clipboardText: string }
+  readonly span: { readonly start: number; readonly end: number; readonly draftRev: number }
+}
+interface NativeReferenceScope {
+  bail(scope: NativeReferenceScope, event: 'slash/input-insert-reference', request: NativeReferenceRequest): unknown
+}
+interface NativeResourceInput {
+  readonly draft: string
+  readonly phase: string
+  readonly draftRev: number
+  readonly occurrences: readonly { readonly offset: number; readonly length: number }[]
+}
 interface NativeSessionResourceProps extends WorkSurfaceInjected {
   readonly session: { readonly sessionId: string }
-  readonly input: { readonly draft: string; readonly phase: string }
+  readonly input: NativeResourceInput
+  readonly insertResourceReference: (request: NativeReferenceRequest) => boolean
   readonly inputActions: { readonly setDraft: (text: string) => void }
 }
 
@@ -437,10 +454,46 @@ function resourceErrorMessage(error: unknown): string {
   return '资料复制失败，请重试。'
 }
 
+/** Promote copied workspace paths through the native reference event, including restored drafts. */
+export function nextSessionResourceReference(input: NativeResourceInput): NativeReferenceRequest | null {
+  if (input.phase !== 'plain') return null
+  const mentions = /@"(attachment-[a-f0-9]{12}-[a-f0-9]{12}-[^"\r\n]+\.(?:md|txt|csv|json))"|@(attachment-[a-f0-9]{12}-[a-f0-9]{12}-[^\s"<>]+\.(?:md|txt|csv|json))(?=\s|$)/giu
+  for (const match of input.draft.matchAll(mentions)) {
+    const offset = match.index
+    if (input.occurrences.some(item => offset >= item.offset && offset < item.offset + item.length)) continue
+    const path = match[1] ?? match[2]
+    if (!path) continue
+    const start = offset - input.occurrences.filter(item => item.offset < offset)
+      .reduce((total, item) => total + item.length - 1, 0)
+    return {
+      reference: {
+        source: 'reference', ref: match[0], clipboardText: match[0], appearance: 'file',
+        label: path.replace(/^attachment-[a-f0-9]{12}-[a-f0-9]{12}-/iu, ''),
+      },
+      span: { start, end: start + match[0].length, draftRev: input.draftRev },
+    }
+  }
+  return null
+}
+
 function remoteErrorCode(error: unknown): string | null {
   if (typeof error !== 'object' || error === null || !('code' in error)) return null
   const code = Reflect.get(error, 'code')
   return typeof code === 'string' ? code : null
+}
+
+function NativeSessionResourceTrigger({ session, input, ResourceIcon }: NativeSessionResourceProps & { readonly ResourceIcon: ComponentType<{ readonly size: number }> }): ReactNode {
+  return h('button', {
+    className: 'dsh-work-session-resource-trigger',
+    type: 'button',
+    title: '添加资料（Markdown、TXT、CSV、JSON；复制到工作区后引用）',
+    'aria-label': '添加资料',
+    disabled: input.phase !== 'plain',
+    onClick: () => window.dispatchEvent(new CustomEvent('dsh-work:pick-session-resource', {
+      detail: { sessionId: session.sessionId },
+    })),
+  }, h('span', { className: 'dsh-work-session-resource-trigger-icon', 'aria-hidden': true }, h(ResourceIcon, { size: 14 })),
+  h('span', { className: 'dsh-work-session-resource-trigger-label' }, '资料'))
 }
 
 function NativeSessionResourceEntry({
@@ -448,6 +501,7 @@ function NativeSessionResourceEntry({
   session,
   input,
   inputActions,
+  insertResourceReference,
 }: NativeSessionResourceProps): ReactNode {
   const picker = useRef<HTMLInputElement>(null)
   const activeSessionId = useRef(session.sessionId)
@@ -487,6 +541,30 @@ function NativeSessionResourceEntry({
     setEntries(sessionResourceEntries.get(session.sessionId) ?? Object.freeze([]))
     setDropActive(false)
   }, [session.sessionId])
+
+  useEffect(() => {
+    const pick = (event: Event): void => {
+      if (event instanceof CustomEvent && event.detail?.sessionId === session.sessionId) {
+        picker.current?.click()
+      }
+    }
+    window.addEventListener('dsh-work:pick-session-resource', pick)
+    return () => window.removeEventListener('dsh-work:pick-session-resource', pick)
+  }, [session.sessionId])
+
+  const focusComposer = useCallback((): void => {
+    const targetSessionId = session.sessionId
+    requestAnimationFrame(() => {
+      if (activeSessionId.current === targetSessionId && picker.current?.isConnected) {
+        document.querySelector<HTMLElement>('[data-composer-input]')?.focus()
+      }
+    })
+  }, [session.sessionId])
+
+  useEffect(() => {
+    const reference = nextSessionResourceReference(input)
+    if (reference) insertResourceReference(reference)
+  }, [input, insertResourceReference])
 
   const updateEntries = useCallback((
     targetSessionId: string,
@@ -540,10 +618,11 @@ function NativeSessionResourceEntry({
       sessionResourceDrafts.set(targetSessionId, nextDraft)
       publishRecoveryContext(targetSessionId, nextDraft)
       inputActions.setDraft(nextDraft)
+      focusComposer()
     } catch (error) {
       failed(resourceErrorMessage(error))
     }
-  }, [inputActions, session.sessionId, updateEntries, works])
+  }, [focusComposer, inputActions, session.sessionId, updateEntries, works])
 
   const importFiles = useCallback((files: readonly File[]): void => {
     for (const file of files.slice(0, 10)) void importFile(file)
@@ -593,6 +672,7 @@ function NativeSessionResourceEntry({
       claim(event)
       setDropActive(false)
       importFiles(files)
+      focusComposer()
       const images = Array.from(event.dataTransfer?.files ?? []).filter(file => file.type.startsWith('image/'))
       if (images.length > 0) {
         const transfer = new DataTransfer()
@@ -610,7 +690,7 @@ function NativeSessionResourceEntry({
       window.removeEventListener('dragleave', onDragLeave, true)
       window.removeEventListener('drop', onDrop, true)
     }
-  }, [importFiles])
+  }, [focusComposer, importFiles])
 
   useEffect(() => {
     const copying = (): boolean => (sessionResourceEntries.get(session.sessionId) ?? [])
@@ -690,6 +770,7 @@ function NativeSessionResourceEntry({
   const remove = (entry: SessionResourceEntryState): void => {
     updateEntries(session.sessionId, current => current.filter(candidate => candidate.id !== entry.id))
     entry.abort.abort()
+    focusComposer()
     if (entry.mention) {
       const next = (sessionResourceDrafts.get(session.sessionId) ?? input.draft)
         .replace(entry.mention, '').replace(/ {2,}/gu, ' ').trimStart()
@@ -713,21 +794,14 @@ function NativeSessionResourceEntry({
       const files = Array.from(event.currentTarget.files ?? [])
       event.currentTarget.value = ''
       importFiles(files)
+      focusComposer()
     },
   }),
-  h('button', {
-    className: 'dsh-work-session-resource-trigger',
-    type: 'button',
-    title: '添加资料（Markdown、TXT、CSV、JSON）',
-    'aria-label': '添加资料',
-    disabled: input.phase !== 'plain',
-    onClick: () => picker.current?.click(),
-  }, h('span', { 'aria-hidden': true }, '+'), '资料'),
-  entries.length > 0 ? h('div', {
-    className: 'dsh-work-session-resource-popover',
+  entries.some(entry => entry.status !== 'ready') ? h('div', {
+    className: 'dsh-work-session-resource-list',
     role: 'status',
     'aria-label': '待发送资料',
-  }, ...entries.map(entry => h('div', {
+  }, ...entries.filter(entry => entry.status !== 'ready').map(entry => h('div', {
     className: `dsh-work-session-resource-row is-${entry.status}`,
     key: entry.id,
     'data-work-session-resource-name': entry.file.name,
@@ -737,9 +811,7 @@ function NativeSessionResourceEntry({
     h('strong', { title: entry.path ?? entry.file.name }, entry.file.name),
     h('small', null, entry.status === 'copying'
       ? '正在复制到当前工作区…'
-      : entry.status === 'ready'
-        ? '已复制，发送后读取'
-        : entry.error)),
+      : entry.error)),
   entry.status === 'failed' ? h('button', {
     type: 'button',
     onClick: () => { void importFile(entry.file, entry.id) },
@@ -1832,7 +1904,26 @@ body[data-ds-dark-theme] {
   --work-danger: #dd7b6d;
   --work-shadow: 0 12px 32px rgba(0, 0, 0, .22);
 }
-.dsh-work-native-brand-mark { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 9px; color: white; background: #07162f; font: 760 10px/1 var(--work-font); letter-spacing: -.04em; }
+/* Product-owned artwork occupies the native brand slots without replacing navigation. */
+span:has(> [data-slot="conversation.hero.brand.mark"]) { display: none !important; }
+[data-composer-card] { --dsw-alias-button-info-fill: #248d78; --dsw-alias-button-info-hover: #1c7564; }
+/* Slot anchors keep the upstream navigation and collapsed rail intact. */
+.dsh-work-brand-whale { display: block; width: 40px; height: 40px; object-fit: contain; flex-shrink: 0; }
+button:has([data-dsh-work-brand="name"]) .dsh-work-brand-whale { width: 52px; height: 52px; }
+[data-dsh-work-brand="name"] { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 2px; color: var(--work-text); font: 600 15px/20px var(--work-font); letter-spacing: -.025em; white-space: nowrap; }
+[data-dsh-work-brand="name"] small { color: var(--work-muted); font-size: 11px; font-weight: 400; line-height: 15px; letter-spacing: 0; }
+button:has([data-dsh-work-brand="name"]) { padding-block: 4px; border-radius: 8px; }
+button:has([data-dsh-work-brand="name"]) > span { height: 52px; gap: 5px; }
+[data-slot="sidebar"] > div > div:first-child { height: 72px; }
+body:has([role="dialog"], .dsh-work-output-preview, .dsh-work-legacy-deliverable-overlay) .dsh-work-window-drag { display: none; }
+.dsh-work-window-drag { position: fixed; z-index: 1; top: 0; left: 90px; right: 0; height: 38px; -webkit-app-region: drag; pointer-events: none; }
+html[data-dsh-work-platform="darwin"] [data-slot="sidebar"] > div { position: relative; padding-top: 48px; }
+html[data-dsh-work-platform="darwin"] [data-slot="sidebar"] > div > div:first-child > button:last-child { position: absolute; z-index: 2; right: 14px; top: 10px; -webkit-app-region: no-drag; }
+html[data-dsh-work-platform="darwin"] [data-sidebar-collapsed] [data-slot="sidebar"] > div > div:first-child > button:last-child { position: static; }
+html[data-dsh-work-platform="darwin"] [data-sidebar-collapsed] [data-slot="sidebar"] > div > div:first-child { height: 36px; }
+html[data-dsh-work-platform="darwin"] [data-slot="conversation"] > div,
+html[data-dsh-work-platform="darwin"] [data-slot="details"] > div { padding-top: 38px; box-sizing: border-box; }
+
 [data-approval-key] { font-family: var(--work-font); }
 [data-approval-key] > div { border-color: color-mix(in srgb, var(--work-warning) 46%, var(--work-border)) !important; border-radius: 14px !important; box-shadow: var(--work-shadow) !important; }
 .dsh-work-session-outputs { display: grid; gap: 10px; margin-top: 16px; color: var(--work-text); font-family: var(--work-font); }
@@ -1982,14 +2073,23 @@ body[data-ds-dark-theme] {
 .dsh-work-legacy-deliverable-loading { min-height: 160px; display: grid; place-items: center; margin: 0; color: var(--work-muted); font-size: 13px; }
 .dsh-work-legacy-deliverable-frame footer { display: flex; justify-content: flex-end; padding: 12px 18px; border-top: 1px solid var(--work-border); }
 .dsh-work-inline-error { margin: 8px 0 -4px; color: var(--work-danger); font-size: 12px; line-height: 18px; }
-.dsh-work-session-resource { position: relative; display: inline-flex; align-items: center; font-family: var(--work-font); }
+.dsh-work-session-resource { min-width: 0; width: min(var(--dsh-composer-card-max-width, 720px), calc(100% - 32px)); margin-inline: auto; font-family: var(--work-font); }
+.dsh-work-session-resource:not(:has(.dsh-work-session-resource-list)) { height: 0; }
+.dsh-work-session-resource.is-drop-active { outline: 1px dashed var(--work-accent); border-radius: 10px; }
 .dsh-work-file-input { position: fixed; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); opacity: 0; pointer-events: none; }
-.dsh-work-session-resource-trigger { height: 30px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border: 0; border-radius: 7px; color: var(--work-muted); background: transparent; cursor: pointer; font: 500 12px/1 var(--work-font); }
-.dsh-work-session-resource-trigger span { font-size: 17px; line-height: 1; }
-.dsh-work-session-resource-trigger:hover:not(:disabled), .dsh-work-session-resource.is-drop-active .dsh-work-session-resource-trigger { color: var(--work-accent); background: var(--work-accent-subtle); }
-.dsh-work-session-resource-trigger:disabled { opacity: .45; cursor: default; }
-.dsh-work-session-resource-popover { position: absolute; left: 0; bottom: 38px; z-index: 20; width: min(360px, calc(100vw - 40px)); display: grid; gap: 5px; padding: 8px; border: 1px solid var(--work-border); border-radius: 10px; color: var(--work-text); background: var(--work-surface); box-shadow: var(--work-shadow); }
-.dsh-work-session-resource-row { min-width: 0; display: flex; align-items: center; gap: 8px; padding: 7px; border-radius: 7px; background: var(--work-surface-subtle); }
+.dsh-work-session-resource-trigger { min-width: 0; max-width: 220px; height: 28px; display: inline-flex; align-items: center; gap: 4px; padding: 0 4px 0 8px; border: none; border-radius: 24px; outline: none; color: var(--dsw-alias-label-secondary); background: transparent; cursor: pointer; font: inherit; font-size: 13px; font-weight: 500; line-height: 20px; }
+.dsh-work-session-resource-trigger-icon { display: inline-flex; flex: none; }
+.dsh-work-session-resource-trigger-icon svg { width: 14px; height: 14px; }
+.dsh-work-session-resource-trigger-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-work-session-resource-trigger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.dsh-work-session-resource-trigger:focus-visible { box-shadow: 0 0 0 2px var(--dsw-alias-border-l3); }
+.dsh-work-session-resource-trigger:disabled { color: var(--dsw-alias-label-dimmed); cursor: default; }
+@container (width <= 460px) { .dsh-work-session-resource-trigger-label { display: none; } }
+.dsh-work-session-resource-list { display: flex; flex-wrap: wrap; gap: 6px; max-height: 100px; overflow-y: auto; margin-bottom: 4px; color: var(--work-text); }
+.dsh-work-session-resource-row { min-width: 0; display: flex; align-items: center; gap: 6px; padding: 4px 7px; border-radius: 8px; background: var(--work-surface-subtle); }
+[data-composer-chip="reference"] { --dsw-alias-state-business-primary: var(--work-text); --dsw-alias-interactive-bg-hover: var(--work-surface-subtle); }
+[data-composer-chip="reference"] > span { height: 22px; max-width: min(320px, 100%); border-radius: 11px; font-size: 12px; line-height: 22px; }
+[data-composer-chip="reference"] > span > svg { color: var(--work-accent); }
 .dsh-work-session-resource-row.is-failed { color: var(--work-danger); }
 .dsh-work-session-resource-icon { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; flex: none; border-radius: 6px; color: var(--work-accent); background: var(--work-accent-subtle); font-size: 10px; font-weight: 700; }
 .dsh-work-session-resource-copy { min-width: 0; flex: 1; }
@@ -2014,7 +2114,7 @@ function installStyles(): () => void {
   return () => tag.remove()
 }
 
-export function registerWorkSurface(ctx: Context, works: IWorks): () => void {
+export function registerWorkSurface(ctx: Context, works: IWorks, ResourceIcon: ComponentType<{ readonly size: number }>): () => void {
   const sessionNavigation = (ctx as Context & WorkSessionNavigationContext).sessions
   let stopRecoveryNavigation: (() => void) | null = null
   const openRetainedSession = (retained: WorkRecoveryContext): void => {
@@ -2117,13 +2217,26 @@ export function registerWorkSurface(ctx: Context, works: IWorks): () => void {
   ctx.slots.inject('sidebar.brand.name', () => ctx.slots.register({
     name: 'sidebar.brand.name',
     priority: -100,
-  }, () => h('span', { 'data-dsh-work-brand': 'name' }, 'DSH Work')))
+  }, () => h('span', { 'data-dsh-work-brand': 'name', title: 'DSH Work · 基于 DeepSeek Harness 构建' },
+    h('small', null, '基于'), h('span', null, 'DeepSeek Harness'))))
   ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
     name: 'conversation.input.left',
     id: 'dsh-work-session-resource',
     order: -100,
     label: '添加资料',
-    inject: () => ({ works }),
+    inject: () => ({ works, ResourceIcon }),
+  }, NativeSessionResourceTrigger))
+  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+    name: 'conversation.input.dock',
+    id: 'dsh-work-session-resources',
+    order: -100,
+    inject: (sessionId: string) => ({
+      works,
+      insertResourceReference: (request: NativeReferenceRequest): boolean => {
+        const scope = sessionNavigation.scope(sessionId)
+        return scope?.bail(scope, 'slash/input-insert-reference', request) === true
+      },
+    }),
   }, NativeSessionResourceEntry))
   ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
     name: 'conversation.chat.turnTail',
@@ -2137,11 +2250,17 @@ export function registerWorkSurface(ctx: Context, works: IWorks): () => void {
   ctx.slots.inject('sidebar.brand.mark', () => ctx.slots.register({
     name: 'sidebar.brand.mark',
     priority: -100,
-  }, () => h('span', {
-    className: 'dsh-work-native-brand-mark',
+  }, () => h('img', {
+    className: 'dsh-work-brand-whale',
     'data-dsh-work-brand': 'mark',
+    src: WORK_WHALE_DATA_URL,
+    alt: '',
     'aria-hidden': 'true',
-  }, 'DW')))
+  })))
+  ctx.slots.inject('conversation.hero.brand.mark', () => ctx.slots.register({
+    name: 'conversation.hero.brand.mark',
+    priority: -100,
+  }, () => null))
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action',
     id: 'dsh-work-legacy-deliverable-open',

@@ -1,3 +1,4 @@
+import type { ComponentType } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import {
   RemoteSnapshotStream,
@@ -44,6 +45,11 @@ export function createWorkStateStream(
   })
 }
 
+// The web host supplies shared UI primitives through the same ModuleLoader require as native client plugins.
+declare const require: (id: '@deepseek-ai/dsh-client-ui-primitives') => {
+  readonly IconPlusOutline16: ComponentType<{ readonly size: number }>
+}
+
 export const inject = ['remote', 'slots', 'layout', 'sessions']
 
 export async function apply(ctx: Context): Promise<() => Promise<void>> {
@@ -51,7 +57,7 @@ export async function apply(ctx: Context): Promise<() => Promise<void>> {
   const workScope = ctx.inject(['remote.work', 'layout', 'sessions'], workCtx => {
     const model = new ClientWorkModel(workCtx.remote.work)
     const works = new WorksController(workCtx, model)
-    const disposeSurface = registerWorkSurface(workCtx, works)
+    const disposeSurface = registerWorkSurface(workCtx, works, require('@deepseek-ai/dsh-client-ui-primitives').IconPlusOutline16)
     const control = createWorkStateStream(workCtx.remote, model)
     control.start()
     return async () => {

@@ -39,3 +39,5 @@ Use a decision record when a change affects the desktop stack, upstream integrat
 | [0019: Runtime environment compatibility](0019-runtime-environment-compatibility.md) | accepted | Restores macOS shell and Windows process-helper lookup; isolates guardian version probing. |
 
 ADR 0001, ADR 0003, ADR 0005, and ADR 0006 are accepted; ADR 0004 and ADR 0007 through ADR 0013 are implemented against the locked alpha.2 pair. Every unchecked M0 criterion remains a delivery gate rather than an implemented claim. Frozen research is evidence, not the product controller.
+
+[0019: Native source material delivery](0019-native-source-material-delivery.md) — accepted; self-contained, hash-locked native source/notice delivery with library replacement verification.

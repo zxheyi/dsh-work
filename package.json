@@ -45,7 +45,8 @@
     "notices:generate": "node scripts/distribution-notices.mjs",
     "notices:verify-release": "node scripts/distribution-notices.mjs --release",
     "pretest:release-live": "pnpm build",
-    "test:release-live": "node scripts/run-live-release-test.mjs"
+    "test:release-live": "node scripts/run-live-release-test.mjs",
+    "notices:prepare-native": "node scripts/native-distribution.mjs"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.2",

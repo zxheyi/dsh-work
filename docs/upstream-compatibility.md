@@ -46,6 +46,22 @@ The repository gate must verify:
 
 The shadow may point the pinned official settings, credential, session, attachment and storage providers at the user-selected Harness home. This is Harness-native provider configuration rather than a copied persistence implementation. Compatibility verification must prove the exact provider row ids and configuration fields against the pinned package family, prove source Profile bytes stay unchanged, and prove safe mode uses no selected external path. A future upstream pin that changes these rows or path contracts blocks shared-profile mode until its dedicated compatibility change passes.
 
+### Shared Agent presets
+
+The owned shared generation maps `.agent-presets` to the selected home's `.agent-presets` with a directory symlink (junction on Windows). The pinned `dsh-agent-presets` registry derives its user root from `dshHomePath('.agent-presets')`; mapping that directory preserves its complete Profile configuration, including `default`, configured `roots`, root precedence, `includeUserRoot`, and `includeShippedRoot`. A config overlay cannot safely add a root because pinned Cordis patching replaces the whole `config` field.
+
+Preparation creates an empty selected-home preset directory when absent so native authoring can work through the link. It never copies preset contents or changes the source Profile. Existing generation directories or links to other targets are rejected without deleting their data. Native copy/delete act on the shared home; isolated and safe-mode generations have no such mapping. This completes ADR 0016's selected-home reuse rather than introducing another preset service.
+
+| Scenario | Expected behavior | Verification |
+| --- | --- | --- |
+| Shared home with presets | Native listing and copy/delete use the selected home | Shadow native scanner/authoring test and real CLI integration |
+| Explicit roots or disabled user root | Preserve the Profile's native configuration and precedence | Byte comparison and real CLI configured-root test |
+| No preset directory yet | Create an empty user root so later authoring succeeds | Empty-root regression |
+| Existing owned directory or different link | Reject without removing existing data | Conflict regressions |
+| Independent or safe-mode generation | Keep user presets isolated | Isolated CLI test and existing Guardian safe-mode tests |
+
+Regression evidence: `tests/shadow-profile.test.ts` uses the pinned native discovery/copy/delete functions; `tests/runtime-integration.test.ts` boots the official CLI to verify shared discovery, explicit user-root disabling and custom-root preservation, and isolated behavior.
+
 ## DSH Desktop reference
 
 [DSH Desktop](https://github.com/anywhere-labs/dsh-desktop) is an architectural reference, not an implementation dependency. At reviewed revision [`8bfc99c`](https://github.com/anywhere-labs/dsh-desktop/tree/8bfc99c1597a10966f3d20f963cd2efe82d6f4b1), it demonstrates three useful boundaries:

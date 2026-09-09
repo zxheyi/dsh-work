@@ -12,6 +12,9 @@ import {
   type RuntimeHostSnapshot,
 } from '../packages/runtime-host/index.ts'
 import { prepareDevelopmentProfile, createOfficialLauncher } from '../packages/runtime-host/official-launcher.ts'
+import { discoverLocalProfiles } from '../packages/runtime-profile/discovery.ts'
+import { prepareShadowProfile } from '../packages/runtime-profile/shadow.ts'
+import { pathToFileURL } from 'node:url'
 import { createOutputGuard } from './support/runtime-output-guard.ts'
 
 test('product Bundle runs through the official CLI for three ready/EOF/restart cycles', { timeout: 90_000 }, async () => {
@@ -235,3 +238,71 @@ for (const reject of [true, false]) {
     }
   })
 }
+
+
+test('real shared Profile discovers user presets and preserves explicit preset configuration', { timeout: 60_000 }, async () => {
+  const node = process.env.DSH_WORK_NODE
+  assert.ok(node)
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-shared-presets-'))
+  let host: RuntimeHost | null = null
+  try {
+    const sourceHome = path.join(root, 'source')
+    const sourceProfile = path.join(sourceHome, 'profiles/web')
+    fs.mkdirSync(sourceProfile, { recursive: true })
+    fs.writeFileSync(path.join(sourceProfile, 'package.json'), JSON.stringify({
+      dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'] } },
+    }))
+    const preset = path.join(sourceHome, '.agent-presets/workbench-readonly')
+    fs.mkdirSync(preset, { recursive: true })
+    fs.writeFileSync(path.join(preset, 'preset.yml'), 'name: Workbench read only\n')
+    fs.writeFileSync(path.join(preset, 'agent.cordis.yml'), '[]\n')
+    const [source] = discoverLocalProfiles({ environment: { DSH_HOME: sourceHome }, userHome: root }).profiles
+    assert.ok(source)
+    const probe = path.join(root, 'preset-probe.mjs')
+    fs.writeFileSync(probe, `
+      import fs from 'node:fs'
+      export const inject = ['agentPresets']
+      export function apply(ctx, config) {
+        return ctx.agentPresets.list().then(roster => {
+          fs.writeFileSync(config.report, JSON.stringify({ roster, roots: ctx.agentPresets.roots }))
+        })
+      }
+    `)
+    for (const mode of ['shared', 'configured', 'isolated']) {
+      const home = path.join(root, mode)
+      if (mode === 'configured') fs.writeFileSync(path.join(sourceProfile, 'cordis.patch.yml'), JSON.stringify([
+        { id: 'agent-presets', config: { default: 'standard', includeUserRoot: false,
+          roots: [{ path: path.join(root, 'team-presets'), trust: 'user' }] } },
+      ]))
+      const prepared = mode === 'isolated' ? (prepareDevelopmentProfile(home), { patches: [] }) : prepareShadowProfile(home, source)
+      const report = path.join(home, 'preset-report.json')
+      const probePatch = path.join(home, 'preset-probe.patch.json')
+      fs.writeFileSync(probePatch, JSON.stringify([{ insert: [{ id: 'preset-probe', name: pathToFileURL(probe).href, config: { report } }] }]))
+      const launch = createOfficialLauncher({ node, home, patches: [...prepared.patches, probePatch] })
+      host = createRuntimeHost({ launch: () => {
+        const child = launch()
+        child.stdout.resume()
+        child.stderr.resume()
+        return child
+      } })
+      const started = await host.start()
+      assert.equal(started.state, 'ready', started.code ?? mode)
+      const reportDeadline = Date.now() + 5_000
+      while (!fs.existsSync(report) && Date.now() < reportDeadline) {
+        await new Promise(resolve => setTimeout(resolve, 25))
+      }
+      const result = JSON.parse(fs.readFileSync(report, 'utf8'))
+      assert.equal(JSON.stringify(result.roster).includes('workbench-readonly'), mode === 'shared')
+      if (mode === 'configured') {
+        assert.ok(result.roots.some((entry: { path: string }) => entry.path === path.join(root, 'team-presets')))
+        assert.equal(result.roots.some((entry: { path: string }) => entry.path.endsWith('.agent-presets')), false)
+      }
+      if (mode === 'isolated') assert.equal(fs.existsSync(path.join(home, '.agent-presets')), false)
+      assert.equal((await host.stop()).state, 'stopped')
+      host = null
+    }
+  } finally {
+    await host?.stop()
+    if (!host || host.snapshot().canStart) fs.rmSync(root, { recursive: true, force: true })
+  }
+})

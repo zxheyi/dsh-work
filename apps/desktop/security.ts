@@ -9,7 +9,7 @@ export const DESKTOP_ASSETS = [
   'renderer.js',
   'startup-presentation.js',
   'style.css',
-  'deepseek-whale.svg',
+  'work-whale.png',
 ] as const
 export type DesktopAsset = typeof DESKTOP_ASSETS[number]
 export const STATUS_CONTENT_SECURITY_POLICY = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
