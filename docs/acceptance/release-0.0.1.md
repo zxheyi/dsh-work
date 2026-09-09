@@ -1,5 +1,7 @@
 # 0.0.1 functional acceptance
 
+Historical evidence: the checks below describe the 2026-09-08 run. Native materials #38 was subsequently implemented by PR #51. The [v0.0.1-alpha.1 candidate handoff](v0.0.1-alpha.1.md) supersedes the draft preparation status below without changing these frozen test results.
+
 On 2026-09-08, all four functional paths passed on macOS arm64 with the real DeepSeek official provider and deepseek-v4-flash. The [frozen manifest](release-0.0.1-evidence/manifest.json) binds the three executions to one run ID and the actual source bytes. The base revision is recorded separately from uncommitted source digests; a base revision alone is not evidence for this change.
 
 | Requested path | Actual evidence |

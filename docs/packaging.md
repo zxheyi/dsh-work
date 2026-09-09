@@ -11,9 +11,13 @@ pnpm install --frozen-lockfile --ignore-scripts
 pnpm runtime:prepare
 pnpm package:desktop
 pnpm test:package
+pnpm notices:verify-release
+pnpm package:archive
 ```
 
 The bundle is under `artifacts/package/bundles/`; `receipt.json` records revision, lock digest, platform and signing classification. `smoke.json` and screenshots record two launches of a relocated bundle. The test uses an isolated user-data directory and a loopback-only debugging port on the test process; normal application launch does not enable debugging. Test fixtures and credentials are not bundled.
+
+The archive command retains the complete tested bundle as a macOS tar.gz or Windows zip with a versioned filename and SHA-256 receipt. CI uploads these complete candidate archives separately from package evidence. They are internal observation candidates; neither archive creation nor CI upload publishes a Release. Follow the [v0.0.1-alpha.1 candidate handoff](acceptance/v0.0.1-alpha.1.md) to freeze a draft and collect actual observations.
 
 On macOS copy `DSH Work.app` to an installation directory. On Windows preserve the entire generated folder and launch `DSH Work.exe`. These unsigned internal-test bundles are not signed installers or Gatekeeper-approved downloads. Do not publish them as stable releases.
 
