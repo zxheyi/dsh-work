@@ -32,4 +32,4 @@ The Node-options test establishes startup contamination, not arbitrary preload e
 
 Before changes: both new defect regressions failed on macOS arm64 / Node 24.11.1; Bash returned ENOENT and the guardian probe exited 9. After changes: those regressions and the existing real AppleScript probe pass. Local product tests, typecheck/contract, 11 runtime integration tests, and workspace empty/create/restore desktop checks passed for the first two fixes. Windows CI then established the third RED regression; its corrected revision reruns affected checks. Full revision-bound results are recorded with the PR; the report must not treat a successful startup smoke as proof of every lazy native tool path.
 
-See [ADR 0019](../decisions/0019-runtime-environment-compatibility.md) for the accepted environment policy and rollback.
+See [ADR 0020](../decisions/0020-runtime-environment-compatibility.md) for the accepted environment policy and rollback.
