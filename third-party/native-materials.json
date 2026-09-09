@@ -1093,7 +1093,8 @@
       "file": "tiff.tar.gz",
       "sha256": "62b15f44c10106065211efa22a2dc77937bd97ee1f6e3afd2c9659010de112eb",
       "bytes": 2616788,
-      "kind": "source"
+      "kind": "source",
+      "repositoryFile": "third-party/native/tiff.tar.gz"
     },
     {
       "id": "highway",
