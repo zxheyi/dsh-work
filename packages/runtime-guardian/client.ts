@@ -75,16 +75,19 @@ export async function createGuardianClient(
   if (!path.isAbsolute(node || '') || !path.isAbsolute(productRoot || '')) {
     throw new Error('explicit guardian paths required')
   }
+  const env: NodeJS.ProcessEnv = { PATH: path.dirname(node), NO_COLOR: '1' }
+  for (const key of ['SystemRoot', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'TMPDIR']) {
+    if (process.env[key]) env[key] = process.env[key]
+  }
+  // The version probe is a child process too; ambient Node options must not
+  // prevent the verified runtime from starting before environment isolation.
   const version = probe(node, ['--version'], {
+    env,
     timeout: 5_000,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   if (version.trim() !== 'v24.11.1') throw new Error('guardian Node version mismatch')
-  const env: NodeJS.ProcessEnv = { PATH: path.dirname(node), NO_COLOR: '1' }
-  for (const key of ['SystemRoot', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'TMPDIR']) {
-    if (process.env[key]) env[key] = process.env[key]
-  }
   const child = spawnProcess(node, [entry, productRoot], {
     env,
     shell: false,
