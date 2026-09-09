@@ -5,6 +5,7 @@ import path from 'node:path'
 import test from 'node:test'
 import { execFileSync } from 'node:child_process'
 import { createOfficialLauncher, prepareDevelopmentProfile } from '../packages/runtime-host/official-launcher.ts'
+import { runtimeSearchPath } from '../packages/runtime-host/environment.ts'
 import type { RuntimeChild } from '../packages/runtime-host/index.ts'
 import { removeOwnedTestHome } from './support/owned-test-home.ts'
 
@@ -29,8 +30,7 @@ test('launcher uses explicit CLI, loopback, empty control pipe and an environmen
         assert.equal(options.shell, false)
         assert.deepEqual(options.stdio, ['pipe', 'pipe', 'pipe', 'ipc'])
         assert.equal(options.env?.DSH_HOME, home)
-        assert.deepEqual(options.env?.PATH?.split(path.delimiter), process.platform === 'darwin'
-          ? [path.dirname(node), '/usr/bin'] : [path.dirname(node)])
+        assert.equal(options.env?.PATH, runtimeSearchPath(node, process.platform, process.env))
         assert.equal(JSON.stringify(options).includes('forbidden-secret'), false)
         return {} as RuntimeChild
       },
@@ -132,4 +132,56 @@ test('macOS launcher environment can execute the native picker interpreter', {
   } finally {
     fs.rmSync(home, { recursive: true, force: true })
   }
+})
+
+// The default upstream foreground shell starts `bash` by name, then commands
+// such as ls/sh inherit the same runtime PATH (no login-shell startup files).
+test('macOS runtime can start Bash and its basic system commands', {
+  skip: process.platform !== 'darwin',
+}, () => {
+  createOfficialLauncher({ node: process.execPath, home: os.tmpdir() }, {
+    probe: () => 'v24.11.1\n',
+    spawnProcess(_executable, _args, options) {
+      assert.equal(execFileSync('bash', ['-c', 'ls -d . && sh -c "printf shell-ready"'], {
+        env: options.env, cwd: options.cwd, encoding: 'utf8', timeout: 5_000,
+      }), '.\nshell-ready')
+      return {} as RuntimeChild
+    },
+  })()
+})
+
+// Upstream process-tree cancellation invokes taskkill by name on Windows.
+// Help exercises native command resolution without terminating any process.
+test('Windows runtime can resolve its process-tree helper', {
+  skip: process.platform !== 'win32',
+}, () => {
+  createOfficialLauncher({ node: process.execPath, home: os.tmpdir() }, {
+    probe: () => 'v24.11.1\n',
+    spawnProcess(_executable, _args, options) {
+      execFileSync('taskkill', ['/?'], {
+        env: options.env, cwd: options.cwd, stdio: 'pipe', timeout: 5_000,
+      })
+      return {} as RuntimeChild
+    },
+  })()
+})
+
+
+test('runtime command lookup admits only fixed platform helpers after bundled Node', () => {
+  assert.equal(runtimeSearchPath('/app with spaces/node', 'darwin', { PATH: '/untrusted:.' }),
+    '/app with spaces:/usr/bin:/bin')
+  assert.equal(runtimeSearchPath('/app/node', 'linux', { PATH: '/untrusted:.' }), '/app')
+  for (const key of ['SystemRoot', 'SYSTEMROOT', 'systemroot', 'WINDIR']) {
+    assert.equal(runtimeSearchPath('D:\\DSH Work\\node.exe', 'win32', {
+      [key]: 'E:\\Windows', PATH: 'C:\\untrusted;.',
+    }), 'D:\\DSH Work;E:\\Windows\\System32')
+  }
+  for (const root of [undefined, '', 'relative-windows', '\\Windows', 'C:\\Windows;C:\\untrusted', 'C:\\Windows\0']) {
+    assert.equal(runtimeSearchPath('D:\\DSH Work\\node.exe', 'win32', {
+      SystemRoot: root, PATH: 'C:\\untrusted;.',
+    }), 'D:\\DSH Work')
+  }
+  assert.equal(runtimeSearchPath('D:\\DSH Work\\node.exe', 'win32', {
+    SystemRoot: 'E:\\Windows', WINDIR: 'F:\\other',
+  }), 'D:\\DSH Work;E:\\Windows\\System32')
 })

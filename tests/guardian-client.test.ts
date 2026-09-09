@@ -127,3 +127,19 @@ test('guardian readiness timeout disconnects the detached process for bounded cl
   }), /readiness timeout/)
   assert.equal(disconnects, 1)
 })
+
+test('guardian version probe ignores incompatible ambient Node options', async () => {
+  const productRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-work-guardian-env-'))
+  const previous = process.env.NODE_OPTIONS
+  process.env.NODE_OPTIONS = '--dsh-work-invalid-ambient-option'
+  let client: Awaited<ReturnType<typeof createGuardianClient>> | undefined
+  try {
+    client = await createGuardianClient({ node: process.execPath, productRoot })
+    assert.equal(client.snapshot().state, 'stopped')
+  } finally {
+    if (previous === undefined) delete process.env.NODE_OPTIONS
+    else process.env.NODE_OPTIONS = previous
+    await client?.dispose()
+    fs.rmSync(productRoot, { recursive: true, force: true })
+  }
+})
