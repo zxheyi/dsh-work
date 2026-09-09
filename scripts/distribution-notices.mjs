@@ -2,6 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
+import { retainNativeMaterials } from './native-distribution.mjs'
+import { verifyNativeReplacement } from './native-replacement-smoke.mjs'
 const root = path.resolve(import.meta.dirname, '..')
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const read = file => JSON.parse(fs.readFileSync(file))
@@ -90,7 +92,9 @@ export function generateDistributionNotices(application, resources) {
       const versions = path.join(application, item.path, 'versions.json')
       item.nativeComponents = fs.existsSync(versions) ? read(versions) : {}
       item.notices.push(retain(fs.readFileSync(path.join(application, item.path, 'README.md')), `${item.path}/README.md`))
-      blockers.push({ package: `${item.name}@${item.version}`, reason: 'Native component license texts and corresponding-source/relinking distribution must be completed before public redistribution; upstream license table and exact component versions are retained.' })
+      for (const reason of retainNativeMaterials(item, application, destination)) {
+        blockers.push({ package: `${item.name}@${item.version}`, reason })
+      }
     }
     if (item.notices.length === 0) blockers.push({ package: `${item.name}@${item.version}`, reason: 'No shipped or verified supplemental license text.' })
   }
@@ -104,12 +108,20 @@ export function generateDistributionNotices(application, resources) {
     'DSH Work uses MIT. Dependencies retain their own licenses. Node notices are in ../runtime/node/LICENSE; Electron and Chromium notices are copied alongside this inventory.', '',
     '| Package | License | Notice files |', '| --- | --- | --- |',
     ...packages.map(item => `| ${item.name}@${item.version} | ${item.license} | ${item.notices.map(notice => `[text](${notice.file})`).join(', ') || 'MISSING'} |`),
-    '', '## Pending distribution materials', '', ...blockers.map(item => `- ${item.package}: ${item.reason}`)]
+    '', '## Native sources and replacement', '', 'When present, [native/REBUILDING.md](native/REBUILDING.md) describes the supplied source archives, notices, build recipes and library replacement. The inventory binds them to actual native binary digests.', '', '## Pending distribution materials', '', ...blockers.map(item => `- ${item.package}: ${item.reason}`)]
   fs.writeFileSync(path.join(destination, 'THIRD-PARTY-NOTICES.md'), `${lines.join('\n')}\n`)
   return inventory
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const inventory = generateDistributionNotices(path.join(root, 'artifacts/package/application'), path.join(root, 'artifacts/package/resources'))
   console.log(`Inventoried ${inventory.packages.length} production packages; ${inventory.blockers.length} distribution-material blockers.`)
-  if (process.argv.includes('--release') && inventory.blockers.length) throw new Error('distribution material gate is not complete')
+  if (process.argv.includes('--release')) {
+    if (inventory.blockers.length) {
+      for (const blocker of inventory.blockers.slice(0, 5)) console.error(`${blocker.package}: ${blocker.reason}`)
+      throw new Error('distribution material gate is not complete; run pnpm notices:prepare-native and inspect artifacts/package/resources/third-party/inventory.json')
+    }
+    const replacement = verifyNativeReplacement(path.join(root, 'artifacts/package/application'))
+    fs.writeFileSync(path.join(root, 'artifacts/package/resources/third-party/native-replacement-smoke.json'), `${JSON.stringify(replacement, null, 2)}\n`)
+    console.log('Native addon accepts modified ABI-compatible library bytes.')
+  }
 }

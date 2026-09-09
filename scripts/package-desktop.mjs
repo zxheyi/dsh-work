@@ -4,6 +4,8 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { generateDistributionNotices } from './distribution-notices.mjs'
+import { prepareNativeMaterials } from './native-distribution.mjs'
+import { verifyNativeReplacement } from './native-replacement-smoke.mjs'
 import { stageProductRuntime } from './stage-product-runtime.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
@@ -47,7 +49,10 @@ export async function packageDesktop({ signed = false } = {}) {
   fs.rmSync(path.join(stage, 'pnpm-lock.yaml'))
   const resources = path.join(output, 'resources')
   stageProductRuntime(context, resources)
+  await prepareNativeMaterials()
   const inventory = generateDistributionNotices(stage, resources)
+  const replacement = verifyNativeReplacement(stage)
+  fs.writeFileSync(path.join(resources, 'third-party/native-replacement-smoke.json'), `${JSON.stringify(replacement, null, 2)}\n`)
   if (signed && inventory.blockers.length) throw new Error('distribution material gate is not complete')
   const packages = await packager({
     dir: stage, out: path.join(output, 'bundles'), name: 'DSH Work',
