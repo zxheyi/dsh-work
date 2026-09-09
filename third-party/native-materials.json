@@ -1133,7 +1133,8 @@
       "file": "fontconfig.tar.gz",
       "sha256": "9ae01e1d53acdef56010c5451cd34aa41d325b2faccd8606448d8fa01b2496b3",
       "bytes": 666753,
-      "kind": "source"
+      "kind": "source",
+      "repositoryFile": "third-party/native/fontconfig.tar.gz"
     },
     {
       "id": "harfbuzz",
