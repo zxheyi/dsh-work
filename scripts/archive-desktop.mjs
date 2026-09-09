@@ -48,7 +48,9 @@ export function validateCandidateEvidence({ current, receipt, smoke, inventory, 
     requireEvidence(replaced?.before === binary.sha256 && /^[a-f0-9]{64}$/u.test(replaced.after)
       && replaced.after !== replaced.before, `native replacement digest evidence is invalid: ${binary.file}`)
   }
-  requireEvidence(replacement.result?.version === native[0].nativeComponents?.vips
+  const loadedVersion = replacement.result?.version
+  requireEvidence(loadedVersion?.semver === native[0].nativeComponents?.vips
+    && loadedVersion?.isGlobal === false && loadedVersion?.isWasm === false
     && replacement.result?.formats?.length > 0, 'native replacement did not prove matching libvips availability')
 }
 

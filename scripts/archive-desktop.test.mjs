@@ -14,7 +14,7 @@ const fixture = () => ({
   receipt: { schema: 'dsh-work.desktop-package.v1', revision: 'b'.repeat(40), version: '0.0.1-alpha.1', platform: 'darwin', arch: 'arm64', lockfileSHA256: digest, distribution: 'unsigned-internal-test' },
   smoke: { status: 'pass', revision: 'b'.repeat(40), platform: 'darwin', arch: 'arm64', distribution: 'unsigned-internal-test', bundleSHA256: digest, relocated: true, launches: 2, cleanShutdown: true, developerNodeIgnored: true },
   inventory: { schema: 'dsh-work.distribution-notices.v1', platform: 'darwin', arch: 'arm64', lockfileSHA256: digest, blockers: [], packages: [{ name: '@img/sharp-libvips-darwin-arm64', nativeComponents: { vips: '8.18.6' }, notices: [{ file: 'texts/license.txt', sha256: digest }], nativeMaterials: [{ file: 'native/source.tar.gz', sha256: digest }], nativeBinaries: [{ file: 'lib/libvips.dylib', sha256: digest }] }] },
-  replacement: { platform: 'darwin', arch: 'arm64', replacements: [{ file: 'libvips.dylib', before: digest, after: 'c'.repeat(64) }], result: { version: '8.18.6', formats: ['jpeg', 'png'] } },
+  replacement: { platform: 'darwin', arch: 'arm64', replacements: [{ file: 'libvips.dylib', before: digest, after: 'c'.repeat(64) }], result: { version: { semver: '8.18.6', isGlobal: false, isWasm: false }, formats: ['jpeg', 'png'] } },
   bundledManifest: { version: '0.0.1-alpha.1' },
 })
 
@@ -46,7 +46,10 @@ test('candidate archive requires current native package, successful smoke and di
     ['stale replacement', value => { value.replacement.replacements[0].before = 'old' }, /replacement/],
     ['unchanged bytes', value => { value.replacement.replacements[0].after = digest }, /replacement/],
     ['missing replacement library', value => { value.replacement.replacements = [] }, /replacement/],
-    ['wrong libvips', value => { value.replacement.result.version = '0.0.0' }, /replacement/],
+    ['wrong libvips', value => { value.replacement.result.version.semver = '0.0.0' }, /replacement/],
+    ['global libvips', value => { value.replacement.result.version.isGlobal = true }, /replacement/],
+    ['WASM libvips', value => { value.replacement.result.version.isWasm = true }, /replacement/],
+    ['invalid version shape', value => { value.replacement.result.version = '8.18.6' }, /replacement/],
   ]
   for (const [label, mutate, pattern] of cases) {
     const value = fixture()
