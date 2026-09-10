@@ -6,6 +6,8 @@ import { pathToFileURL } from 'node:url'
 import { generateDistributionNotices } from './distribution-notices.mjs'
 import { prepareNativeMaterials } from './native-distribution.mjs'
 import { verifyNativeReplacement } from './native-replacement-smoke.mjs'
+import { pruneDesktopDependencies } from './prune-desktop-dependencies.mjs'
+import { stageSourceCompanion } from './source-companion.mjs'
 import { stageProductRuntime } from './stage-product-runtime.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
@@ -54,11 +56,14 @@ export async function packageDesktop({ signed = false } = {}) {
   execFileSync(context.node, [path.join(stage, 'node_modules/@deepseek-ai/dsh-subprocess-local/scripts/ensure-spawn-helper.mjs')], {
     cwd: stage, stdio: 'inherit',
   })
+  const pruning = pruneDesktopDependencies(path.join(stage, 'node_modules'))
+  fs.writeFileSync(path.join(output, 'pruning.json'), `${JSON.stringify(pruning, null, 2)}\n`)
   await prepareNativeMaterials()
   const inventory = generateDistributionNotices(stage, resources)
   const replacement = verifyNativeReplacement(stage)
   fs.writeFileSync(path.join(resources, 'third-party/native-replacement-smoke.json'), `${JSON.stringify(replacement, null, 2)}\n`)
-  if (signed && inventory.blockers.length) throw new Error('distribution material gate is not complete')
+  if (inventory.blockers.length) throw new Error('distribution material gate is not complete')
+  stageSourceCompanion({ resources, output: path.join(output, 'sources'), version: manifest.version, platform: process.platform, arch: process.arch })
   const packages = await packager({
     dir: stage, out: path.join(output, 'bundles'), name: 'DSH Work',
     executableName: 'DSH Work', appBundleId: 'io.github.zxheyi.dsh-work',

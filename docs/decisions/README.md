@@ -45,3 +45,5 @@ ADR 0001, ADR 0005, ADR 0006, and ADR 0021 are accepted; ADR 0004 and ADR 0007 t
 [0021: Official dsh 0.1.5 runtime pair](0021-dsh-015-runtime-upgrade.md) — accepted; supersedes the alpha.2 selection and composes versioned output through native Sidebar tabs. Native evidence remains version-specific.
 
 [0022: Native file workflows and historical output identity](0022-native-file-compatibility.md) — accepted; preserves migrated history and composes native proxy, upload, attachment and present contracts.
+
+[0023: Compact desktop distribution](0023-compact-desktop-distribution.md) — accepted; trims development assets and pairs desktop binaries with verified native source downloads.

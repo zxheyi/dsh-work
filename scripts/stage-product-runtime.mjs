@@ -32,7 +32,11 @@ export function stageProductRuntime(context, destination, verify = verifyProduct
   fs.mkdirSync(destination, { recursive: true, mode: 0o700 })
   fs.rmSync(runtime, { recursive: true, force: true })
   fs.mkdirSync(runtime, { recursive: true, mode: 0o700 })
-  fs.cpSync(source, target, { recursive: true })
+  // Keep npm/npx and their relative links available to native terminal tools.
+  // Headers and manuals are build/development material, not runtime inputs.
+  fs.cpSync(source, target, { recursive: true, verbatimSymlinks: true,
+    filter: file => !['include', 'share'].includes(path.relative(source, file).split(path.sep)[0]),
+  })
   fs.writeFileSync(path.join(runtime, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 })
   return manifest
 }
