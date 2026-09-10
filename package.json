@@ -9,7 +9,7 @@
     "build": "node scripts/build-product.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "pretest": "pnpm build",
-    "test": "node --test scripts/*.test.mjs tests/typescript-toolchain.test.ts tests/work-controller.test.ts tests/work-remote.test.ts tests/work-client.test.ts tests/work-client-bundle.test.ts tests/work-surface.test.ts tests/work-bundle.test.ts tests/lifecycle-activity.test.ts tests/runtime-contract.test.ts tests/runtime-host.test.ts tests/official-launcher.test.ts tests/local-profile-discovery.test.ts tests/shadow-profile.test.ts tests/startup-preferences.test.ts tests/startup-checkpoint.test.ts tests/startup-presentation.test.ts tests/desktop-runtime-paths.test.ts tests/desktop-security.test.ts tests/renderer.test.ts tests/close-policy.test.ts tests/tray.test.ts tests/owned-test-home.test.ts tests/generation-store.test.ts tests/runtime-guardian.test.ts tests/guardian-client.test.ts tests/unavailable-guardian-client.test.ts tests/live-release-evidence.test.ts",
+    "test": "node --test scripts/*.test.mjs tests/typescript-toolchain.test.ts tests/work-controller.test.ts tests/work-remote.test.ts tests/work-client.test.ts tests/work-client-bundle.test.ts tests/work-surface.test.ts tests/work-bundle.test.ts tests/lifecycle-activity.test.ts tests/runtime-upgrade.test.ts tests/runtime-contract.test.ts tests/runtime-host.test.ts tests/official-launcher.test.ts tests/local-profile-discovery.test.ts tests/shadow-profile.test.ts tests/startup-preferences.test.ts tests/startup-checkpoint.test.ts tests/startup-presentation.test.ts tests/desktop-runtime-paths.test.ts tests/desktop-security.test.ts tests/renderer.test.ts tests/close-policy.test.ts tests/tray.test.ts tests/owned-test-home.test.ts tests/generation-store.test.ts tests/runtime-guardian.test.ts tests/guardian-client.test.ts tests/unavailable-guardian-client.test.ts tests/live-release-evidence.test.ts",
     "check": "pnpm typecheck && node scripts/verify-contract.mjs",
     "verify:familiar-v5": "node scripts/verify-familiar-v5-acceptance.mjs",
     "runtime:prepare": "node scripts/prepare-product-runtime.mjs",
@@ -51,14 +51,15 @@
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.2",
-    "@deepseek-ai/dsh": "0.1.2-alpha.2",
-    "@deepseek-ai/dsh-api-gateway": "0.1.2-alpha.2",
-    "@deepseek-ai/dsh-client-ui-layout": "0.1.2-alpha.2",
-    "@deepseek-ai/dsh-client-ui-renderer": "0.1.2-alpha.2",
-    "@deepseek-ai/dsh-client-ui-sidebar": "0.1.2-alpha.2",
-    "@deepseek-ai/dsh-cmdline": "0.1.2-alpha.2",
-    "@deepseek-ai/dsh-storage-domain": "0.1.2-alpha.2",
-    "@deepseek-ai/dsh-typert-protocol": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-api-gateway": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-client-ui-layout": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-client-ui-sidebar": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-cmdline": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-storage-domain": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.5-rc.1",
     "react": "18.3.1",
     "zod": "4.5.4"
   },
@@ -72,6 +73,7 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "@deepseek-ai/dsh-subprocess-local",
       "electron"
     ]
   },

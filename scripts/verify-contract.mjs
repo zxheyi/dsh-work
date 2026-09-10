@@ -33,6 +33,7 @@ export const requiredFiles = [
   'scripts/verify-pr-contract.test.mjs',
   '.gitignore',
   'runtime/baseline.json',
+  'docs/decisions/0021-dsh-015-runtime-upgrade.md',
   'runtime/README.md',
   'package.json',
   'pnpm-lock.yaml',
@@ -223,15 +224,15 @@ export function verifyContract(root) {
     'docs/decisions/0002-official-dsh-cli-runtime.md',
   )
 
-  const runtimeDecision = read(root, 'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md')
+  const runtimeDecision = read(root, 'docs/decisions/0021-dsh-015-runtime-upgrade.md')
   for (const token of [
     'Status: accepted',
-    '`0a53fb55bea101816fa226bb964ae2bed71c343b`',
-    '`@deepseek-ai/dsh@0.1.2-alpha.2`',
+    '`183f08e9c6dde7e36cd2318eaee70b0da08fb35e`',
+    '`@deepseek-ai/dsh@0.1.5-rc.1`',
     'Node.js `24.11.1`',
     'pnpm `10.34.4`',
   ]) {
-    requireText(errors, runtimeDecision, token, 'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md')
+    requireText(errors, runtimeDecision, token, 'docs/decisions/0021-dsh-015-runtime-upgrade.md')
   }
 
   const ownershipDecision = read(root, 'docs/decisions/0004-crash-safe-runtime-ownership.md')
@@ -320,13 +321,13 @@ export function verifyContract(root) {
   }
   try {
     const baseline = JSON.parse(read(root, 'runtime/baseline.json'))
-    if (baseline.status !== 'accepted' || baseline.decision !== 'docs/decisions/0003-dsh-alpha2-runtime-upgrade.md' ||
+    if (baseline.status !== 'accepted' || baseline.decision !== 'docs/decisions/0021-dsh-015-runtime-upgrade.md' ||
         baseline.source?.repository !== 'https://github.com/deepseek-ai/deepseek-harness.git' ||
-        baseline.source?.tag !== 'dsh-v0.1.2-alpha.2' || baseline.source?.commit !== '0a53fb55bea101816fa226bb964ae2bed71c343b' ||
-        baseline.runtime?.package !== '@deepseek-ai/dsh' || baseline.runtime?.version !== '0.1.2-alpha.2' ||
-        baseline.runtime?.integrity !== 'sha512-4TvTC5kRKlgtSU2UTBv+cID9a2Z+6+m6mpvjXWJfVzuTkflCff6s4MsQpFJTCmwFh/k7zNWe7qFXcLYMV/5VvA==' ||
+        baseline.source?.tag !== 'dsh-v0.1.5-rc.1' || baseline.source?.commit !== '183f08e9c6dde7e36cd2318eaee70b0da08fb35e' ||
+        baseline.runtime?.package !== '@deepseek-ai/dsh' || baseline.runtime?.version !== '0.1.5-rc.1' ||
+        baseline.runtime?.integrity !== 'sha512-rmNmzQCg3oIc1z8xH7izRSOuy1TNzq+/NILyfM+7e8DKOyV+yBtg47WEsqR2SiIe1ATec3L/rUa1YhIcfQ2XEg==' ||
         baseline.runtime?.node !== '24.11.1' || baseline.runtime?.pnpm !== '10.34.4' ||
-        baseline.runtime?.tarball !== 'https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.2-alpha.2.tgz' ||
+        baseline.runtime?.tarball !== 'https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.5-rc.1.tgz' ||
         JSON.stringify(baseline.runtime?.nodeArtifacts) !== JSON.stringify(expectedNodeArtifacts) ||
         baseline.electron !== '44.0.0') {
       errors.push('runtime/baseline.json: active selection does not match accepted decisions')

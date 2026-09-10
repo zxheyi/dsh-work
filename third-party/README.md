@@ -8,7 +8,7 @@ DSH Work uses the [MIT License](../LICENSE), selected by the owner on 2026-09-07
 
 For an existing staged package, run `pnpm notices:generate`. The generated table links every package to retained notice texts. Inventory entries include version, declared license, repository, installed relative path and SHA-256 evidence. Missing license metadata fails generation. Build-only Electron Packager is not distributed. Platform-specific optional dependencies are inventoried on their native CI hosts.
 
-[Supplemental source receipts](license-sources.json) pin the exact source commits published in npm metadata for xterm 6.0.0, pi 0.84.4 and sharp-libvips 1.3.3. The generator verifies every supplemental digest. AWS packages missing their root LICENSE use the license shipped by the same SDK repository in `@aws-sdk/types`; Koffi platform binaries use their exact-version parent LICENSE. `data-uri-to-buffer` embeds its full MIT text in README, which is retained. No dependency is silently relicensed.
+[Supplemental source receipts](license-sources.json) pin the exact source commits published in npm metadata for xterm 6.0.0, pi 0.85.1 and sharp-libvips 1.3.3. The generator verifies every supplemental digest. AWS packages missing their root LICENSE use the license shipped by the same SDK repository in `@aws-sdk/types`; Koffi platform binaries use their exact-version parent LICENSE. `data-uri-to-buffer` embeds its full MIT text in README, which is retained. The standardwebhooks 1.1.1 receipt uses its exact published commit’s `libraries/LICENSE` (MIT); the repository-root Apache license is not substituted for the library license. No dependency is silently relicensed.
 
 ## Native source delivery
 

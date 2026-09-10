@@ -13,15 +13,15 @@ DSH Work must not modify or copy upstream source to implement product behavior, 
 | Item | Value | Evidence |
 | --- | --- | --- |
 | Source repository | `https://github.com/deepseek-ai/deepseek-harness` | Project README |
-| Source revision | `0a53fb55bea101816fa226bb964ae2bed71c343b` (`dsh-v0.1.2-alpha.2`) | [ADR 0003](decisions/0003-dsh-alpha2-runtime-upgrade.md) |
-| Source integration method | Read-only provenance baseline; launch the official `dsh --profile` CLI as a child | [ADR 0003](decisions/0003-dsh-alpha2-runtime-upgrade.md) |
-| Runtime package family | Official npm `@deepseek-ai/dsh@0.1.2-alpha.2` | Native compatibility probes and development desktop lifecycle passed; complete process-tree and packaged-product gates remain open |
-| Runtime integrity | `sha512-4TvTC5kRKlgtSU2UTBv+cID9a2Z+6+m6mpvjXWJfVzuTkflCff6s4MsQpFJTCmwFh/k7zNWe7qFXcLYMV/5VvA==` | npm registry, archive-byte checks, and research lockfile |
+| Source revision | `183f08e9c6dde7e36cd2318eaee70b0da08fb35e` (`dsh-v0.1.5-rc.1`) | [ADR 0021](decisions/0021-dsh-015-runtime-upgrade.md) |
+| Source integration method | Read-only provenance baseline; launch the official `dsh --profile` CLI as a child | [ADR 0021](decisions/0021-dsh-015-runtime-upgrade.md) |
+| Runtime package family | Official npm `@deepseek-ai/dsh@0.1.5-rc.1` | rc.1 verification is recorded separately; prior alpha.2 evidence does not cover this selection |
+| Runtime integrity | `sha512-rmNmzQCg3oIc1z8xH7izRSOuy1TNzq+/NILyfM+7e8DKOyV+yBtg47WEsqR2SiIe1ATec3L/rUa1YhIcfQ2XEg==` | npm registry, archive-byte checks, and active product lockfile |
 | Standalone Node baseline | Node.js `24.11.1` | macOS arm64 and Windows x64 Node archives and executable bytes verified |
-| Package manager boundary | pnpm `10.34.4` only in controlled build/materialization; no package manager at ordinary launch | Development materialization passed; packaged proof pending |
-| Last compatibility verification | 2026-09-01, macOS arm64 and Windows x64 product CLI/Profile and Electron lifecycle | [CI 33465087985](https://github.com/zxheyi/dsh-work/actions/runs/33465087985), tested `4fd63dd`; [frozen receipt and scope](https://github.com/zxheyi/dsh-work/blob/4fd63ddefc347238f5a5c717a10bd59a2f326693/docs/acceptance/electron-lifecycle-slice.md#native-receipt) |
+| Package manager boundary | pnpm `10.34.4` only in controlled build/materialization; no package manager at ordinary launch | macOS arm64 relocated package launches passed; Windows rc.1 evidence pending |
+| Historical alpha.2 verification | 2026-09-01, macOS arm64 and Windows x64 product CLI/Profile and Electron lifecycle | [CI 33465087985](https://github.com/zxheyi/dsh-work/actions/runs/33465087985), tested `4fd63dd`; [frozen receipt and scope](https://github.com/zxheyi/dsh-work/blob/4fd63ddefc347238f5a5c717a10bd59a2f326693/docs/acceptance/electron-lifecycle-slice.md#native-receipt) |
 
-These values are the accepted M0 baseline, not an implementation-complete distribution manifest. The machine-readable active selection is [`runtime/baseline.json`](../runtime/baseline.json). Historical rc.2/alpha.1 observations remain associated with their original revisions. Product implementation must use only the accepted alpha.2 public services; later HEAD behavior is not implicitly available.
+These values are the accepted rc.1 upgrade baseline, not an implementation-complete distribution manifest. The machine-readable active selection is [`runtime/baseline.json`](../runtime/baseline.json). Historical rc.2/alpha.1 observations remain associated with their original revisions. Product implementation must use only the accepted rc.1 public services; later HEAD behavior is not implicitly available.
 
 ## Required compatibility checks
 
