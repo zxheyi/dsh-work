@@ -1,6 +1,12 @@
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 
+// Called only by the isolated probe, after PTY exit and all assertions. Windows
+// ConPTY worker handles can outlive the terminal; they must not hang this probe.
+export function completeToolProbe(result) {
+  process.stdout.write(JSON.stringify(result) + '\n', () => process.exit(0))
+}
+
 export function verifyPackagedTools(resources) {
   const application = path.join(resources, 'app')
   const nodeDirectory = path.join(resources, 'runtime/node', process.platform === 'win32' ? '' : 'bin')
@@ -9,6 +15,7 @@ export function verifyPackagedTools(resources) {
     ? [path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32')]
     : ['/usr/bin', '/bin']
   const program = String.raw`
+    const complete = ${completeToolProbe.toString()};
     const assert = require('node:assert/strict');
     const pty = require('node-pty');
     const sharp = require('sharp');
@@ -26,7 +33,7 @@ export function verifyPackagedTools(resources) {
         assert.equal(exitCode, 0, output);
         assert.ok(output.includes('DSH_PTY_OK'), output);
         clearTimeout(timeout);
-        console.log(JSON.stringify({ node: process.versions.node, npm: true, npx: true, pty: true, sharp: true }));
+        complete({ node: process.versions.node, npm: true, npx: true, pty: true, sharp: true });
       });
     })().catch(error => { console.error(error); process.exit(1) });
   `
