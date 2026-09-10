@@ -10,7 +10,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 import type { RuntimeChild } from './index.ts'
-import { runtimeSearchPath } from './environment.ts'
+import { proxyEnvironment, runtimeSearchPath } from './environment.ts'
 
 interface RuntimeBaseline {
   readonly runtime: {
@@ -136,6 +136,7 @@ export function createOfficialLauncher(
     const manifest = JSON.parse(fs.readFileSync(path.join(installed, 'package.json'), 'utf8')) as { version?: string }
     if (manifest.version !== baseline.runtime.version) throw new Error('runtime version mismatch')
     const env: NodeJS.ProcessEnv = {
+      ...proxyEnvironment(process.env),
       HOME: home,
       USERPROFILE: home,
       APPDATA: home,

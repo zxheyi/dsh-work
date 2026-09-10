@@ -6,6 +6,7 @@ import {
   type SpawnOptions,
 } from 'node:child_process'
 import path from 'node:path'
+import { proxyEnvironment } from '../runtime-host/environment.ts'
 import { fileURLToPath } from 'node:url'
 
 import type {
@@ -75,7 +76,7 @@ export async function createGuardianClient(
   if (!path.isAbsolute(node || '') || !path.isAbsolute(productRoot || '')) {
     throw new Error('explicit guardian paths required')
   }
-  const env: NodeJS.ProcessEnv = { PATH: path.dirname(node), NO_COLOR: '1' }
+  const env: NodeJS.ProcessEnv = { ...proxyEnvironment(process.env), PATH: path.dirname(node), NO_COLOR: '1' }
   for (const key of ['SystemRoot', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'TMPDIR']) {
     if (process.env[key]) env[key] = process.env[key]
   }
