@@ -59,6 +59,8 @@ function toolCall(index, id, name, argsValue) {
 }
 
 function referencedPath(text) {
+  const nativePath = /verbatim read-only copy saved at ("(?:[^"\\]|\\.)*")/u.exec(text)?.[1]
+  if (nativePath) return JSON.parse(nativePath)
   return /@(?:"([^"\r\n]+)"|([^\s"'<>]+))/u.exec(text)?.slice(1).find(Boolean) ?? null
 }
 
@@ -105,8 +107,13 @@ class OutputAdapter extends LlmAdapter {
       }
       if (userPrompt.includes(GENERATE_A_PROMPT) && latest.source.callId === 'output-a-read') {
         for (const event of toolCall(0, 'output-a-markdown', 'write', { file_path: 'report-a.md', content: REPORT_A })) yield event
-        for (const event of toolCall(1, 'output-a-csv', 'write', { file_path: 'report-b.csv', content: 'name,value\nalpha,1\n' })) yield event
+        for (const event of toolCall(1, 'output-a-csv', 'bash', { description: 'Generate the CSV deliverable', command: "printf 'name,value\\nalpha,1\\n' > report-b.csv" })) yield event
         for (const event of toolCall(2, 'output-a-empty', 'write', { file_path: 'empty.md', content: '' })) yield event
+        yield { type: 'finish', reason: { kind: 'tool-calls' } }
+        return
+      }
+      if (userPrompt.includes(GENERATE_A_PROMPT) && latest.source.callId !== 'output-a-present') {
+        for (const event of toolCall(0, 'output-a-present', 'present', { files: [{ path: 'report-a.md' }, { path: 'report-b.csv' }] })) yield event
         yield { type: 'finish', reason: { kind: 'tool-calls' } }
         return
       }
@@ -145,7 +152,7 @@ class OutputAdapter extends LlmAdapter {
       return
     }
     if (prompt.includes(GENERATE_B_PROMPT)) {
-      for (const event of toolCall(0, 'output-b-markdown', 'write', { file_path: 'other-session.md', content: '# 乙报告\n' })) yield event
+      for (const event of toolCall(0, 'output-b-present', 'present', { files: [{ path: 'other-session.md' }] })) yield event
       yield { type: 'finish', reason: { kind: 'tool-calls' } }
       return
     }
@@ -180,6 +187,7 @@ export async function apply(context) {
   }
   const workspacePath = context.dshHomePath('t08-output-workspace')
   await fs.mkdir(workspacePath, { recursive: true })
+  await fs.writeFile(`${workspacePath}/other-session.md`, '# 乙报告\n')
   const workspace = await context.workspaceRegistry.create(workspacePath, '成果工作区')
   for (const [sessionId, requestId, prompt, title] of [
     [SESSION_A, 't08-bootstrap-a', '成果夹具甲已准备', '成果会话甲'],

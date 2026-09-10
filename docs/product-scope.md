@@ -33,7 +33,7 @@ The active product milestone is [familiar DSH conversations and file outcomes](a
 
 ## In scope now
 
-- Preserve native Workspace, Session, model, mode, permission and settings navigation through the accepted alpha.2 public composition boundaries.
+- Preserve native Workspace, Session, model, mode, permission and settings navigation through the accepted runtime public composition boundaries.
 - Deliver ordinary conversations without a required Work goal or output-type form.
 - Attach real files, review safe Markdown beside the conversation, revise in the original composer, and save independently of adoption.
 - Add immutable file versions, comparison, restore and per-version adoption in independently verified slices.

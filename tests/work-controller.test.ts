@@ -3896,3 +3896,49 @@ test('rejects invalid Session output coordinates and unavailable inspection', as
     sessionId: 'session-a', turn: -1, throughSeq: 1,
   }), (error: unknown) => error instanceof WorkError && error.code === 'work/session-output-invalid')
 })
+
+test('native presented files join immutable versions and save without requiring a write tool call', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-work-presented-'))
+  const workspace = path.join(root, 'workspace')
+  await fs.mkdir(workspace)
+  const bytes = '# Existing report\n'
+  await fs.writeFile(path.join(workspace, 'existing.md'), bytes)
+  await fs.writeFile(path.join(workspace, 'shell.csv'), 'name,value\na,1\n')
+  await fs.writeFile(path.join(root, 'outside.md'), 'outside')
+  await fs.symlink(path.join(root, 'outside.md'), path.join(workspace, 'linked.md'))
+  let events: unknown[] = [
+    { seq: 0, type: 'turn/start', data: { turn: 1 } },
+    // A successful shell result alone carries no claimed output paths.
+    { seq: 1, type: 'tool/call', data: { turn: 1, callId: 'shell', name: 'bash', arguments: '{"command":"generate"}' } },
+    { seq: 2, type: 'tool/result', surfaceOp: 'append', data: { turn: 1, message: { source: { callId: 'shell' }, content: [{ type: 'tool-result', isError: false }] } } },
+    { seq: 3, type: 'deliverables/presented', data: { turn: 1, callId: 'present', files: [
+      { path: 'existing.md', description: 'Existing file' }, { path: 'shell.csv' },
+      { path: './existing.md' }, { path: path.join(workspace, 'existing.md') }, { path: '../outside.md' }, { path: 'linked.md' }, { path: 'missing.md' },
+    ] } },
+  ]
+  const controller = createWorkController({
+    workspaceRoot: workspace, sessionOutputVersionRoot: path.join(root, 'versions'),
+    deliveryRoot: path.join(root, 'saved'),
+    harness: { ...testHarness(), async inspectSession() { return { cwd: workspace, events } }, async inspectSessionWorkspace() { return workspace } },
+  })
+  const spec = { sessionId: 'present-session', turn: 1, throughSeq: 4 }
+  try {
+    assert.deepEqual(await controller.inspectSessionOutputs(spec), [], 'unfinished turn stays unpublished')
+    events.push({ seq: 4, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+    assert.deepEqual(await controller.inspectSessionOutputs({ ...spec, throughSeq: 2 }), [])
+    const outputs = await controller.inspectSessionOutputs(spec)
+    assert.deepEqual(outputs.map(output => output.path), ['existing.md', 'shell.csv'])
+    const versions = await controller.listSessionOutputVersions({ sessionId: spec.sessionId, path: 'existing.md' })
+    assert.equal(versions.length, 1)
+    await fs.writeFile(path.join(workspace, 'existing.md'), 'later external bytes')
+    assert.equal((await controller.readSessionOutputVersion({ fileId: versions[0]!.fileId, versionId: versions[0]!.versionId })).content, bytes)
+    const saved = await controller.saveSessionOutput({ ...spec, path: 'existing.md', version: { fileId: versions[0]!.fileId, versionId: versions[0]!.versionId } })
+    assert.equal(saved.bytes, Buffer.byteLength(bytes))
+    events = [
+      { seq: 0, type: 'tool/call', data: { turn: 2, callId: 'failed', name: 'present', arguments: '{"files":[{"path":"existing.md"}]}' } },
+      { seq: 1, type: 'tool/result', surfaceOp: 'append', data: { turn: 2, message: { source: { callId: 'failed' }, content: [{ type: 'tool-result', isError: true }] } } },
+      { seq: 2, type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } },
+    ]
+    assert.deepEqual(await controller.inspectSessionOutputs({ ...spec, turn: 2 }), [])
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})

@@ -17,7 +17,7 @@ Use a decision record when a change affects the desktop stack, upstream integrat
 | --- | --- | --- |
 | [0001: Electron child-process desktop host](0001-electron-desktop-host.md) | accepted | Selects Electron for M0 and pauses Tauri product work; graceful Windows stop, packaging, security, and lifecycle gates remain open. |
 | [0002: Official `dsh` CLI and matched runtime pair](0002-official-dsh-cli-runtime.md) | superseded | Historical rc.2 selection; replaced by ADR 0003 without rewriting its evidence. |
-| [0003: Official dsh alpha.2 runtime pair](0003-dsh-alpha2-runtime-upgrade.md) | accepted | Selects the matched alpha.2 pair after macOS/Windows native verification; product lifecycle and packaging remain open. |
+| [0003: Official dsh alpha.2 runtime pair](0003-dsh-alpha2-runtime-upgrade.md) | superseded | Selects the matched alpha.2 pair after macOS/Windows native verification; product lifecycle and packaging remain open. |
 | [0004: Crash-safe runtime ownership and Profile generations](0004-crash-safe-runtime-ownership.md) | implemented | Selects an external Node guardian, atomic generation leases, clean reuse, and explicit isolated recovery without PID-based termination. |
 | [0005: TypeScript product source and emitted JavaScript runtime](0005-typescript-product-source.md) | accepted | Selects strict TypeScript for product source and tests while keeping bootstrap verification directly executable. |
 | [0006: Work as a product-owned aggregate over Harness Workspace and Session](0006-work-as-product-owned-aggregate.md) | accepted | Adds a DSH Work-owned outcome aggregate above Harness Workspace and Session while keeping execution and plugin lifecycles upstream-owned. |
@@ -38,6 +38,10 @@ Use a decision record when a change affects the desktop stack, upstream integrat
 
 | [0020: Runtime environment compatibility](0020-runtime-environment-compatibility.md) | accepted | Restores macOS shell and Windows process-helper lookup; isolates guardian version probing. |
 
-ADR 0001, ADR 0003, ADR 0005, and ADR 0006 are accepted; ADR 0004 and ADR 0007 through ADR 0013 are implemented against the locked alpha.2 pair. Every unchecked M0 criterion remains a delivery gate rather than an implemented claim. Frozen research is evidence, not the product controller.
+ADR 0001, ADR 0005, ADR 0006, and ADR 0021 are accepted; ADR 0004 and ADR 0007 through ADR 0013 are implemented against the locked alpha.2 pair. Every unchecked M0 criterion remains a delivery gate rather than an implemented claim. Frozen research is evidence, not the product controller.
 
 [0019: Native source material delivery](0019-native-source-material-delivery.md) — accepted; self-contained, hash-locked native source/notice delivery with library replacement verification.
+
+[0021: Official dsh 0.1.5 runtime pair](0021-dsh-015-runtime-upgrade.md) — accepted; supersedes the alpha.2 selection and composes versioned output through native Sidebar tabs. Native evidence remains version-specific.
+
+[0022: Native file workflows and historical output identity](0022-native-file-compatibility.md) — accepted; preserves migrated history and composes native proxy, upload, attachment and present contracts.

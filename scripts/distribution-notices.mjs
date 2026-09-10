@@ -66,11 +66,12 @@ export function generateDistributionNotices(application, resources) {
     if (item.notices.length === 0) {
       let extra
       if (item.name === '@xterm/headless' && item.version === '6.0.0') extra = supplemental('xterm')
-      else if (['@earendil-works/pi-ai', '@earendil-works/pi-telemetry'].includes(item.name) && item.version === '0.84.4') extra = supplemental('pi')
+      else if (['@earendil-works/pi-ai', '@earendil-works/pi-telemetry'].includes(item.name) && item.version === '0.85.1') extra = supplemental('pi')
+      else if (item.name === 'standardwebhooks' && item.version === '1.1.1') extra = supplemental('standardwebhooks')
       else if (item.name.startsWith('@aws-sdk/') && item.repository?.includes('aws/aws-sdk-js-v3')) {
         const file = 'node_modules/@aws-sdk/types/LICENSE'
         extra = { source: `same SDK repository license shipped in ${file}`, bytes: fs.readFileSync(path.join(application, file)) }
-      } else if (item.name.startsWith('@koromix/koffi-') && item.version === '3.1.6') {
+      } else if (item.name.startsWith('@koromix/koffi-') && item.version === '3.2.1') {
         const counterpart = read(path.join(application, 'node_modules/koffi/package.json'))
         if (counterpart.version !== item.version) throw new Error('Koffi license source version mismatch')
         const file = 'node_modules/koffi/LICENSE.txt'

@@ -1,6 +1,6 @@
 # 0003: Official dsh alpha.2 runtime pair
 
-Status: accepted
+Status: superseded by ADR 0021
 
 Date: 2026-08-31
 

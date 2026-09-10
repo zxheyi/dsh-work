@@ -143,3 +143,50 @@ test('guardian version probe ignores incompatible ambient Node options', async (
     fs.rmSync(productRoot, { recursive: true, force: true })
   }
 })
+
+test('proxy settings survive both child boundaries while ambient runtime injection stays excluded', async () => {
+  const { createOfficialLauncher } = await import('../packages/runtime-host/official-launcher.ts')
+  const proxy = {
+    HTTP_PROXY: 'http://upper.invalid:8080', http_proxy: 'http://lower.invalid:8081',
+    HTTPS_PROXY: 'http://secure.invalid:8080', https_proxy: '',
+    ALL_PROXY: 'http://fallback.invalid:8080', all_proxy: '',
+    NO_PROXY: 'example.invalid', no_proxy: 'localhost,127.0.0.1',
+  }
+  const excluded = { NODE_OPTIONS: '--invalid-test-option', NODE_PATH: '/invalid', ELECTRON_RUN_AS_NODE: '1', DEEPSEEK_API_KEY: 'test-must-not-forward' }
+  const keys = [...Object.keys(proxy), ...Object.keys(excluded)]
+  const before = Object.fromEntries(keys.map(key => [key, process.env[key]]))
+  Object.assign(process.env, proxy, excluded)
+  const expectedProxy = Object.fromEntries(Object.keys(proxy).map(key => [key, process.env[key]]))
+  const child = new FakeGuardianProcess()
+  let guardianEnvironment: NodeJS.ProcessEnv = {}
+  const check = (environment: NodeJS.ProcessEnv | undefined) => {
+    for (const [key, value] of Object.entries(expectedProxy)) assert.equal(environment?.[key], value, key)
+    for (const key of Object.keys(excluded)) assert.equal(environment?.[key], undefined, key)
+  }
+  try {
+    const creating = createGuardianClient({ node: process.execPath, productRoot: os.tmpdir() }, {
+      probe(_exe, _args, options) { check(options.env); return 'v24.11.1\n' },
+      spawnProcess(_exe, _args, options) {
+        check(options.env)
+        guardianEnvironment = options.env!
+        return child as unknown as ChildProcess
+      },
+    })
+    // Feed the first boundary's actual environment into the second launcher.
+    for (const key of keys) delete process.env[key]
+    for (const key of keys) if (guardianEnvironment[key] !== undefined) process.env[key] = guardianEnvironment[key]
+    createOfficialLauncher({ node: process.execPath, home: os.tmpdir() }, {
+      probe(_exe, _args, options) { check(options.env); return 'v24.11.1\n' },
+      spawnProcess(_exe, _args, options) { check(options.env); return {} as import('../packages/runtime-host/index.ts').RuntimeChild },
+    })()
+    child.emit('message', { protocol: GUARDIAN_PROTOCOL, event: 'guardian-ready', value: { state: 'stopped', code: null, canStart: true, canStop: false, canRecover: false } })
+    await creating
+    child.exitCode = 0
+    child.emit('exit', 0, null)
+  } finally {
+    for (const key of keys) {
+      if (before[key] === undefined) delete process.env[key]
+      else process.env[key] = before[key]
+    }
+  }
+})

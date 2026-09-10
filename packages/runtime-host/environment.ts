@@ -22,3 +22,14 @@ export function runtimeSearchPath(
   }
   return directories.join(paths.delimiter)
 }
+
+/** Forward only proxy configuration; the native Harness owns validation and routing. */
+export function proxyEnvironment(environment: Readonly<NodeJS.ProcessEnv>): NodeJS.ProcessEnv {
+  const selected: NodeJS.ProcessEnv = {}
+  for (const key of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+    'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy']) {
+    // Empty values participate in the upstream casing/fallback policy too.
+    if (environment[key] !== undefined) selected[key] = environment[key]
+  }
+  return selected
+}

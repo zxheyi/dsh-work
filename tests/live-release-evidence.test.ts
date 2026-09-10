@@ -25,3 +25,13 @@ test('live evidence accepts a distinct target line in a completed multi-line ass
   assert.equal(hasCompletedAssistantReply([multiline,completed],1,'OK'),true)
   assert.equal(hasCompletedAssistantReply([multiline,completed],1,'PREV'),false)
 })
+
+test('live evidence consumes the V3 assistant message instead of removed top-level chunks', () => {
+  const message = { type: 'assistant/message', data: { turn: 1, message: {
+    role: 'assistant', content: [{ type: 'text', text: 'PREVIOUS\nOK' }],
+  } } }
+  assert.equal(hasCompletedAssistantReply([message, completed], 1, 'OK'), true)
+  assert.equal(hasCompletedAssistantReply([{ ...message, type: 'user/message' }, completed], 1, 'OK'), false)
+  assert.equal(hasCompletedAssistantReply([message], 1, 'OK'), false)
+  assert.equal(hasCompletedAssistantReply([message, completed], 2, 'OK'), false)
+})

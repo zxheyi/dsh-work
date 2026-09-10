@@ -31,5 +31,5 @@ if (exit !== 0 || report?.status !== 'pass') {
   console.error(`Session resource acceptance failed in ${report?.step || 'launch'}`)
   process.exitCode = 1
 } else {
-  console.log('Session resource acceptance passed: select, copy, isolate, restore, remove failure, and send')
+  console.log('Session resource acceptance passed: native picker, failure/retry, cancel, mixed drop, Session isolation, and receipt submission')
 }

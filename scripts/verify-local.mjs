@@ -64,7 +64,8 @@ try {
   run('contract', ['scripts/verify-contract.mjs'])
   provenance('after-contract')
   run('runtime', ['--test', '--test-reporter=tap', 'tests/runtime-integration.test.ts',
-    'tests/guardian-integration.test.ts', 'tests/work-client-loader.integration.test.ts'])
+    'tests/guardian-integration.test.ts', 'tests/work-client-loader.integration.test.ts',
+    'tests/session-migration.integration.test.ts'])
   provenance('after-runtime')
   if (process.argv.includes('--desktop')) {
     const modes = ['normal', 'missing', 'renderer-crash', 'runtime-recovery', 'host-death']

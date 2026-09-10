@@ -250,7 +250,7 @@ async function run(): Promise<void> {
       assert.equal(clicked, true)
     }
     const selectFile = (name: string, type: string, content: string): Promise<boolean> => js<boolean>(
-      "(() => { const input = document.querySelector('[data-work-session-resource] input[type=file]'); if (!(input instanceof HTMLInputElement)) return false; const transfer = new DataTransfer(); transfer.items.add(new File([" + JSON.stringify(content) + "], " + JSON.stringify(name) + ", { type: " + JSON.stringify(type) + " })); Object.defineProperty(input, 'files', { configurable: true, value: transfer.files }); input.dispatchEvent(new Event('change', { bubbles: true })); return true })()",
+      "(() => { const input = document.querySelector('input[type=file]'); if (!(input instanceof HTMLInputElement)) return false; const transfer = new DataTransfer(); transfer.items.add(new File([" + JSON.stringify(content) + "], " + JSON.stringify(name) + ", { type: " + JSON.stringify(type) + " })); Object.defineProperty(input, 'files', { configurable: true, value: transfer.files }); input.dispatchEvent(new Event('change', { bubbles: true })); return true })()",
     )
 
     step = 'ordinary-reply'; report('fail')
@@ -289,12 +289,9 @@ async function run(): Promise<void> {
     await waitFor(
       () => js<{ body: string; draft: string }>("({ body: document.body.innerText, draft: document.querySelector('[data-composer-input]')?.textContent ?? '' })"),
       value => value.body.includes(sourceName) && !value.body.includes('attachment-')
-        && value.draft.includes(sourceName) && value.draft.includes(baseline.generateAPrompt),
+        && !value.body.includes('上传中') && value.draft.includes(baseline.generateAPrompt),
       'Session A source did not become ready',
     )
-    const resourceProjection = await js<string>("JSON.parse(window.name.slice('dsh-work-recovery:v1:'.length)).draft")
-    const sourcePath = /@(?:"([^"\r\n]+)"|([^\s"'<>]+))/u.exec(resourceProjection)?.slice(1).find(Boolean)
-    assert.ok(sourcePath)
     await clickSend()
     const names = await waitFor(
       () => js<string[]>("Array.from(document.querySelectorAll('[data-work-session-output] strong')).map(item => item.textContent ?? '')"),
@@ -310,13 +307,15 @@ async function run(): Promise<void> {
       'Source inspection did not settle',
     )
     assert.equal(sourcePhase, 'ready')
+    const sourcePath = await js<string>("document.querySelector('[data-work-session-source]')?.getAttribute('data-work-session-source') ?? ''")
+    assert.ok(path.isAbsolute(sourcePath))
     await waitFor(
       () => js<string>("document.querySelector('[data-work-session-sources]')?.textContent ?? ''"),
       text => text === `已读取 1 份资料${sourceName}已读取`,
       'Verified source grouping did not appear beside generated results',
     )
     assert.equal(await js<number>("document.querySelectorAll('[data-produced-files-row]').length"), 0)
-    assert.equal(fs.readFileSync(path.join(baseline.workspacePath, sourcePath), 'utf8'), sourceContent)
+    assert.equal(fs.readFileSync(sourcePath, 'utf8'), sourceContent)
     const reportA = fs.readFileSync(path.join(baseline.workspacePath, 'report-a.md'), 'utf8')
     assert.match(reportA, /^# 甲报告/u)
     assert.equal(fs.readFileSync(path.join(baseline.workspacePath, 'report-b.csv'), 'utf8'), 'name,value\nalpha,1\n')
@@ -366,17 +365,17 @@ async function run(): Promise<void> {
     await waitFor(
       () => js<string>("document.querySelector('[data-work-output-preview-markdown]')?.textContent ?? ''"),
       text => text.includes('本周结论已经整理完成。') && text.includes('产品：整理试用反馈。'),
-      'Markdown output did not render in the details panel',
+      'Markdown output did not render in the native Sidebar tab',
     )
     await waitFor(
-      () => js<boolean>("document.querySelector('[data-details-collapsed]') === null"),
+      () => js<boolean>("document.querySelector('[data-sidebar-right-open]') !== null"),
       value => value,
-      'Details layout did not open for the Markdown preview',
+      'Native Sidebar layout did not open for the Markdown preview',
     )
     await waitFor(
-      () => js<number>("document.querySelector('[data-slot=details]')?.parentElement?.getBoundingClientRect().width ?? 0"),
+      () => js<number>("document.querySelector('[data-slot=rightbar]')?.parentElement?.getBoundingClientRect().width ?? 0"),
       width => width >= 300,
-      'Details layout did not finish expanding',
+      'Native Sidebar layout did not finish expanding',
     )
     assert.equal(await js<number>("document.querySelectorAll('[data-work-output-preview-markdown] script, [data-work-output-preview-markdown] img, [data-work-output-preview-markdown] iframe, [data-work-output-preview-markdown] a').length"), 0)
     assert.equal(await js<boolean>('globalThis.__dshWorkPreviewExecuted === true'), false)
@@ -386,7 +385,7 @@ async function run(): Promise<void> {
     assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] [role=tab]')).find(item => item.textContent?.trim().startsWith('来源')); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
     const sourcePanel = await waitFor(
       () => js<string>("document.querySelector('[data-work-output-preview-source]')?.textContent ?? ''"),
-      text => text.includes(sourceName) && text.includes('工作区副本') && text.includes('已读取') && text.includes('在输入框引用'),
+      text => text.includes(sourceName) && text.includes('资料文件') && text.includes('已读取') && text.includes('在输入框引用'),
       'Preview source tab did not show the verified Workspace snapshot',
     )
     assert.match(sourcePanel, /已读取/u)
@@ -421,9 +420,9 @@ async function run(): Promise<void> {
     )
     assert.equal(await js<boolean>("(() => { const call = document.querySelector('[data-chat-call-id]'); const buttons = call?.querySelectorAll('button'); const inspect = buttons?.item((buttons?.length ?? 0) - 1); if (!(inspect instanceof HTMLButtonElement)) return false; inspect.click(); return true })()"), true)
     await waitFor(
-      () => js<boolean>("document.querySelector('[data-work-output-preview]') === null && document.querySelector('[role=tab][aria-selected=true]')?.textContent?.trim() === '轨迹'"),
+      () => js<boolean>("document.querySelector('[data-work-output-preview]') !== null && document.querySelector('[role=tab][aria-selected=true]')?.textContent?.trim() === '轨迹'"),
       value => value,
-      'Native Tool inspection did not take over from the Work preview',
+      'Native Tool inspection did not preserve the independent Work preview tab',
     )
     assert.equal(await js<boolean>("(() => { const tab = Array.from(document.querySelectorAll('[role=tab]')).find(item => item.textContent?.trim() === '对话'); if (!(tab instanceof HTMLButtonElement)) return false; tab.click(); return true })()"), true)
     await waitFor(
@@ -432,6 +431,8 @@ async function run(): Promise<void> {
       'Conversation outputs did not return after native Tool inspection',
     )
     assert.equal(await selectAt(0), 'report-a.md')
+    // Native tabs preserve the source subview while inspecting a tool in the center.
+    assert.equal(await js<boolean>("(() => { const tab = Array.from(document.querySelectorAll('[data-work-output-preview] [role=tab]')).find(item => item.textContent?.trim() === '内容'); if (!(tab instanceof HTMLButtonElement)) return false; tab.click(); return true })()"), true)
     await waitFor(
       () => js<number>("document.querySelectorAll('[data-work-output-preview-markdown]').length"),
       count => count === 1,
@@ -486,7 +487,7 @@ async function run(): Promise<void> {
     assert.equal(await setDraft('保留的修改草稿'), '保留的修改草稿')
     assert.equal(await js<boolean>("(() => { const button = document.querySelector('[aria-label=\"返回会话并关闭文件预览\"]'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
     await waitFor(
-      () => js<boolean>("document.querySelector('[data-details-collapsed]') !== null"),
+      () => js<boolean>("document.querySelector('[data-work-output-preview]') === null"),
       value => value,
       'Preview did not close',
     )

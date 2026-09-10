@@ -81,7 +81,7 @@ interface WorkBundleContext extends HarnessWorkContext {
   effect(execute: () => () => Promise<void>): unknown
 }
 
-export const inject = ['dshHomePath', 'storageDomain', 'workspaceRegistry', 'sessionController']
+export const inject = ['dshHomePath', 'storageDomain', 'workspaceRegistry', 'sessionController', 'attachments']
 export const name = 'dsh-work'
 
 export async function apply(context: WorkBundleContext): Promise<void> {

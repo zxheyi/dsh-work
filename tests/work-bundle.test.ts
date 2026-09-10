@@ -54,7 +54,7 @@ test('mounts a storageDomain-backed WorkController as a Host service', async () 
   const created = await controller!.create({ title: 'Bundle', goal: 'Persist through the Host.' })
 
   assert.equal(workDomainSpec.name, 'dsh_work')
-  assert.deepEqual(inject, ['dshHomePath', 'storageDomain', 'workspaceRegistry', 'sessionController'])
+  assert.deepEqual(inject, ['dshHomePath', 'storageDomain', 'workspaceRegistry', 'sessionController', 'attachments'])
   assert.equal(workDomainSpec.global.schema.safeParse(state).success, true)
   assert.equal(state.work?.workId, created.workId)
   const legacyWork = structuredClone(state.work!) as unknown as Record<string, unknown>

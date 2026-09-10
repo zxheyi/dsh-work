@@ -49,6 +49,11 @@ export async function packageDesktop({ signed = false } = {}) {
   fs.rmSync(path.join(stage, 'pnpm-lock.yaml'))
   const resources = path.join(output, 'resources')
   stageProductRuntime(context, resources)
+  // The official rc.1 hook restores node-pty's prebuilt helper executable bit.
+  // Packaging disables general dependency scripts, so run only this reviewed hook.
+  execFileSync(context.node, [path.join(stage, 'node_modules/@deepseek-ai/dsh-subprocess-local/scripts/ensure-spawn-helper.mjs')], {
+    cwd: stage, stdio: 'inherit',
+  })
   await prepareNativeMaterials()
   const inventory = generateDistributionNotices(stage, resources)
   const replacement = verifyNativeReplacement(stage)

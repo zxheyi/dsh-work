@@ -6,6 +6,7 @@ export interface LiveEvent {
   readonly data?: {
     readonly turn?: number
     readonly reason?: { readonly kind?: string; readonly error?: { readonly code?: string } }
+    readonly message?: { readonly role?: string; readonly content?: readonly { readonly type?: string; readonly text?: string }[] }
     readonly chunk?: { readonly type?: string; readonly block?: { readonly type?: string; readonly text?: string } }
   }
 }
@@ -13,9 +14,16 @@ export interface LiveEvent {
 export function hasCompletedAssistantReply(events: readonly LiveEvent[], turn: number, text: string): boolean {
   return events.some(event => event.type === 'turn/end' && event.data?.turn === turn
     && event.data.reason?.kind === 'completed')
-    && events.some(event => event.type === 'assistant/chunk' && event.data?.turn === turn
-      && event.data.chunk?.type === 'block-end' && event.data.chunk.block?.type === 'text'
-      && event.data.chunk.block.text?.split(/\r?\n/).some(line => line.trim() === text))
+    && events.some(event => {
+      if (event.data?.turn !== turn) return false
+      const exactLine = (value: string | undefined) => value?.split(/\r?\n/).some(line => line.trim() === text) === true
+      if (event.type === 'assistant/message' && event.data.message?.role === 'assistant') {
+        return event.data.message.content?.some(block => block.type === 'text' && exactLine(block.text)) === true
+      }
+      // Keep old isolated alpha.2 evidence readable; V3 folds these chunks into messages.
+      return event.type === 'assistant/chunk' && event.data.chunk?.type === 'block-end'
+        && event.data.chunk.block?.type === 'text' && exactLine(event.data.chunk.block.text)
+    })
 }
 
 /** Read only this test's synthetic logs; leave the native default encoding unchanged. */

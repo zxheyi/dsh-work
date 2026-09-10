@@ -8,7 +8,7 @@ interface ActiveGeneration {
   readonly schema: typeof SCHEMA
   readonly generation: string
   readonly guardianPid: number
-  readonly runtime: '0.1.2-alpha.2'
+  readonly runtime: '0.1.5-rc.1'
   readonly state: 'claimed'
   readonly claimedAt: string
 }
@@ -73,7 +73,7 @@ const validActive = (value: unknown): value is ActiveGeneration =>
   exactKeys(value, ['schema', 'generation', 'guardianPid', 'runtime', 'state', 'claimedAt']) &&
   value.schema === SCHEMA && safeGeneration(value.generation) &&
   typeof value.guardianPid === 'number' && Number.isSafeInteger(value.guardianPid) && value.guardianPid > 0 &&
-  value.runtime === '0.1.2-alpha.2' && value.state === 'claimed' && validTime(value.claimedAt)
+  value.runtime === '0.1.5-rc.1' && value.state === 'claimed' && validTime(value.claimedAt)
 
 const validTerminal = (value: unknown): value is TerminalGeneration =>
   exactKeys(value, ['schema', 'generation', 'status', 'confirmedAt']) &&
@@ -154,7 +154,7 @@ export function createGenerationStore(
     schema: SCHEMA,
     generation,
     guardianPid: pid,
-    runtime: '0.1.2-alpha.2',
+    runtime: '0.1.5-rc.1',
     state: 'claimed',
     claimedAt: now(),
   })

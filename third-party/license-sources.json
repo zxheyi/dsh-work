@@ -7,7 +7,7 @@
   },
   {
     "id": "pi",
-    "url": "https://raw.githubusercontent.com/earendil-works/pi/b79e4cc834970cca69daebffab7df1da7d1e52c4/LICENSE",
+    "url": "https://raw.githubusercontent.com/earendil-works/pi/d981de1229ef899957bbe968bc8dcda02a21f477/LICENSE",
     "file": "third-party/licenses/pi.txt",
     "sha256": "0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48"
   },
@@ -16,5 +16,11 @@
     "url": "https://raw.githubusercontent.com/lovell/sharp-libvips/6e5971d333377743163edc3ad9e5d0b897abcbc9/THIRD-PARTY-NOTICES.md",
     "file": "third-party/licenses/libvips-notices.txt",
     "sha256": "25ffcfa69e28b1913ced27ec778b90f24911a1bb3021253577e8b0af55db0d49"
+  },
+  {
+    "id": "standardwebhooks",
+    "url": "https://raw.githubusercontent.com/standard-webhooks/standard-webhooks/b4d2c14fc5b4ccff3ff271e3b087dff812254c59/libraries/LICENSE",
+    "file": "third-party/licenses/standardwebhooks.txt",
+    "sha256": "5ec8c7b26b64d881a6706617bed25c049f97f2f35de034c756de8546fd6dbe27"
   }
 ]

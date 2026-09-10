@@ -89,8 +89,8 @@ async function run(): Promise<void> {
       }
       return {
         ready: Boolean(document.querySelector('[data-composer-input]')
-          && document.querySelector('[data-work-session-resource]')),
-        sessionId: document.querySelector('[data-work-session-resource]')?.getAttribute('data-work-session-resource') ?? '',
+          && document.querySelector('input[type=file]')),
+        sessionId: window.name.startsWith('dsh-work-recovery:v1:') ? JSON.parse(window.name.slice('dsh-work-recovery:v1:'.length)).sessionId : '',
         draft: document.querySelector('[data-composer-input]')?.textContent ?? '',
         turns: document.querySelectorAll('[data-chat-turn]').length,
         conversations: document.querySelectorAll('[role=treeitem]').length,
@@ -129,7 +129,7 @@ async function run(): Promise<void> {
     ), 'utf8')) as { sessionA: string; generateAPrompt: string }
     const selectFile = (name: string, type: string, content: string): Promise<boolean> => js<boolean>(
       `(() => {
-        const input = document.querySelector('[data-work-session-resource] input[type=file]')
+        const input = document.querySelector('input[type=file]')
         if (!(input instanceof HTMLInputElement)) return false
         const transfer = new DataTransfer()
         transfer.items.add(new File([${JSON.stringify(content)}], ${JSON.stringify(name)}, { type: ${JSON.stringify(type)} }))
@@ -144,8 +144,8 @@ async function run(): Promise<void> {
     await setDraft(baseline.generateAPrompt)
     assert.equal(await selectFile('recovery-source.txt', 'text/plain', 'runtime recovery source'), true)
     await waitFor(
-      () => js<string>("document.querySelector('[data-composer-input]')?.textContent ?? ''"),
-      value => value.includes('recovery-source.txt') && value.includes(baseline.generateAPrompt),
+      () => js<string>("document.body.innerText"),
+      value => value.includes('recovery-source.txt') && value.includes(baseline.generateAPrompt) && !value.includes('上传中'),
       'Source resource was not attached before generating an output',
     )
     await js(`(() => {
