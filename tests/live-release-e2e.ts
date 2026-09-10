@@ -136,10 +136,10 @@ try {
   fs.writeFileSync(path.join(home, 'live-session-title.txt'), title)
   step = 'attachment-generate'; report('fail')
   await setDraft('Read the attached file using tools, then write release-report.md in the workspace root. Include a Markdown heading and the exact text Orchid: 7. Do not ask questions.')
-  await js(`(() => { const input = document.querySelector('[data-work-session-resource] input[type=file]'); const transfer = new DataTransfer();
+  await js(`(() => { const input = document.querySelector('input[type=file]'); const transfer = new DataTransfer();
     transfer.items.add(new File(['# Synthetic brief\\nProject Orchid has 7 items.\\n'], 'release-brief.md', {type:'text/markdown'}));
     Object.defineProperty(input,'files',{configurable:true,value:transfer.files});input.dispatchEvent(new Event('change',{bubbles:true})); })()`)
-  await wait(() => js<boolean>(`document.querySelector('[data-composer-input]')?.textContent?.includes('release-brief.md') === true && document.querySelector('[data-composer-input]')?.textContent?.includes('Orchid: 7') === true`))
+  await wait(() => js<boolean>(`document.body.innerText.includes('release-brief.md') && !document.body.innerText.includes('上传中') && document.querySelector('[data-composer-input]')?.textContent?.includes('Orchid: 7') === true`))
   await js(`document.querySelector('button[aria-label="发送消息"]')?.click()`)
   const reportFile = path.join(home, 'live-workspace/release-report.md')
   await wait(async () => fs.existsSync(reportFile) && fs.readFileSync(reportFile, 'utf8').includes('Orchid: 7'))
