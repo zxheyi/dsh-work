@@ -366,17 +366,17 @@ async function run(): Promise<void> {
     await waitFor(
       () => js<string>("document.querySelector('[data-work-output-preview-markdown]')?.textContent ?? ''"),
       text => text.includes('本周结论已经整理完成。') && text.includes('产品：整理试用反馈。'),
-      'Markdown output did not render in the details panel',
+      'Markdown output did not render in the native Sidebar tab',
     )
     await waitFor(
-      () => js<boolean>("document.querySelector('[data-details-collapsed]') === null"),
+      () => js<boolean>("document.querySelector('[data-sidebar-right-open]') !== null"),
       value => value,
-      'Details layout did not open for the Markdown preview',
+      'Native Sidebar layout did not open for the Markdown preview',
     )
     await waitFor(
-      () => js<number>("document.querySelector('[data-slot=details]')?.parentElement?.getBoundingClientRect().width ?? 0"),
+      () => js<number>("document.querySelector('[data-slot=rightbar]')?.parentElement?.getBoundingClientRect().width ?? 0"),
       width => width >= 300,
-      'Details layout did not finish expanding',
+      'Native Sidebar layout did not finish expanding',
     )
     assert.equal(await js<number>("document.querySelectorAll('[data-work-output-preview-markdown] script, [data-work-output-preview-markdown] img, [data-work-output-preview-markdown] iframe, [data-work-output-preview-markdown] a').length"), 0)
     assert.equal(await js<boolean>('globalThis.__dshWorkPreviewExecuted === true'), false)
@@ -421,9 +421,9 @@ async function run(): Promise<void> {
     )
     assert.equal(await js<boolean>("(() => { const call = document.querySelector('[data-chat-call-id]'); const buttons = call?.querySelectorAll('button'); const inspect = buttons?.item((buttons?.length ?? 0) - 1); if (!(inspect instanceof HTMLButtonElement)) return false; inspect.click(); return true })()"), true)
     await waitFor(
-      () => js<boolean>("document.querySelector('[data-work-output-preview]') === null && document.querySelector('[role=tab][aria-selected=true]')?.textContent?.trim() === '轨迹'"),
+      () => js<boolean>("document.querySelector('[data-work-output-preview]') !== null && document.querySelector('[role=tab][aria-selected=true]')?.textContent?.trim() === '轨迹'"),
       value => value,
-      'Native Tool inspection did not take over from the Work preview',
+      'Native Tool inspection did not preserve the independent Work preview tab',
     )
     assert.equal(await js<boolean>("(() => { const tab = Array.from(document.querySelectorAll('[role=tab]')).find(item => item.textContent?.trim() === '对话'); if (!(tab instanceof HTMLButtonElement)) return false; tab.click(); return true })()"), true)
     await waitFor(
@@ -432,6 +432,8 @@ async function run(): Promise<void> {
       'Conversation outputs did not return after native Tool inspection',
     )
     assert.equal(await selectAt(0), 'report-a.md')
+    // Native tabs preserve the source subview while inspecting a tool in the center.
+    assert.equal(await js<boolean>("(() => { const tab = Array.from(document.querySelectorAll('[data-work-output-preview] [role=tab]')).find(item => item.textContent?.trim() === '内容'); if (!(tab instanceof HTMLButtonElement)) return false; tab.click(); return true })()"), true)
     await waitFor(
       () => js<number>("document.querySelectorAll('[data-work-output-preview-markdown]').length"),
       count => count === 1,
@@ -486,7 +488,7 @@ async function run(): Promise<void> {
     assert.equal(await setDraft('保留的修改草稿'), '保留的修改草稿')
     assert.equal(await js<boolean>("(() => { const button = document.querySelector('[aria-label=\"返回会话并关闭文件预览\"]'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
     await waitFor(
-      () => js<boolean>("document.querySelector('[data-details-collapsed]') !== null"),
+      () => js<boolean>("document.querySelector('[data-work-output-preview]') === null"),
       value => value,
       'Preview did not close',
     )

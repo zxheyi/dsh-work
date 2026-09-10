@@ -5,7 +5,7 @@ import path from 'node:path'
 import type { StartupSelection } from './preferences.ts'
 
 const SCHEMA = 'dsh-work.startup-checkpoint.v1' as const
-const RUNTIME = '0.1.2-alpha.2' as const
+const RUNTIME = '0.1.5-rc.1' as const
 const FILE = 'startup-checkpoint.json'
 const MAX_BYTES = 4 * 1024
 

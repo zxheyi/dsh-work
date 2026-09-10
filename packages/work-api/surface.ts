@@ -16,6 +16,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import type { UseSidebarRightTabInfo } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 
 import type { IWorks, WorkClientSnapshot } from './client-model.ts'
 import type {
@@ -1922,7 +1923,7 @@ html[data-dsh-work-platform="darwin"] [data-slot="sidebar"] > div > div:first-ch
 html[data-dsh-work-platform="darwin"] [data-sidebar-collapsed] [data-slot="sidebar"] > div > div:first-child > button:last-child { position: static; }
 html[data-dsh-work-platform="darwin"] [data-sidebar-collapsed] [data-slot="sidebar"] > div > div:first-child { height: 36px; }
 html[data-dsh-work-platform="darwin"] [data-slot="conversation"] > div,
-html[data-dsh-work-platform="darwin"] [data-slot="details"] > div { padding-top: 38px; box-sizing: border-box; }
+html[data-dsh-work-platform="darwin"] [data-slot="rightbar"] > div { padding-top: 38px; box-sizing: border-box; }
 
 [data-approval-key] { font-family: var(--work-font); }
 [data-approval-key] > div { border-color: color-mix(in srgb, var(--work-warning) 46%, var(--work-border)) !important; border-radius: 14px !important; box-shadow: var(--work-shadow) !important; }
@@ -2150,18 +2151,25 @@ export function registerWorkSurface(ctx: Context, works: IWorks, ResourceIcon: C
   }
   restoreContext()
   const removeStyles = installStyles()
-  const preview = createSessionOutputPreviewStore()
-  let removePreview: (() => void) | null = null
-  const releasePreview = (): void => {
-    removePreview?.()
-    removePreview = null
-    preview.clear()
+  const previews = new Map<string, SessionOutputPreviewStore>()
+  const previewFor = (sessionId: string): SessionOutputPreviewStore => {
+    let preview = previews.get(sessionId)
+    if (!preview) {
+      preview = createSessionOutputPreviewStore()
+      previews.set(sessionId, preview)
+    }
+    return preview
   }
-  const closePreview = (): void => {
+  const previewKind = 'dsh-work-output'
+  const previewId = '@dsh-work/work-api/output'
+  const removePreviewType = ctx.sidebarRightTabs.register({
+    id: previewId, kind: previewKind, title: () => '文件版本',
+  })
+  const closePreview = (preview: SessionOutputPreviewStore, closeTab: () => void): void => {
     const selected = preview.getSnapshot()
     const returnToComposer = window.matchMedia(NARROW_PREVIEW_QUERY).matches
-    ctx.layout.closeDetails()
-    releasePreview()
+    closeTab()
+    preview.clear()
     if (selected && activeRecoveryContext?.sessionId === selected.sessionId) {
       publishRecoveryContext(selected.sessionId, activeRecoveryContext.draft, null)
     }
@@ -2178,17 +2186,17 @@ export function registerWorkSurface(ctx: Context, works: IWorks, ResourceIcon: C
       })
     }
   }
-  const handOverToNativeToolSurface = (event: Event): void => {
-    if (!preview.getSnapshot() || !(event.target instanceof Element)) return
-    const call = event.target.closest<HTMLElement>('[data-chat-call-id]')
-    const callId = call?.dataset.chatCallId
-    if (!callId) return
-    requestAnimationFrame(() => {
-      const matching = Array.from(document.querySelectorAll<HTMLElement>('[data-chat-call-id]'))
-        .find(candidate => candidate.dataset.chatCallId === callId)
-      if (!matching || matching.hasAttribute('data-selected')) releasePreview()
+  const removePreview = ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
+    name: 'sidebar.right.pane.tab', key: previewId,
+    inject: (sessionId: string) => ({ works, preview: previewFor(sessionId) }),
+  }, (props: Omit<NativeSessionOutputPreviewProps, 'closePreview'> & {
+    readonly useTabInfo: UseSidebarRightTabInfo
+  }) => {
+    const info = props.useTabInfo()
+    return h(NativeSessionOutputPreview, {
+      ...props, closePreview: () => closePreview(props.preview, () => info.tab.actions.close()),
     })
-  }
+  }))
   const selectOutput = (event: Event): void => {
     if (!(event instanceof CustomEvent) || typeof event.detail !== 'object' || !event.detail) return
     const detail = event.detail as Partial<SessionOutputPreviewDetail>
@@ -2203,17 +2211,11 @@ export function registerWorkSurface(ctx: Context, works: IWorks, ResourceIcon: C
       || (typeof detail.mediaType !== 'string' && detail.mediaType !== null)
       || typeof open !== 'function') return
     event.preventDefault()
-    preview.select(Object.freeze({ ...detail, open } as SessionOutputPreviewSelection))
-    removePreview ??= ctx.slots.register({
-      name: 'details',
-      priority: -100,
-      inject: () => ({ works, preview, closePreview }),
-    }, NativeSessionOutputPreview)
-    requestAnimationFrame(() => ctx.layout.openDetails())
+    previewFor(detail.sessionId).select(Object.freeze({ ...detail, open } as SessionOutputPreviewSelection))
+    ctx.sidebarRight.openTab(previewKind)
   }
   window.addEventListener('dsh-work:select-session-output', selectOutput)
   window.addEventListener('dsh-work:restore-context', restoreContext)
-  window.addEventListener('click', handOverToNativeToolSurface)
   ctx.slots.inject('sidebar.brand.name', () => ctx.slots.register({
     name: 'sidebar.brand.name',
     priority: -100,
@@ -2277,9 +2279,10 @@ export function registerWorkSurface(ctx: Context, works: IWorks, ResourceIcon: C
   return () => {
     window.removeEventListener('dsh-work:select-session-output', selectOutput)
     window.removeEventListener('dsh-work:restore-context', restoreContext)
-    window.removeEventListener('click', handOverToNativeToolSurface)
-    removePreview?.()
-    preview.clear()
+    removePreview()
+    removePreviewType()
+    for (const preview of previews.values()) preview.clear()
+    previews.clear()
     stopRecoveryNavigation?.()
     removeStyles()
   }

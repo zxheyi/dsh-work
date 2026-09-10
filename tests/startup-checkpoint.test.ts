@@ -16,7 +16,7 @@ test('healthy checkpoints retain only bounded startup identity', () => {
       kind: 'shared', profileId: 'a'.repeat(24), profileName: 'web', homePath: '/private/source',
     }, 'selected', () => '2026-09-07T12:00:00.000Z')
     assert.deepEqual(readStartupCheckpoint(root), {
-      schema: 'dsh-work.startup-checkpoint.v1', runtime: '0.1.2-alpha.2', mode: 'selected',
+      schema: 'dsh-work.startup-checkpoint.v1', runtime: '0.1.5-rc.1', mode: 'selected',
       source: { kind: 'shared', profileId: 'a'.repeat(24), profileName: 'web' },
       readyAt: '2026-09-07T12:00:00.000Z',
     })

@@ -17,6 +17,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
       '@deepseek-ai/dsh-client-ui-layout',
       '@deepseek-ai/dsh-client-ui-renderer',
       '@deepseek-ai/dsh-client-ui-sidebar',
+      '@deepseek-ai/dsh-client-ui-sidebar-right',
     ],
     platform: 'web',
   })
@@ -65,10 +66,12 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
     inject?: unknown
   }
   assert.equal(typeof exports.apply, 'function')
-  assert.deepEqual(Array.from(exports.inject as string[]), ['remote', 'slots', 'layout', 'sessions'])
+  assert.deepEqual(Array.from(exports.inject as string[]), ['remote', 'slots', 'layout', 'sessions', 'sidebarRight', 'sidebarRightTabs'])
 
   const injectedSlots: string[] = []
   const injectedServices: string[][] = []
+  let previewInjection: ((sessionId: string) => { preview: unknown }) | undefined
+  const tabDefinitions: string[] = []
   const registeredSlots: Array<{ name: string; priority?: number }> = []
   const remote = {
     async $mount() { return async () => {} },
@@ -92,7 +95,9 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   let scopedDispose: (() => Promise<void> | void) | undefined
   const clientContext = {
     remote,
-    layout: { openDetails() {}, closeDetails() {}, toggleSidebar() {} },
+    layout: { toggleSidebar() {} },
+    sidebarRight: { openTab() {} },
+    sidebarRightTabs: { register(definition: { kind: string }) { tabDefinitions.push(definition.kind); return () => {} } },
     inject(deps: string[], apply: (ctx: unknown) => (() => Promise<void> | void)) {
       injectedServices.push(deps)
       scopedDispose = apply(clientContext)
@@ -104,9 +109,10 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
     slots: {
       inject(name: string, register: () => void) {
         injectedSlots.push(name)
-        register()
+        return register()
       },
-      register(options: { name: string; priority?: number }) {
+      register(options: { name: string; priority?: number; inject?: (sessionId: string) => { preview: unknown } }) {
+        if (options.name === 'sidebar.right.pane.tab') previewInjection = options.inject
         registeredSlots.push({
           name: options.name,
           ...(options.priority === undefined ? {} : { priority: options.priority }),
@@ -116,8 +122,9 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
     },
   }
   const dispose = await exports.apply!(clientContext)
-  assert.deepEqual(injectedServices.map(value => Array.from(value)), [['remote.work', 'layout', 'sessions']])
+  assert.deepEqual(injectedServices.map(value => Array.from(value)), [['remote.work', 'layout', 'sessions', 'sidebarRight', 'sidebarRightTabs']])
   assert.deepEqual(injectedSlots, [
+    'sidebar.right.pane.tab',
     'sidebar.brand.name',
     'conversation.input.left',
     'conversation.input.dock',
@@ -128,6 +135,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
     'shell.overlay',
   ])
   assert.deepEqual(registeredSlots, [
+    { name: 'sidebar.right.pane.tab' },
     { name: 'sidebar.brand.name', priority: -100 },
     { name: 'conversation.input.left' },
     { name: 'conversation.input.dock' },
@@ -137,6 +145,10 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
     { name: 'sidebar.footer.action' },
     { name: 'shell.overlay' },
   ])
+  assert.deepEqual(tabDefinitions, ['dsh-work-output'])
+  assert.ok(previewInjection)
+  assert.equal(previewInjection('one').preview, previewInjection('one').preview)
+  assert.notEqual(previewInjection('one').preview, previewInjection('two').preview, 'native tabs must not share another session output selection')
   assert.match(source, /data-dsh-work-brand/)
   assert.equal(injectedSlots.includes('sidebar.brand.mark'), true, 'use the approved product whale in expanded and collapsed sidebars')
   assert.match(source, /--work-accent: #2f63e9/u)
