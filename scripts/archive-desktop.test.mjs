@@ -6,13 +6,14 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { archiveDesktop, validateCandidateEvidence, verifyBundledDistribution, writeCandidateArchive } from './archive-desktop.mjs'
+import { stageSourceCompanion, withSourceCompanion } from './source-companion.mjs'
 import { bundleSHA256 } from './bundle-digest.mjs'
 
 const digest = 'a'.repeat(64)
 const fixture = () => ({
   current: { revision: 'b'.repeat(40), version: '0.0.1-alpha.1', platform: 'darwin', arch: 'arm64', lockfileSHA256: digest, bundleSHA256: digest, clean: true },
   receipt: { schema: 'dsh-work.desktop-package.v1', revision: 'b'.repeat(40), version: '0.0.1-alpha.1', platform: 'darwin', arch: 'arm64', lockfileSHA256: digest, distribution: 'unsigned-internal-test' },
-  smoke: { status: 'pass', revision: 'b'.repeat(40), platform: 'darwin', arch: 'arm64', distribution: 'unsigned-internal-test', bundleSHA256: digest, relocated: true, launches: 2, cleanShutdown: true, developerNodeIgnored: true },
+  smoke: { status: 'pass', revision: 'b'.repeat(40), platform: 'darwin', arch: 'arm64', distribution: 'unsigned-internal-test', bundleSHA256: digest, relocated: true, launches: 2, cleanShutdown: true, developerNodeIgnored: true, nativeTools: { node: '24.11.1', npm: true, npx: true, pty: true, sharp: true } },
   inventory: { schema: 'dsh-work.distribution-notices.v1', platform: 'darwin', arch: 'arm64', lockfileSHA256: digest, blockers: [], packages: [{ name: '@img/sharp-libvips-darwin-arm64', nativeComponents: { vips: '8.18.6' }, notices: [{ file: 'texts/license.txt', sha256: digest }], nativeMaterials: [{ file: 'native/source.tar.gz', sha256: digest }], nativeBinaries: [{ file: 'lib/libvips.dylib', sha256: digest }] }] },
   replacement: { platform: 'darwin', arch: 'arm64', replacements: [{ file: 'libvips.dylib', before: digest, after: 'c'.repeat(64) }], result: { version: { semver: '8.18.6', isGlobal: false, isWasm: false }, formats: ['jpeg', 'png'] } },
   bundledManifest: { version: '0.0.1-alpha.1' },
@@ -32,6 +33,8 @@ test('candidate archive requires current native package, successful smoke and di
     ['stale smoke', value => { value.smoke.revision = 'old' }, /smoke/],
     ['missing bundle digest', value => { delete value.smoke.bundleSHA256 }, /bundle digest/],
     ['bundle edited after smoke', value => { value.current.bundleSHA256 = 'c'.repeat(64) }, /bundle digest/],
+    ['missing native tool smoke', value => { delete value.smoke.nativeTools }, /native tools/],
+    ['failed PTY smoke', value => { value.smoke.nativeTools.pty = false }, /native tools/],
     ['no relocation', value => { value.smoke.relocated = false }, /smoke/],
     ['one launch', value => { value.smoke.launches = 1 }, /smoke/],
     ['unclean shutdown', value => { value.smoke.cleanShutdown = false }, /smoke/],
@@ -66,6 +69,7 @@ test('failed candidate rerun clears earlier completion records before reading ev
     fs.mkdirSync(output, { recursive: true })
     const stem = `DSH-Work-0.0.1-alpha.1-${process.platform}-${process.arch}`
     const outputs = ['receipt.json', 'sha256', process.platform === 'darwin' ? 'tar.gz' : 'zip'].map(extension => path.join(output, `${stem}.${extension}`))
+    outputs.push(path.join(output, `${stem}-sources.tar.gz`))
     for (const file of outputs) fs.writeFileSync(file, 'old candidate')
     await assert.rejects(archiveDesktop({ projectRoot: temporary }), /receipt.json/)
     for (const file of outputs) assert.equal(fs.existsSync(file), false, 'failed evidence must invalidate prior candidate outputs')
@@ -144,6 +148,19 @@ test('archive verifies materials and dependency inventory inside the shipped bun
     write(path.join(resources, 'third-party'), 'texts/license.txt', 'notice')
     write(path.join(application, 'node_modules/unlisted'), 'package.json', JSON.stringify({ name: 'unlisted', version: '1.0.0', license: 'MIT' }))
     assert.throws(verify, /actual dependencies/)
+    fs.rmSync(path.join(application, 'node_modules/unlisted'), { recursive: true })
+    const sources = path.join(temporary, 'sources')
+    const descriptor = stageSourceCompanion({ resources, output: sources, version: '0.0.1-alpha.1', platform: process.platform === 'win32' ? 'win32' : 'darwin', arch: process.platform === 'win32' ? 'x64' : 'arm64' })
+    const paired = () => withSourceCompanion(path.join(resources, 'third-party'), path.join(sources, descriptor.file), nativeRoot =>
+      verifyBundledDistribution({ application, resources, inventory, materialLock, materialLockPath, nativeRoot }))
+    assert.doesNotThrow(paired)
+    assert.throws(verify, /missing material/)
+    write(native, 'license.txt', 'tampered bundled license')
+    assert.throws(paired, /bundled native notice/)
+    write(native, 'license.txt', 'license content')
+    write(packageRoot, 'lib/native.dylib', 'changed after source split')
+    assert.throws(paired, /binary digest/)
+
   } finally { fs.rmSync(temporary, { recursive: true, force: true }) }
 })
 

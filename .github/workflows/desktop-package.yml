@@ -33,6 +33,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-candidate-${{ matrix.os }}
+          # One candidate contains application + matching sources + paired receipt/checksums.
           path: artifacts/release/
           if-no-files-found: error
           compression-level: 0
@@ -41,6 +42,7 @@ jobs:
         with:
           name: package-evidence-${{ matrix.os }}
           path: |
+            artifacts/package/pruning.json
             artifacts/package/receipt.json
             artifacts/package/smoke.json
             artifacts/package/smoke-*.png

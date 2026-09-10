@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { setTimeout as delay } from 'node:timers/promises'
+import { verifyPackagedTools } from './verify-packaged-tools.mjs'
 import { bundleSHA256 } from './bundle-digest.mjs'
 const root = path.resolve(import.meta.dirname, '..')
 const receipt = JSON.parse(fs.readFileSync(path.join(root, 'artifacts/package/receipt.json')))
@@ -32,6 +33,7 @@ let clean = false
 let phase = 'relocate'
 let lastProbe
 let sendCommand
+let nativeTools
 const until = async (action, requireRunning = true) => {
   const deadline = Date.now() + 90000
   while (Date.now() < deadline) {
@@ -43,6 +45,8 @@ const until = async (action, requireRunning = true) => {
   throw new Error('packaged desktop timed out')
 }
 try {
+  phase = 'native-tools'
+  nativeTools = verifyPackagedTools(resources)
   for (let pass = 0; pass < 2; pass++) {
     fs.rmSync(path.join(userData, 'DevToolsActivePort'), { force: true })
     const env = { ...process.env, DSH_HOME: path.join(temporary, 'empty-harness'), DSH_WORK_NODE: path.join(temporary, 'deliberately-missing-node'), PATH: path.dirname(executable) }
@@ -103,7 +107,7 @@ try {
   assert.equal(await bundleSHA256(installed), testedBundleSHA256, 'tested bundle changed during smoke')
   assert.equal(await bundleSHA256(originalBundle), testedBundleSHA256, 'original bundle changed during smoke')
   clean = true
-  fs.writeFileSync(output, JSON.stringify({ status: 'pass', revision: receipt.revision, platform: process.platform, arch: process.arch, distribution: receipt.distribution, bundleSHA256: testedBundleSHA256, relocated: true, launches: 2, cleanShutdown: true, developerNodeIgnored: true }, null, 2))
+  fs.writeFileSync(output, JSON.stringify({ status: 'pass', revision: receipt.revision, platform: process.platform, arch: process.arch, distribution: receipt.distribution, bundleSHA256: testedBundleSHA256, relocated: true, launches: 2, cleanShutdown: true, developerNodeIgnored: true, nativeTools }, null, 2))
   console.log('Relocated packaged desktop: two launches, native surface, clean shutdown passed')
 } catch (error) {
   if (sendCommand && socket?.readyState === WebSocket.OPEN) {

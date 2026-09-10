@@ -12,7 +12,12 @@ test('stages only a verified Node tree into the packaged resource layout', () =>
     const extracted = path.join(root, 'node-v24.11.1-darwin-arm64')
     const node = path.join(extracted, 'bin/node')
     fs.mkdirSync(path.dirname(node), { recursive: true })
-    fs.writeFileSync(node, 'verified node bytes')
+    fs.writeFileSync(node, 'verified node bytes', { mode: 0o755 })
+    for (const file of ['include/node/node.h', 'share/man/node.1', 'lib/node_modules/npm/bin/npm-cli.js', 'LICENSE']) {
+      fs.mkdirSync(path.dirname(path.join(extracted, file)), { recursive: true })
+      fs.writeFileSync(path.join(extracted, file), file)
+    }
+    if (process.platform !== 'win32') fs.symlinkSync('../lib/node_modules/npm/bin/npm-cli.js', path.join(extracted, 'bin/npm'))
     const destination = path.join(root, 'resources')
     let verified = 0
 
@@ -22,6 +27,11 @@ test('stages only a verified Node tree into the packaged resource layout', () =>
     })
 
     assert.equal(verified, 1)
+    if (process.platform !== 'win32') assert.equal(fs.readlinkSync(path.join(destination, 'runtime/node/bin/npm')), '../lib/node_modules/npm/bin/npm-cli.js')
+    assert.equal(fs.existsSync(path.join(destination, 'runtime/node/include')), false)
+    assert.equal(fs.existsSync(path.join(destination, 'runtime/node/share')), false)
+    assert.ok(fs.existsSync(path.join(destination, 'runtime/node/lib/node_modules/npm/bin/npm-cli.js')))
+    assert.ok(fs.existsSync(path.join(destination, 'runtime/node/LICENSE')))
     assert.equal(fs.readFileSync(path.join(destination, 'runtime/node/bin/node'), 'utf8'), 'verified node bytes')
     assert.deepEqual(manifest, {
       schema: 'dsh-work.packaged-runtime.v1',

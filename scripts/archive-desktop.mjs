@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { inventoryPackages } from './distribution-notices.mjs'
 import { verifyNativeMaterials } from './native-distribution.mjs'
+import { sourceArchiveName, withSourceCompanion } from './source-companion.mjs'
 import { bundleSHA256 } from './bundle-digest.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
@@ -26,6 +27,7 @@ export function validateCandidateEvidence({ current, receipt, smoke, inventory, 
   requireEvidence(['unsigned-internal-test', 'developer-id-notarized'].includes(receipt.distribution), 'unrecognized package distribution')
   requireEvidence(smoke?.status === 'pass' && smoke.relocated === true && smoke.launches === 2
     && smoke.cleanShutdown === true && smoke.developerNodeIgnored === true, 'successful relocated two-launch clean smoke is required')
+  requireEvidence(smoke.nativeTools?.node && ['npm', 'npx', 'pty', 'sharp'].every(key => smoke.nativeTools[key] === true), 'packaged native tools smoke is required')
   requireEvidence(/^[a-f0-9]{64}$/u.test(smoke.bundleSHA256) && smoke.bundleSHA256 === current.bundleSHA256, 'smoke bundle digest does not match current bundle bytes')
   for (const field of ['revision', 'platform', 'arch', 'distribution']) {
     requireEvidence(smoke[field] === receipt[field], `smoke ${field} does not match package receipt`)
@@ -62,7 +64,7 @@ const containedPath = (directory, relative) => {
   return result
 }
 
-export function verifyBundledDistribution({ application, resources, inventory, materialLock, materialLockPath }) {
+export function verifyBundledDistribution({ application, resources, inventory, materialLock, materialLockPath, nativeRoot = path.join(resources, 'third-party/native') }) {
   const identity = packages => packages.map(item => `${item.name}@${item.version}:${item.path}`).sort()
   requireEvidence(JSON.stringify(identity(inventoryPackages(application))) === JSON.stringify(identity(inventory.packages)), 'bundled package inventory does not match actual dependencies')
   const thirdParty = path.join(resources, 'third-party')
@@ -85,7 +87,10 @@ export function verifyBundledDistribution({ application, resources, inventory, m
     const listed = materials.map(({ id, file, sha256, url, kind }) => ({ id, file: `native/${file}`, sha256, source: url, kind }))
     requireEvidence(JSON.stringify(item.nativeMaterials) === JSON.stringify(listed)
       && JSON.stringify(item.nativeBinaries) === JSON.stringify(selected.binaries), 'bundled native inventory differs from locked material/binary coverage')
-    const errors = verifyNativeMaterials(item, { ...selected, materials }, containedPath(application, item.path), path.join(thirdParty, 'native'))
+    for (const material of materials.filter(value => value.kind !== 'source')) {
+      requireEvidence(sha(fs.readFileSync(containedPath(path.join(thirdParty, 'native'), material.file))) === material.sha256, `bundled native notice/build digest mismatch: ${material.file}`)
+    }
+    const errors = verifyNativeMaterials(item, { ...selected, materials }, containedPath(application, item.path), nativeRoot)
     requireEvidence(errors.length === 0, `bundled native materials failed verification: ${errors.slice(0, 5).join('; ')}`)
   }
 }
@@ -114,9 +119,10 @@ export async function archiveDesktop({ projectRoot = root } = {}) {
   const archive = path.join(output, `${stem}.${process.platform === 'darwin' ? 'tar.gz' : 'zip'}`)
   const archiveReceiptPath = path.join(output, `${stem}.receipt.json`)
   const checksumPath = path.join(output, `${stem}.sha256`)
+  const sourceOutput = path.join(output, sourceArchiveName(version, process.platform, process.arch))
   // Invalidate completion before even reading evidence: failed reruns must not
   // leave a previous candidate looking like the result of the current attempt.
-  for (const file of [archiveReceiptPath, checksumPath, archive]) fs.rmSync(file, { force: true })
+  for (const file of [archiveReceiptPath, checksumPath, archive, sourceOutput]) fs.rmSync(file, { force: true })
   const packageRoot = path.join(projectRoot, 'artifacts/package')
   const receiptPath = path.join(packageRoot, 'receipt.json')
   const smokePath = path.join(packageRoot, 'smoke.json')
@@ -138,15 +144,23 @@ export async function archiveDesktop({ projectRoot = root } = {}) {
   const inventory = read(inventoryPath)
   const replacement = read(replacementPath)
   validateCandidateEvidence({ current, receipt, smoke, inventory, replacement, bundledManifest: read(path.join(application, 'package.json')) })
-  verifyBundledDistribution({ application, resources, inventory, materialLock: read(materialLockPath), materialLockPath })
+  const sourceArchive = path.join(packageRoot, 'sources', path.basename(sourceOutput))
+  const sourceDescriptor = withSourceCompanion(path.join(resources, 'third-party'), sourceArchive, (nativeRoot, descriptor) => {
+    requireEvidence(descriptor.version === current.version && descriptor.platform === current.platform && descriptor.arch === current.arch, 'source archive does not match candidate')
+    verifyBundledDistribution({ application, resources, inventory, materialLock: read(materialLockPath), materialLockPath, nativeRoot })
+    return descriptor
+  })
   writeCandidateArchive(bundle, archive, current.platform)
   requireEvidence(await bundleSHA256(bundle) === current.bundleSHA256, 'bundle changed while creating candidate archive')
+  fs.copyFileSync(sourceArchive, sourceOutput)
+  requireEvidence(await fileSHA256(sourceOutput) === sourceDescriptor.sha256, 'source archive changed during copying')
   const archiveSHA256 = await fileSHA256(archive)
   const archiveReceipt = {
     schema: 'dsh-work.desktop-candidate-archive.v1', revision: current.revision, version: current.version,
     platform: current.platform, arch: current.arch, distribution: receipt.distribution,
     publication: 'draft-only-pending-human-acceptance',
     archive: { file: path.basename(archive), rootDirectory: path.basename(bundle), bytes: fs.statSync(archive).size, sha256: archiveSHA256, bundleSHA256: current.bundleSHA256 },
+    sources: sourceDescriptor,
     package: receipt, smoke, replacement,
     evidenceSHA256: Object.fromEntries([
       ['packageReceipt', receiptPath], ['smoke', smokePath], ['inventory', inventoryPath],
@@ -154,7 +168,7 @@ export async function archiveDesktop({ projectRoot = root } = {}) {
     ].map(([name, file]) => [name, sha(fs.readFileSync(file))])),
   }
   fs.writeFileSync(archiveReceiptPath, `${JSON.stringify(archiveReceipt, null, 2)}\n`)
-  fs.writeFileSync(checksumPath, `${archiveSHA256}  ${path.basename(archive)}\n${await fileSHA256(archiveReceiptPath)}  ${path.basename(archiveReceiptPath)}\n`)
+  fs.writeFileSync(checksumPath, `${archiveSHA256}  ${path.basename(archive)}\n${sourceDescriptor.sha256}  ${path.basename(sourceOutput)}\n${await fileSHA256(archiveReceiptPath)}  ${path.basename(archiveReceiptPath)}\n`)
   console.log(`Verified draft candidate archive: ${path.relative(projectRoot, archive)}`)
   return archiveReceipt
 }
