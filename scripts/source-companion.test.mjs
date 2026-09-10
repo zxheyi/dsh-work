@@ -16,7 +16,7 @@ test('source delivery pairs the application with a hash-bound archive and retain
     const lockPath = path.join(native, 'materials.json')
     fs.writeFileSync(lockPath, JSON.stringify({ materials }))
     const output = path.join(root, 'sources')
-    const descriptor = stageSourceCompanion({ resources, output, version: '0.0.1-alpha.1', platform: process.platform, arch: process.arch })
+    const descriptor = stageSourceCompanion({ resources, output, version: '0.0.1-alpha.1', platform: process.platform === 'win32' ? 'win32' : 'darwin', arch: process.platform === 'win32' ? 'x64' : 'arm64' })
     const archive = path.join(output, descriptor.file)
     assert.equal(fs.existsSync(path.join(native, 'source.tar.gz')), false)
     assert.equal(fs.readFileSync(path.join(native, 'LICENSE'), 'utf8'), 'license')

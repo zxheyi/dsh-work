@@ -150,7 +150,7 @@ test('archive verifies materials and dependency inventory inside the shipped bun
     assert.throws(verify, /actual dependencies/)
     fs.rmSync(path.join(application, 'node_modules/unlisted'), { recursive: true })
     const sources = path.join(temporary, 'sources')
-    const descriptor = stageSourceCompanion({ resources, output: sources, version: '0.0.1-alpha.1', platform: process.platform, arch: process.arch })
+    const descriptor = stageSourceCompanion({ resources, output: sources, version: '0.0.1-alpha.1', platform: process.platform === 'win32' ? 'win32' : 'darwin', arch: process.platform === 'win32' ? 'x64' : 'arm64' })
     const paired = () => withSourceCompanion(path.join(resources, 'third-party'), path.join(sources, descriptor.file), nativeRoot =>
       verifyBundledDistribution({ application, resources, inventory, materialLock, materialLockPath, nativeRoot }))
     assert.doesNotThrow(paired)
