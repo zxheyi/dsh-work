@@ -68,7 +68,9 @@ test('product early EOF does not hide an invalid Profile; the same owned home ca
     const pending = host.start()
     const rejected = await host.stop()
     assert.equal(rejected.state, 'failed')
-    assert.equal(rejected.code, 'runtime-exit-failed')
+    assert.ok(['runtime-exit-failed', 'startup-timeout', 'forced-stop'].includes(rejected.code ?? ''),
+      'native load rejection must remain a failure even if the bounded host deadline wins')
+    assert.equal(rejected.canStart, true, 'retry requires confirmed child cleanup')
     assert.equal((await pending).state, 'failed')
     fs.writeFileSync(patchPath, original)
     assert.equal((await host.start()).state, 'ready')
@@ -218,14 +220,24 @@ for (const reject of [true, false]) {
       const pending = host.start()
       const stopped = await host.stop()
       assert.equal(stopped.state, reject ? 'failed' : 'stopped')
-      assert.equal(stopped.code, reject ? 'runtime-exit-failed' : null)
+      if (reject) {
+        assert.ok(['runtime-exit-failed', 'startup-timeout', 'forced-stop'].includes(stopped.code ?? ''))
+        assert.equal(stopped.canStart, true, 'bounded rejection must confirm cleanup before retry')
+      } else assert.equal(stopped.code, null)
       assert.deepEqual(await pending, stopped)
       const events = timeline.map(value => value.event)
       assert.ok(events.includes('dsh-work-delay:loaded'))
       assert.ok(events.includes(`dsh-work-delay:${reject ? 'rejected' : 'completed'}`))
       assert.equal(events.includes('ready'), !reject)
       assert.ok(events.includes('disposed'))
-      assert.equal(events.includes('force-requested'), false)
+      if (!reject || stopped.code === 'runtime-exit-failed') {
+        assert.equal(events.includes('force-requested'), false)
+      }
+      // The rc.1 CLI can dispose its tree before its process quiesces. The
+      // product deadline remains unchanged and must never report a clean stop.
+      if (events.includes('force-requested')) {
+        assert.ok(events.indexOf('dsh-work-delay:rejected') < events.indexOf('force-requested'))
+      }
       assert.ok(events.includes('exit'))
       assert.ok(events.includes('close'))
       assert.ok(events.indexOf('exit') < events.indexOf('close'))

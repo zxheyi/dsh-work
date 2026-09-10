@@ -64,8 +64,6 @@ interface WorkSessionNavigationContext {
 }
 
 const h = createElement
-const MAX_RESOURCE_FILE_BYTES = 25 * 1024 * 1024
-const SUPPORTED_SESSION_RESOURCE = /\.(?:csv|json|md|txt)$/iu
 const NARROW_PREVIEW_QUERY = '(max-width: 995px)'
 
 const narrowPreviewSnapshot = (): boolean =>
@@ -75,16 +73,6 @@ const subscribeNarrowPreview = (listener: () => void): (() => void) => {
   const query = window.matchMedia(NARROW_PREVIEW_QUERY)
   query.addEventListener('change', listener)
   return () => query.removeEventListener('change', listener)
-}
-
-interface SessionResourceEntryState {
-  readonly id: string
-  readonly file: File
-  readonly abort: AbortController
-  readonly status: 'copying' | 'ready' | 'failed'
-  readonly path: string | null
-  readonly mention: string | null
-  readonly error: string | null
 }
 
 interface NativeReferenceRequest {
@@ -205,7 +193,6 @@ export type SafeMarkdownRenderPlan =
   | { readonly mode: 'structured'; readonly blocks: readonly SafeMarkdownBlock[] }
   | { readonly mode: 'plain'; readonly content: string }
 
-const sessionResourceEntries = new Map<string, readonly SessionResourceEntryState[]>()
 const sessionResourceDrafts = new Map<string, string>()
 const MAX_STRUCTURED_MARKDOWN_NODES = 2_000
 let activeRecoveryContext: WorkRecoveryContext | null = null
@@ -434,28 +421,10 @@ function useWorks(works: IWorks): WorkClientSnapshot {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-async function fileBase64(file: File): Promise<string> {
-  const bytes = new Uint8Array(await file.arrayBuffer())
-  let binary = ''
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
-  }
-  return btoa(binary)
-}
-
 function resourceMention(resourcePath: string): string {
   return /\s/u.test(resourcePath) ? `@"${resourcePath}"` : `@${resourcePath}`
 }
 
-function resourceErrorMessage(error: unknown): string {
-  if (typeof error === 'object' && error !== null && 'message' in error) {
-    const message = Reflect.get(error, 'message')
-    if (typeof message === 'string' && message.length > 0) return message
-  }
-  return '资料复制失败，请重试。'
-}
-
-/** Promote copied workspace paths through the native reference event, including restored drafts. */
 export function nextSessionResourceReference(input: NativeResourceInput): NativeReferenceRequest | null {
   if (input.phase !== 'plain') return null
   const mentions = /@"(attachment-[a-f0-9]{12}-[a-f0-9]{12}-[^"\r\n]+\.(?:md|txt|csv|json))"|@(attachment-[a-f0-9]{12}-[a-f0-9]{12}-[^\s"<>]+\.(?:md|txt|csv|json))(?=\s|$)/giu
@@ -483,38 +452,11 @@ function remoteErrorCode(error: unknown): string | null {
   return typeof code === 'string' ? code : null
 }
 
-function NativeSessionResourceTrigger({ session, input, ResourceIcon }: NativeSessionResourceProps & { readonly ResourceIcon: ComponentType<{ readonly size: number }> }): ReactNode {
-  return h('button', {
-    className: 'dsh-work-session-resource-trigger',
-    type: 'button',
-    title: '添加资料（Markdown、TXT、CSV、JSON；复制到工作区后引用）',
-    'aria-label': '添加资料',
-    disabled: input.phase !== 'plain',
-    onClick: () => window.dispatchEvent(new CustomEvent('dsh-work:pick-session-resource', {
-      detail: { sessionId: session.sessionId },
-    })),
-  }, h('span', { className: 'dsh-work-session-resource-trigger-icon', 'aria-hidden': true }, h(ResourceIcon, { size: 14 })),
-  h('span', { className: 'dsh-work-session-resource-trigger-label' }, '资料'))
-}
-
-function NativeSessionResourceEntry({
-  works,
-  session,
-  input,
-  inputActions,
-  insertResourceReference,
-}: NativeSessionResourceProps): ReactNode {
-  const picker = useRef<HTMLInputElement>(null)
-  const activeSessionId = useRef(session.sessionId)
-  const previousDraft = useRef(input.draft)
-  const [entries, setEntries] = useState<readonly SessionResourceEntryState[]>(
-    () => sessionResourceEntries.get(session.sessionId) ?? Object.freeze([]),
-  )
-  const [dropActive, setDropActive] = useState(false)
-  activeSessionId.current = session.sessionId
+// Native Harness owns picking, drag/drop, upload progress, retry and cancellation.
+// This dock only restores DWork text/revision references in the native composer.
+function NativeSessionResourceEntry({ session, input, inputActions, insertResourceReference }: NativeSessionResourceProps): ReactNode {
   sessionResourceDrafts.set(session.sessionId, input.draft)
   publishRecoveryContext(session.sessionId, input.draft)
-
   useEffect(() => {
     if (pendingRecoveryDraft?.sessionId !== session.sessionId) return
     const retained = pendingRecoveryDraft
@@ -527,209 +469,9 @@ function NativeSessionResourceEntry({
   }, [input.draft, inputActions, session.sessionId])
 
   useEffect(() => {
-    const prior = previousDraft.current
-    previousDraft.current = input.draft
-    if (prior.length < 1 || input.draft.length > 0) return
-    const retained = (sessionResourceEntries.get(session.sessionId) ?? [])
-      .filter(entry => entry.status !== 'ready' || !entry.mention || !prior.includes(entry.mention))
-    if (retained.length === entries.length) return
-    const next = Object.freeze(retained)
-    sessionResourceEntries.set(session.sessionId, next)
-    setEntries(next)
-  }, [entries.length, input.draft, session.sessionId])
-
-  useEffect(() => {
-    setEntries(sessionResourceEntries.get(session.sessionId) ?? Object.freeze([]))
-    setDropActive(false)
-  }, [session.sessionId])
-
-  useEffect(() => {
-    const pick = (event: Event): void => {
-      if (event instanceof CustomEvent && event.detail?.sessionId === session.sessionId) {
-        picker.current?.click()
-      }
-    }
-    window.addEventListener('dsh-work:pick-session-resource', pick)
-    return () => window.removeEventListener('dsh-work:pick-session-resource', pick)
-  }, [session.sessionId])
-
-  const focusComposer = useCallback((): void => {
-    const targetSessionId = session.sessionId
-    requestAnimationFrame(() => {
-      if (activeSessionId.current === targetSessionId && picker.current?.isConnected) {
-        document.querySelector<HTMLElement>('[data-composer-input]')?.focus()
-      }
-    })
-  }, [session.sessionId])
-
-  useEffect(() => {
     const reference = nextSessionResourceReference(input)
     if (reference) insertResourceReference(reference)
   }, [input, insertResourceReference])
-
-  const updateEntries = useCallback((
-    targetSessionId: string,
-    update: (current: readonly SessionResourceEntryState[]) => readonly SessionResourceEntryState[],
-  ): void => {
-    const next = Object.freeze(update(sessionResourceEntries.get(targetSessionId) ?? Object.freeze([])))
-    sessionResourceEntries.set(targetSessionId, next)
-    if (activeSessionId.current === targetSessionId) setEntries(next)
-  }, [])
-
-  const importFile = useCallback(async (file: File, reuseId?: string): Promise<void> => {
-    const targetSessionId = session.sessionId
-    const id = reuseId ?? globalThis.crypto.randomUUID()
-    const abort = new AbortController()
-    const failed = (message: string, replaceCurrent = false): void => updateEntries(targetSessionId, current => {
-      const installed = current.find(entry => entry.id === id)
-      if (!replaceCurrent && installed?.abort !== abort) return current
-      return [
-        ...current.filter(entry => entry.id !== id),
-        Object.freeze({ id, file, abort, status: 'failed' as const, path: null, mention: null, error: message }),
-      ]
-    })
-    if (!SUPPORTED_SESSION_RESOURCE.test(file.name)) {
-      failed('当前仅支持 Markdown、TXT、CSV 和 JSON 文件。', true)
-      return
-    }
-    if (file.size < 1 || file.size > MAX_RESOURCE_FILE_BYTES) {
-      failed('文件必须非空且不能超过 25 MiB。', true)
-      return
-    }
-    updateEntries(targetSessionId, current => [
-      ...current.filter(entry => entry.id !== id),
-      Object.freeze({ id, file, abort, status: 'copying' as const, path: null, mention: null, error: null }),
-    ])
-    try {
-      const resource = await works.importSessionResource({
-        sessionId: targetSessionId,
-        name: file.name,
-        ...(file.type ? { mediaType: file.type } : {}),
-        dataBase64: await fileBase64(file),
-      }, abort.signal)
-      const installed = sessionResourceEntries.get(targetSessionId)?.find(entry => entry.id === id)
-      if (installed?.abort !== abort || installed.status !== 'copying') return
-      const mention = resourceMention(resource.path)
-      updateEntries(targetSessionId, current => current.map(entry => entry.id === id
-        ? Object.freeze({ ...entry, status: 'ready' as const, path: resource.path, mention })
-        : entry))
-      const targetDraft = sessionResourceDrafts.get(targetSessionId) ?? ''
-      const separator = targetDraft.trim().length > 0 ? ' ' : ''
-      const nextDraft = `${targetDraft}${separator}${mention} `
-      sessionResourceDrafts.set(targetSessionId, nextDraft)
-      publishRecoveryContext(targetSessionId, nextDraft)
-      inputActions.setDraft(nextDraft)
-      focusComposer()
-    } catch (error) {
-      failed(resourceErrorMessage(error))
-    }
-  }, [focusComposer, inputActions, session.sessionId, updateEntries, works])
-
-  const importFiles = useCallback((files: readonly File[]): void => {
-    for (const file of files.slice(0, 10)) void importFile(file)
-    const overflow = files[10]
-    if (!overflow) return
-    const abort = new AbortController()
-    updateEntries(session.sessionId, current => [
-      ...current,
-      Object.freeze({
-        id: globalThis.crypto.randomUUID(),
-        file: overflow,
-        abort,
-        status: 'failed' as const,
-        path: null,
-        mention: null,
-        error: '一次最多添加 10 个资料，其余文件未复制。',
-      }),
-    ])
-  }, [importFile, session.sessionId, updateEntries])
-
-  useEffect(() => {
-    const nonImageItems = (event: DragEvent): readonly DataTransferItem[] =>
-      Array.from(event.dataTransfer?.items ?? [])
-        .filter(item => item.kind === 'file' && !item.type.startsWith('image/'))
-    const claim = (event: DragEvent): boolean => {
-      if (nonImageItems(event).length < 1) return false
-      event.preventDefault()
-      event.stopPropagation()
-      event.stopImmediatePropagation()
-      return true
-    }
-    const onDragEnter = (event: DragEvent): void => {
-      if (!claim(event)) return
-      setDropActive(true)
-    }
-    const onDragOver = (event: DragEvent): void => {
-      if (!claim(event)) return
-      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
-      setDropActive(true)
-    }
-    const onDragLeave = (event: DragEvent): void => {
-      if (event.relatedTarget === null) setDropActive(false)
-    }
-    const onDrop = (event: DragEvent): void => {
-      const files = Array.from(event.dataTransfer?.files ?? []).filter(file => !file.type.startsWith('image/'))
-      if (files.length < 1) return
-      claim(event)
-      setDropActive(false)
-      importFiles(files)
-      focusComposer()
-      const images = Array.from(event.dataTransfer?.files ?? []).filter(file => file.type.startsWith('image/'))
-      if (images.length > 0) {
-        const transfer = new DataTransfer()
-        for (const image of images) transfer.items.add(image)
-        document.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }))
-      }
-    }
-    window.addEventListener('dragenter', onDragEnter, true)
-    window.addEventListener('dragover', onDragOver, true)
-    window.addEventListener('dragleave', onDragLeave, true)
-    window.addEventListener('drop', onDrop, true)
-    return () => {
-      window.removeEventListener('dragenter', onDragEnter, true)
-      window.removeEventListener('dragover', onDragOver, true)
-      window.removeEventListener('dragleave', onDragLeave, true)
-      window.removeEventListener('drop', onDrop, true)
-    }
-  }, [focusComposer, importFiles])
-
-  useEffect(() => {
-    const copying = (): boolean => (sessionResourceEntries.get(session.sessionId) ?? [])
-      .some(entry => entry.status === 'copying')
-    const blockClick = (event: MouseEvent): void => {
-      if (!copying()) return
-      const target = event.target instanceof Element ? event.target.closest('button') : null
-      const card = target?.closest('[data-composer-card]')
-      const buttons = card?.querySelectorAll('button')
-      if (!target || !card || target !== buttons?.item((buttons?.length ?? 0) - 1) || !target.querySelector('svg path')) return
-      event.preventDefault()
-      event.stopPropagation()
-      event.stopImmediatePropagation()
-    }
-    const blockKey = (event: globalThis.KeyboardEvent): void => {
-      if (!copying() || event.key !== 'Enter' || event.isComposing) return
-      const target = event.target instanceof Element ? event.target.closest('[data-composer-input]') : null
-      if (!target) return
-      event.preventDefault()
-      event.stopPropagation()
-      event.stopImmediatePropagation()
-    }
-    const blockSubmit = (event: SubmitEvent): void => {
-      if (!copying()) return
-      event.preventDefault()
-      event.stopPropagation()
-      event.stopImmediatePropagation()
-    }
-    window.addEventListener('click', blockClick, true)
-    window.addEventListener('keydown', blockKey, true)
-    window.addEventListener('submit', blockSubmit, true)
-    return () => {
-      window.removeEventListener('click', blockClick, true)
-      window.removeEventListener('keydown', blockKey, true)
-      window.removeEventListener('submit', blockSubmit, true)
-    }
-  }, [session.sessionId])
-
   useEffect(() => {
     const referenceSource = (event: Event): void => {
       if (!(event instanceof CustomEvent) || typeof event.detail !== 'object' || !event.detail) return
@@ -768,60 +510,7 @@ function NativeSessionResourceEntry({
     return () => window.removeEventListener('dsh-work:reference-session-resource', referenceSource)
   }, [input.draft, inputActions, session.sessionId])
 
-  const remove = (entry: SessionResourceEntryState): void => {
-    updateEntries(session.sessionId, current => current.filter(candidate => candidate.id !== entry.id))
-    entry.abort.abort()
-    focusComposer()
-    if (entry.mention) {
-      const next = (sessionResourceDrafts.get(session.sessionId) ?? input.draft)
-        .replace(entry.mention, '').replace(/ {2,}/gu, ' ').trimStart()
-      sessionResourceDrafts.set(session.sessionId, next)
-      publishRecoveryContext(session.sessionId, next)
-      inputActions.setDraft(next)
-    }
-  }
-
-  return h('div', {
-    className: `dsh-work-session-resource${dropActive ? ' is-drop-active' : ''}`,
-    'data-work-session-resource': session.sessionId,
-  },
-  h('input', {
-    ref: picker,
-    className: 'dsh-work-file-input',
-    type: 'file',
-    multiple: true,
-    accept: '.md,.txt,.csv,.json,text/markdown,text/plain,text/csv,application/json',
-    onChange: (event: { currentTarget: HTMLInputElement }) => {
-      const files = Array.from(event.currentTarget.files ?? [])
-      event.currentTarget.value = ''
-      importFiles(files)
-      focusComposer()
-    },
-  }),
-  entries.some(entry => entry.status !== 'ready') ? h('div', {
-    className: 'dsh-work-session-resource-list',
-    role: 'status',
-    'aria-label': '待发送资料',
-  }, ...entries.filter(entry => entry.status !== 'ready').map(entry => h('div', {
-    className: `dsh-work-session-resource-row is-${entry.status}`,
-    key: entry.id,
-    'data-work-session-resource-name': entry.file.name,
-  },
-  h('span', { className: 'dsh-work-session-resource-icon', 'aria-hidden': true }, '文'),
-  h('span', { className: 'dsh-work-session-resource-copy' },
-    h('strong', { title: entry.path ?? entry.file.name }, entry.file.name),
-    h('small', null, entry.status === 'copying'
-      ? '正在复制到当前工作区…'
-      : entry.error)),
-  entry.status === 'failed' ? h('button', {
-    type: 'button',
-    onClick: () => { void importFile(entry.file, entry.id) },
-  }, '重试') : null,
-  h('button', {
-    type: 'button',
-    'aria-label': `移除 ${entry.file.name}`,
-    onClick: () => remove(entry),
-  }, '×')))) : null)
+  return null
 }
 
 function LegacyDeliverableAction({ works, wide }: WorkSurfaceInjected & { readonly wide: boolean }): ReactNode {
@@ -1709,7 +1398,7 @@ function NativeSessionOutputPreview({
           : previewSources.length < 1
             ? h('div', { className: 'dsh-work-output-preview-empty' },
               h('strong', null, '没有可核对的资料来源'),
-              h('p', null, '这里只显示本回合明确引用或实际读取的工作区资料。'))
+              h('p', null, '这里只显示本回合明确引用或实际读取的资料文件。'))
             : h('div', { className: 'dsh-work-output-preview-sources' }, ...previewSources.map(source => h('article', {
               className: `dsh-work-output-preview-source is-${source.status}`,
               key: source.path,
@@ -1721,7 +1410,7 @@ function NativeSessionOutputPreview({
                 h('strong', null, source.name),
                 h('small', { title: source.path }, source.path))),
             h('div', { className: 'dsh-work-output-preview-source-meta' },
-              h('span', null, '工作区副本'),
+              h('span', null, '资料文件'),
               h('span', { className: `is-${source.status}` }, sourceStatusLabel(source.status)),
               source.bytes === null ? null : h('span', null, outputSize(source.bytes))),
             h('button', {
@@ -2115,7 +1804,7 @@ function installStyles(): () => void {
   return () => tag.remove()
 }
 
-export function registerWorkSurface(ctx: Context, works: IWorks, ResourceIcon: ComponentType<{ readonly size: number }>): () => void {
+export function registerWorkSurface(ctx: Context, works: IWorks): () => void {
   const sessionNavigation = (ctx as Context & WorkSessionNavigationContext).sessions
   let stopRecoveryNavigation: (() => void) | null = null
   const openRetainedSession = (retained: WorkRecoveryContext): void => {
@@ -2221,13 +1910,6 @@ export function registerWorkSurface(ctx: Context, works: IWorks, ResourceIcon: C
     priority: -100,
   }, () => h('span', { 'data-dsh-work-brand': 'name', title: 'DSH Work · 基于 DeepSeek Harness 构建' },
     h('small', null, '基于'), h('span', null, 'DeepSeek Harness'))))
-  ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
-    name: 'conversation.input.left',
-    id: 'dsh-work-session-resource',
-    order: -100,
-    label: '添加资料',
-    inject: () => ({ works, ResourceIcon }),
-  }, NativeSessionResourceTrigger))
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
     name: 'conversation.input.dock',
     id: 'dsh-work-session-resources',

@@ -16,7 +16,7 @@
     "runtime:verify": "node scripts/verify-product-runtime.mjs artifacts/runtime/context.json",
     "runtime:stage": "node scripts/stage-product-runtime.mjs artifacts/runtime/context.json artifacts/product-resources",
     "pretest:runtime": "pnpm build",
-    "test:runtime": "node --test tests/runtime-integration.test.ts tests/guardian-integration.test.ts tests/work-client-loader.integration.test.ts",
+    "test:runtime": "node --test tests/runtime-integration.test.ts tests/guardian-integration.test.ts tests/work-client-loader.integration.test.ts tests/session-migration.integration.test.ts",
     "pretest:desktop": "pnpm build",
     "test:desktop": "node scripts/run-desktop-test.mjs",
     "pretest:work-shell": "pnpm build",

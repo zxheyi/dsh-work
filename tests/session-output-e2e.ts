@@ -250,7 +250,7 @@ async function run(): Promise<void> {
       assert.equal(clicked, true)
     }
     const selectFile = (name: string, type: string, content: string): Promise<boolean> => js<boolean>(
-      "(() => { const input = document.querySelector('[data-work-session-resource] input[type=file]'); if (!(input instanceof HTMLInputElement)) return false; const transfer = new DataTransfer(); transfer.items.add(new File([" + JSON.stringify(content) + "], " + JSON.stringify(name) + ", { type: " + JSON.stringify(type) + " })); Object.defineProperty(input, 'files', { configurable: true, value: transfer.files }); input.dispatchEvent(new Event('change', { bubbles: true })); return true })()",
+      "(() => { const input = document.querySelector('input[type=file]'); if (!(input instanceof HTMLInputElement)) return false; const transfer = new DataTransfer(); transfer.items.add(new File([" + JSON.stringify(content) + "], " + JSON.stringify(name) + ", { type: " + JSON.stringify(type) + " })); Object.defineProperty(input, 'files', { configurable: true, value: transfer.files }); input.dispatchEvent(new Event('change', { bubbles: true })); return true })()",
     )
 
     step = 'ordinary-reply'; report('fail')
@@ -289,12 +289,9 @@ async function run(): Promise<void> {
     await waitFor(
       () => js<{ body: string; draft: string }>("({ body: document.body.innerText, draft: document.querySelector('[data-composer-input]')?.textContent ?? '' })"),
       value => value.body.includes(sourceName) && !value.body.includes('attachment-')
-        && value.draft.includes(sourceName) && value.draft.includes(baseline.generateAPrompt),
+        && !value.body.includes('上传中') && value.draft.includes(baseline.generateAPrompt),
       'Session A source did not become ready',
     )
-    const resourceProjection = await js<string>("JSON.parse(window.name.slice('dsh-work-recovery:v1:'.length)).draft")
-    const sourcePath = /@(?:"([^"\r\n]+)"|([^\s"'<>]+))/u.exec(resourceProjection)?.slice(1).find(Boolean)
-    assert.ok(sourcePath)
     await clickSend()
     const names = await waitFor(
       () => js<string[]>("Array.from(document.querySelectorAll('[data-work-session-output] strong')).map(item => item.textContent ?? '')"),
@@ -310,13 +307,15 @@ async function run(): Promise<void> {
       'Source inspection did not settle',
     )
     assert.equal(sourcePhase, 'ready')
+    const sourcePath = await js<string>("document.querySelector('[data-work-session-source]')?.getAttribute('data-work-session-source') ?? ''")
+    assert.ok(path.isAbsolute(sourcePath))
     await waitFor(
       () => js<string>("document.querySelector('[data-work-session-sources]')?.textContent ?? ''"),
       text => text === `已读取 1 份资料${sourceName}已读取`,
       'Verified source grouping did not appear beside generated results',
     )
     assert.equal(await js<number>("document.querySelectorAll('[data-produced-files-row]').length"), 0)
-    assert.equal(fs.readFileSync(path.join(baseline.workspacePath, sourcePath), 'utf8'), sourceContent)
+    assert.equal(fs.readFileSync(sourcePath, 'utf8'), sourceContent)
     const reportA = fs.readFileSync(path.join(baseline.workspacePath, 'report-a.md'), 'utf8')
     assert.match(reportA, /^# 甲报告/u)
     assert.equal(fs.readFileSync(path.join(baseline.workspacePath, 'report-b.csv'), 'utf8'), 'name,value\nalpha,1\n')
@@ -386,7 +385,7 @@ async function run(): Promise<void> {
     assert.equal(await js<boolean>("(() => { const button = Array.from(document.querySelectorAll('[data-work-output-preview] [role=tab]')).find(item => item.textContent?.trim().startsWith('来源')); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true })()"), true)
     const sourcePanel = await waitFor(
       () => js<string>("document.querySelector('[data-work-output-preview-source]')?.textContent ?? ''"),
-      text => text.includes(sourceName) && text.includes('工作区副本') && text.includes('已读取') && text.includes('在输入框引用'),
+      text => text.includes(sourceName) && text.includes('资料文件') && text.includes('已读取') && text.includes('在输入框引用'),
       'Preview source tab did not show the verified Workspace snapshot',
     )
     assert.match(sourcePanel, /已读取/u)

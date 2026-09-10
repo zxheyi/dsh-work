@@ -126,7 +126,6 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   assert.deepEqual(injectedSlots, [
     'sidebar.right.pane.tab',
     'sidebar.brand.name',
-    'conversation.input.left',
     'conversation.input.dock',
     'conversation.chat.turnTail',
     'sidebar.brand.mark',
@@ -137,7 +136,6 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   assert.deepEqual(registeredSlots, [
     { name: 'sidebar.right.pane.tab' },
     { name: 'sidebar.brand.name', priority: -100 },
-    { name: 'conversation.input.left' },
     { name: 'conversation.input.dock' },
     { name: 'conversation.chat.turnTail', priority: -100 },
     { name: 'sidebar.brand.mark', priority: -100 },
@@ -157,7 +155,7 @@ test('builds Work Client API as a Harness ModuleLoader bundle', async () => {
   assert.match(source, /\.dsh-work-output-preview-tabs \{[^}]*height: 42px/su)
   assert.match(source, /data-work-legacy-deliverable-open/)
   assert.match(source, /data-work-legacy-deliverable-preview/)
-  assert.match(source, /data-work-session-resource/)
+  assert.doesNotMatch(source, /data-work-session-resource|pick-session-resource|stopImmediatePropagation/)
   assert.match(source, /data-work-session-outputs/)
   assert.match(source, /data-work-session-sources/)
   assert.match(source, /data-work-output-preview-source/)
