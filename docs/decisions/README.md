@@ -38,12 +38,14 @@ Use a decision record when a change affects the desktop stack, upstream integrat
 
 | [0020: Runtime environment compatibility](0020-runtime-environment-compatibility.md) | accepted | Restores macOS shell and Windows process-helper lookup; isolates guardian version probing. |
 
-ADR 0001, ADR 0005, ADR 0006, and ADR 0021 are accepted; ADR 0004 and ADR 0007 through ADR 0013 are implemented against the locked alpha.2 pair. Every unchecked M0 criterion remains a delivery gate rather than an implemented claim. Frozen research is evidence, not the product controller.
+ADR 0001, ADR 0005, ADR 0006, and ADR 0024 are accepted; ADR 0004 and ADR 0007 through ADR 0013 are implemented against the locked alpha.2 pair. Every unchecked M0 criterion remains a delivery gate rather than an implemented claim. Frozen research is evidence, not the product controller.
 
 [0019: Native source material delivery](0019-native-source-material-delivery.md) — accepted; self-contained, hash-locked native source/notice delivery with library replacement verification.
 
-[0021: Official dsh 0.1.5 runtime pair](0021-dsh-015-runtime-upgrade.md) — accepted; supersedes the alpha.2 selection and composes versioned output through native Sidebar tabs. Native evidence remains version-specific.
+[0021: Official dsh 0.1.5 runtime pair](0021-dsh-015-runtime-upgrade.md) — superseded by ADR 0024; selected rc.1 and composed versioned output through native Sidebar tabs. Native evidence remains version-specific.
 
 [0022: Native file workflows and historical output identity](0022-native-file-compatibility.md) — accepted; preserves migrated history and composes native proxy, upload, attachment and present contracts.
 
 [0023: Compact desktop distribution](0023-compact-desktop-distribution.md) — accepted; trims development assets and pairs desktop binaries with verified native source downloads.
+
+[0024: Official dsh 0.1.5-rc.2 runtime pair](0024-dsh-015-rc2-runtime-upgrade.md) — accepted; supersedes rc.1 with the matched rc.2 source and package family.
