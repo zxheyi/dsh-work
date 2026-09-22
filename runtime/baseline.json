@@ -1,18 +1,18 @@
 {
   "status": "accepted",
-  "decision": "docs/decisions/0021-dsh-015-runtime-upgrade.md",
+  "decision": "docs/decisions/0024-dsh-015-rc2-runtime-upgrade.md",
   "source": {
     "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
-    "tag": "dsh-v0.1.5-rc.1",
-    "commit": "183f08e9c6dde7e36cd2318eaee70b0da08fb35e"
+    "tag": "dsh-v0.1.5-rc.2",
+    "commit": "fb2c4b9e698e30edb738bca4cf0618587db7d203"
   },
   "runtime": {
     "package": "@deepseek-ai/dsh",
-    "version": "0.1.5-rc.1",
-    "integrity": "sha512-rmNmzQCg3oIc1z8xH7izRSOuy1TNzq+/NILyfM+7e8DKOyV+yBtg47WEsqR2SiIe1ATec3L/rUa1YhIcfQ2XEg==",
+    "version": "0.1.5-rc.2",
+    "integrity": "sha512-8Xc8hCQHcIWRmTCVU/xZdp6/qMsWMeAd2ObChKDEsfhUPJFXx6H0lgeb1DxUMD86HZrrVN+1bCvn1ppjZ/fOxw==",
     "node": "24.11.1",
     "pnpm": "10.34.4",
-    "tarball": "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.5-rc.1.tgz",
+    "tarball": "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.5-rc.2.tgz",
     "nodeArtifacts": {
       "darwin-x64": {
         "filename": "node-v24.11.1-darwin-x64.tar.gz",

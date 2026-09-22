@@ -1,6 +1,6 @@
 # 0021: Official dsh 0.1.5 runtime pair
 
-Status: accepted
+Status: superseded by ADR 0024
 
 Date: 2026-09-10
 
