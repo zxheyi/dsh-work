@@ -6,7 +6,7 @@
   "exports": { ".": "./index.js", "./package.json": "./package.json" },
   "dependencies": {
     "@deepseek-ai/dsh-storage-domain": "0.1.5-rc.1",
-    "zod": "4.5.4"
+    "zod": "4.6.6"
   },
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
 }
